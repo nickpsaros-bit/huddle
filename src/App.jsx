@@ -1,7 +1,68 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
+import Auth from "./Auth";
+import Profile from "./Profile";
+
+const DEMO_MODE = false;
 
 export default function App() {
-  const [phone, setPhone] = useState("");
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [hasProfile, setHasProfile] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) checkProfile(session.user.id);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        if (session) checkProfile(session.user.id);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const checkProfile = async (userId) => {
+    const { data } = await supabase
+      .from("parents")
+      .select("id, name")
+      .eq("id", userId)
+      .single();
+    if (data?.name) setHasProfile(true);
+  };
+
+  if (loading && !DEMO_MODE) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#0F2044",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "system-ui, sans-serif"
+      }}>
+        <p style={{ color: "#02C39A", fontSize: "1.5rem" }}>Huddle</p>
+      </div>
+    );
+  }
+
+  if (!session && !DEMO_MODE) {
+    return <Auth onAuth={() => {}} />;
+  }
+
+  if (DEMO_MODE || !hasProfile) {
+    return (
+      <Profile
+        session={{ user: { id: "00000000-0000-0000-0000-000000000000" } }}
+        onComplete={() => setHasProfile(true)}
+      />
+    );
+  }
 
   return (
     <div style={{
@@ -14,61 +75,15 @@ export default function App() {
       padding: "2rem",
       fontFamily: "system-ui, sans-serif"
     }}>
-      <h1 style={{ color: "#02C39A", fontSize: "3rem", fontWeight: "700", margin: "0 0 0.5rem" }}>
+      <h1 style={{ color: "#02C39A", fontSize: "3rem", fontWeight: "700", margin: "0 0 1rem" }}>
         Huddle
       </h1>
-      <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 3rem" }}>
-        The social app for school families
+      <p style={{ color: "#FFFFFF", fontSize: "1.1rem" }}>
+        Welcome to Huddle! 👋
       </p>
-
-      <div style={{
-        background: "#162D50",
-        borderRadius: "16px",
-        padding: "2rem",
-        width: "100%",
-        maxWidth: "400px"
-      }}>
-        <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.5rem" }}>
-          Welcome
-        </h2>
-        <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem" }}>
-          Enter your phone number to get started
-        </p>
-
-        <input
-          type="tel"
-          placeholder="(555) 000-0000"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "0.85rem 1rem",
-            borderRadius: "10px",
-            border: "1px solid #2A4A6B",
-            background: "#0F2044",
-            color: "#FFFFFF",
-            fontSize: "1rem",
-            marginBottom: "1rem",
-            boxSizing: "border-box"
-          }}
-        />
-
-        <button
-          style={{
-            width: "100%",
-            padding: "0.85rem",
-            borderRadius: "10px",
-            border: "none",
-            background: "#02C39A",
-            color: "#0F2044",
-            fontSize: "1rem",
-            fontWeight: "600",
-            cursor: "pointer"
-          }}
-        >
-          Send verification code →
-        </button>
-      </div>
+      <p style={{ color: "#8AAEC8", fontSize: "0.9rem", marginTop: "0.5rem" }}>
+        Your classroom is ready.
+      </p>
     </div>
   );
 }
