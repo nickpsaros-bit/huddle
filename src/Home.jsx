@@ -71,6 +71,8 @@ export default function Home({ session }) {
   const searchNewSchools = async (query) => {
     setNewSchoolSearch(query);
     setNewSelectedSchool(null);
+    setNewTeacherResults([]);
+    setNewChildTeacher("");
     if (query.length < 2) { setNewSchoolResults([]); setShowNewSchoolDropdown(false); return; }
     const { data } = await supabase.from("schools").select("*").ilike("name", `%${query}%`).limit(5);
     setNewSchoolResults(data || []);
@@ -85,6 +87,9 @@ export default function Home({ session }) {
     const unique = [...new Set((data || []).map(c => c.teacher_name))];
     setNewTeacherResults(unique);
   };
+
+  const newTeacherMismatch = newTeacherResults.length > 0 && newChildTeacher &&
+    !newTeacherResults.find(t => t.toLowerCase() === newChildTeacher.toLowerCase());
 
   const saveNewChild = async () => {
     setChildLoading(true);
@@ -233,7 +238,7 @@ export default function Home({ session }) {
 
         {Object.entries(childrenBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "0", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
               <span style={{ fontSize: "1.2rem" }}>🏫</span>
               <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
             </div>
@@ -349,8 +354,10 @@ export default function Home({ session }) {
         <div style={overlay}>
           <div style={modalBox}>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add another child</h2>
+
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Child's name</label>
             <input type="text" placeholder="Child's name" value={newChildName} onChange={(e) => setNewChildName(e.target.value)} style={inputStyle} />
+
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
             <select value={newChildGrade} onChange={(e) => setNewChildGrade(e.target.value)} style={inputStyle}>
               <option value="">Select grade...</option>
@@ -366,7 +373,9 @@ export default function Home({ session }) {
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
                   {newSchoolResults.map(school => (
                     <div key={school.id} onClick={() => selectNewSchool(school)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       🏫 {school.name}
                     </div>
                   ))}
@@ -386,20 +395,39 @@ export default function Home({ session }) {
 
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
             <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text" placeholder="Mrs. Johnson" value={newChildTeacher}
-                onChange={(e) => { setNewChildTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0 && newTeacherResults.length > 0); }}
-                style={{ ...inputStyle, marginBottom: 0 }} />
-              {showNewTeacherDropdown && (
-                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
+              <input type="text"
+                placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
+                value={newChildTeacher}
+                onChange={(e) => { setNewChildTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
+                onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
+                style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
+              {showNewTeacherDropdown && newTeacherResults.length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
                   {newTeacherResults.filter(t => t.toLowerCase().includes(newChildTeacher.toLowerCase())).map(teacher => (
                     <div key={teacher} onClick={() => { setNewChildTeacher(teacher); setShowNewTeacherDropdown(false); }}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       📚 {teacher}
                     </div>
                   ))}
+                  {newTeacherMismatch && (
+                    <div onClick={() => setShowNewTeacherDropdown(false)}
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
+                      + Add "{newChildTeacher}" as a new teacher
+                    </div>
+                  )}
                 </div>
               )}
             </div>
+
+            {newTeacherMismatch && (
+              <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
+                <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
+                  ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
+                </p>
+              </div>
+            )}
 
             {childError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{childError}</p>}
             <div style={{ display: "flex", gap: "8px" }}>
