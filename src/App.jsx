@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Auth from "./Auth";
 import Profile from "./Profile";
-
-const DEMO_MODE = false;
+import Home from "./Home";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -36,7 +35,7 @@ export default function App() {
     if (data?.name) setHasProfile(true);
   };
 
-  if (loading && !DEMO_MODE) {
+  if (loading) {
     return (
       <div style={{
         minHeight: "100vh",
@@ -51,39 +50,18 @@ export default function App() {
     );
   }
 
-  if (!session && !DEMO_MODE) {
+  if (!session) {
     return <Auth onAuth={() => {}} />;
   }
 
-  if (DEMO_MODE || !hasProfile) {
+  if (!hasProfile) {
     return (
       <Profile
-        session={{ user: { id: "00000000-0000-0000-0000-000000000000" } }}
+        session={session}
         onComplete={() => setHasProfile(true)}
       />
     );
   }
 
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#0F2044",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "2rem",
-      fontFamily: "system-ui, sans-serif"
-    }}>
-      <h1 style={{ color: "#02C39A", fontSize: "3rem", fontWeight: "700", margin: "0 0 1rem" }}>
-        Huddle
-      </h1>
-      <p style={{ color: "#FFFFFF", fontSize: "1.1rem" }}>
-        Welcome to Huddle! 👋
-      </p>
-      <p style={{ color: "#8AAEC8", fontSize: "0.9rem", marginTop: "0.5rem" }}>
-        Your classroom is ready.
-      </p>
-    </div>
-  );
+  return <Home session={session} />;
 }
