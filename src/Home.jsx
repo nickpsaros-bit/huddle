@@ -147,20 +147,20 @@ export default function Home({ session }) {
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
   // Group children by school
-  const childrenBySchool = children.reduce((acc, child) => {
+  ;const childrenBySchool = children.reduce((acc, child) => {
     const currentYear = new Date().getFullYear();
     const schoolYear = `${currentYear}-${currentYear + 1}`;
     const membership = child.classroom_members?.find(m => m.school_year === schoolYear);
     const schoolName = membership?.classrooms?.schools?.name || "Unknown School";
-    const schoolId = membership?.classrooms?.schools?.id || "unknown";
-    if (!acc[schoolId]) acc[schoolId] = { name: schoolName, classrooms: {} };
+    const schoolKey = schoolName.toLowerCase().replace(/\s+/g, "-");
+    if (!acc[schoolKey]) acc[schoolKey] = { name: schoolName, classrooms: {} };
     const classroomId = membership?.classrooms?.id || "unknown";
     const classroomName = membership?.classrooms?.teacher_name || "Unknown Teacher";
     const grade = membership?.classrooms?.grade;
-    if (!acc[schoolId].classrooms[classroomId]) {
-      acc[schoolId].classrooms[classroomId] = { teacher: classroomName, grade, children: [] };
+    if (!acc[schoolKey].classrooms[classroomId]) {
+      acc[schoolKey].classrooms[classroomId] = { teacher: classroomName, grade, children: [] };
     }
-    acc[schoolId].classrooms[classroomId].children.push(child);
+    acc[schoolKey].classrooms[classroomId].children.push(child);
     return acc;
   }, {});
 
