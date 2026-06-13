@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
+import PlaydateRequest from "./PlaydateRequest";
 
 export default function Home({ session }) {
   const [parent, setParent] = useState(null);
@@ -10,6 +11,7 @@ export default function Home({ session }) {
   const [addingChild, setAddingChild] = useState(false);
   const [editingChild, setEditingChild] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [newChildName, setNewChildName] = useState("");
   const [newChildGrade, setNewChildGrade] = useState("");
   const [newChildTeacher, setNewChildTeacher] = useState("");
@@ -56,12 +58,9 @@ export default function Home({ session }) {
     const fileExt = file.name.split(".").pop();
     const filePath = `child-${childId}.${fileExt}`;
     const { error: uploadError } = await supabase.storage
-      .from("avatars")
-      .upload(filePath, file, { upsert: true });
+      .from("avatars").upload(filePath, file, { upsert: true });
     if (uploadError) { console.error(uploadError); return; }
-    const { data: { publicUrl } } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(filePath);
+    const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(filePath);
     await supabase.from("children").update({ photo_url: publicUrl }).eq("id", childId);
     fetchData();
   };
@@ -135,12 +134,8 @@ export default function Home({ session }) {
         .update({ name: editingChild.name, grade: grades.indexOf(editingChild.grade) })
         .eq("id", editingChild.id);
       if (childErr) throw childErr;
-      if (editingChild.classroomId) {
-        await supabase.from("classrooms").update({ teacher_name: editingChild.teacher }).eq("id", editingChild.classroomId);
-      }
-      if (editingChild.schoolId) {
-        await supabase.from("schools").update({ name: editingChild.school }).eq("id", editingChild.schoolId);
-      }
+      if (editingChild.classroomId) await supabase.from("classrooms").update({ teacher_name: editingChild.teacher }).eq("id", editingChild.classroomId);
+      if (editingChild.schoolId) await supabase.from("schools").update({ name: editingChild.school }).eq("id", editingChild.schoolId);
       setEditingChild(null);
       setChildError("");
       fetchData();
@@ -150,6 +145,24 @@ export default function Home({ session }) {
 
   const signOut = async () => { await supabase.auth.signOut(); };
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
+
+  // Group children by school
+  const childrenBySchool = children.reduce((acc, child) => {
+    const currentYear = new Date().getFullYear();
+    const schoolYear = `${currentYear}-${currentYear + 1}`;
+    const membership = child.classroom_members?.find(m => m.school_year === schoolYear);
+    const schoolName = membership?.classrooms?.schools?.name || "Unknown School";
+    const schoolId = membership?.classrooms?.schools?.id || "unknown";
+    if (!acc[schoolId]) acc[schoolId] = { name: schoolName, classrooms: {} };
+    const classroomId = membership?.classrooms?.id || "unknown";
+    const classroomName = membership?.classrooms?.teacher_name || "Unknown Teacher";
+    const grade = membership?.classrooms?.grade;
+    if (!acc[schoolId].classrooms[classroomId]) {
+      acc[schoolId].classrooms[classroomId] = { teacher: classroomName, grade, children: [] };
+    }
+    acc[schoolId].classrooms[classroomId].children.push(child);
+    return acc;
+  }, {});
 
   const inputStyle = {
     width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
@@ -176,8 +189,17 @@ export default function Home({ session }) {
     );
   }
 
-  if (showProfile) {
-    return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
+  if (showProfile) return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
+
+  if (requestingPlaydate) {
+    return (
+      <PlaydateRequest
+        session={session}
+        recipient={requestingPlaydate}
+        onBack={() => setRequestingPlaydate(null)}
+        onSent={() => setRequestingPlaydate(null)}
+      />
+    );
   }
 
   return (
@@ -187,73 +209,90 @@ export default function Home({ session }) {
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span
-            onClick={() => setShowProfile(true)}
-            style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
+          <span onClick={() => setShowProfile(true)} style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
             Hi, {parent?.name?.split(" ")[0]}!
           </span>
           {parent?.photo_url && (
-            <img
-              src={parent.photo_url}
-              alt="Profile"
-              onClick={() => setShowProfile(true)}
-              style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }}
-            />
+            <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)} style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
           )}
         </div>
       </div>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Your Children */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CHILDREN</p>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "1.5rem", flexWrap: "wrap" }}>
-          {children.map((child) => {
-            const currentYear = new Date().getFullYear();
-            const schoolYear = `${currentYear}-${currentYear + 1}`;
-            const membership = child.classroom_members?.find(m => m.school_year === schoolYear);
-            return (
-              <div key={child.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem", border: "1px solid #2A4A6B", flex: "1", minWidth: "140px", maxWidth: "180px", position: "relative" }}>
-                <button onClick={() => openEdit(child)} style={{ position: "absolute", top: "8px", right: "8px", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", borderRadius: "6px", padding: "2px 7px", fontSize: "0.75rem", cursor: "pointer" }}>✏️</button>
+        {/* YOUR CHILDREN */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>YOUR CHILDREN</p>
 
-                {/* Child photo */}
-                <div
-                  onClick={() => document.getElementById(`child-photo-${child.id}`).click()}
-                  style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", margin: "0 auto 0.75rem", cursor: "pointer", overflow: "hidden", border: "2px solid #02C39A", position: "relative" }}
-                >
-                  {child.photo_url ? (
-                    <img src={child.photo_url} alt={child.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    <span>👦</span>
-                  )}
-                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", padding: "2px 0", textAlign: "center", fontSize: "0.55rem", color: "#FFFFFF" }}>edit</div>
+        {/* Schools */}
+        {Object.entries(childrenBySchool).map(([schoolId, school]) => (
+          <div key={schoolId} style={{ marginBottom: "1.5rem" }}>
+
+            {/* School header */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "0.75rem", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
+              <span style={{ fontSize: "1.2rem" }}>🏫</span>
+              <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
+            </div>
+
+            {/* Classrooms */}
+            <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
+              {Object.entries(school.classrooms).map(([classroomId, classroom], idx, arr) => (
+                <div key={classroomId} style={{ borderBottom: idx < arr.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+
+                  {/* Classroom header */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.6rem 1rem", background: "#0F2A45" }}>
+                    <span style={{ fontSize: "1rem" }}>📚</span>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0 }}>
+                      {classroom.teacher} · {getGradeLabel(classroom.grade)}
+                    </p>
+                  </div>
+
+                  {/* Children in this classroom */}
+                  <div style={{ display: "flex", gap: "10px", padding: "1rem", flexWrap: "wrap" }}>
+                    {classroom.children.map((child) => (
+                      <div key={child.id} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", minWidth: "100px" }}>
+                        <button onClick={() => openEdit(child)} style={{ position: "absolute", top: "-4px", right: "-4px", background: "#162D50", border: "1px solid #2A4A6B", color: "#8AAEC8", borderRadius: "50%", width: "22px", height: "22px", fontSize: "0.65rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>✏️</button>
+
+                        {/* Child photo */}
+                        <div
+                          onClick={() => document.getElementById(`child-photo-${child.id}`).click()}
+                          style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.6rem", cursor: "pointer", overflow: "hidden", border: "3px solid #02C39A", position: "relative", marginBottom: "0.5rem" }}>
+                          {child.photo_url ? (
+                            <img src={child.photo_url} alt={child.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <span>👦</span>
+                          )}
+                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", padding: "2px 0", textAlign: "center", fontSize: "0.5rem", color: "#FFFFFF" }}>edit</div>
+                        </div>
+                        <input id={`child-photo-${child.id}`} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => uploadChildPhoto(e, child.id)} />
+
+                        <p style={{ color: "#FFFFFF", fontSize: "0.85rem", fontWeight: "600", margin: "0 0 2px", textAlign: "center" }}>{child.name}</p>
+                        <p style={{ color: "#02C39A", fontSize: "0.7rem", margin: 0, textAlign: "center" }}>{getGradeLabel(child.grade)}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <input
-                  id={`child-photo-${child.id}`}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: "none" }}
-                  onChange={(e) => uploadChildPhoto(e, child.id)}
-                />
+              ))}
 
-                <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px", textAlign: "center" }}>{child.name}</p>
-                <p style={{ color: "#02C39A", fontSize: "0.75rem", margin: "0 0 4px", textAlign: "center" }}>{getGradeLabel(child.grade)}</p>
-                {membership?.classrooms?.teacher_name && (
-                  <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0 0 2px", textAlign: "center" }}>{membership.classrooms.teacher_name}</p>
-                )}
-                {membership?.classrooms?.schools?.name && (
-                  <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0, textAlign: "center" }}>{membership.classrooms.schools.name}</p>
-                )}
+              {/* Add a child button */}
+              <div
+                onClick={() => setAddingChild(true)}
+                style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
+                <div style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", color: "#607080", fontSize: "1rem" }}>+</div>
+                <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add another child</p>
               </div>
-            );
-          })}
-
-          {/* Add child card */}
-          <div onClick={() => setAddingChild(true)} style={{ background: "transparent", borderRadius: "12px", padding: "1rem", border: "1px dashed #2A4A6B", flex: "1", minWidth: "140px", maxWidth: "180px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", gap: "8px" }}>
-            <div style={{ width: "56px", height: "56px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, textAlign: "center" }}>Add a child</p>
+            </div>
           </div>
-        </div>
+        ))}
+
+        {/* If no children yet */}
+        {children.length === 0 && (
+          <div
+            onClick={() => setAddingChild(true)}
+            style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
+            <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
+            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first child</p>
+          </div>
+        )}
 
         {/* Classroom */}
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CLASSROOM</p>
@@ -287,7 +326,9 @@ export default function Home({ session }) {
                   <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent of {member.children?.name}</p>
                 </div>
               </div>
-              <button style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+              <button
+                onClick={() => setRequestingPlaydate(member.children?.parents)}
+                style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
                 Huddle →
               </button>
             </div>
