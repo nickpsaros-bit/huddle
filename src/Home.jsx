@@ -1,6 +1,6 @@
-import ProfileScreen from "./ProfileScreen";
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import ProfileScreen from "./ProfileScreen";
 
 export default function Home({ session }) {
   const [parent, setParent] = useState(null);
@@ -9,6 +9,7 @@ export default function Home({ session }) {
   const [loading, setLoading] = useState(true);
   const [addingChild, setAddingChild] = useState(false);
   const [editingChild, setEditingChild] = useState(null);
+  const [showProfile, setShowProfile] = useState(false);
   const [newChildName, setNewChildName] = useState("");
   const [newChildGrade, setNewChildGrade] = useState("");
   const [newChildTeacher, setNewChildTeacher] = useState("");
@@ -16,7 +17,6 @@ export default function Home({ session }) {
   const [newChildSchool, setNewChildSchool] = useState("");
   const [childLoading, setChildLoading] = useState(false);
   const [childError, setChildError] = useState("");
-  const [showProfile, setShowProfile] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -50,6 +50,22 @@ export default function Home({ session }) {
     setLoading(false);
   };
 
+  const uploadChildPhoto = async (e, childId) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fileExt = file.name.split(".").pop();
+    const filePath = `child-${childId}.${fileExt}`;
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true });
+    if (uploadError) { console.error(uploadError); return; }
+    const { data: { publicUrl } } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(filePath);
+    await supabase.from("children").update({ photo_url: publicUrl }).eq("id", childId);
+    fetchData();
+  };
+
   const saveNewChild = async () => {
     setChildLoading(true);
     setChildError("");
@@ -65,10 +81,7 @@ export default function Home({ session }) {
       const { data: existingSchool } = await supabase.from("schools").select().eq("activation_code", code).maybeSingle();
       if (existingSchool) {
         school = existingSchool;
-        // Update school name if provided
-        if (newChildSchool) {
-          await supabase.from("schools").update({ name: newChildSchool }).eq("id", existingSchool.id);
-        }
+        if (newChildSchool) await supabase.from("schools").update({ name: newChildSchool }).eq("id", existingSchool.id);
       } else {
         const { data: newSchool, error: schoolErr } = await supabase.from("schools")
           .insert({ name: newChildSchool || "My School", activation_code: code }).select().single();
@@ -122,18 +135,12 @@ export default function Home({ session }) {
         .update({ name: editingChild.name, grade: grades.indexOf(editingChild.grade) })
         .eq("id", editingChild.id);
       if (childErr) throw childErr;
-
       if (editingChild.classroomId) {
-        await supabase.from("classrooms")
-          .update({ teacher_name: editingChild.teacher })
-          .eq("id", editingChild.classroomId);
+        await supabase.from("classrooms").update({ teacher_name: editingChild.teacher }).eq("id", editingChild.classroomId);
       }
       if (editingChild.schoolId) {
-        await supabase.from("schools")
-          .update({ name: editingChild.school })
-          .eq("id", editingChild.schoolId);
+        await supabase.from("schools").update({ name: editingChild.school }).eq("id", editingChild.schoolId);
       }
-
       setEditingChild(null);
       setChildError("");
       fetchData();
@@ -169,25 +176,30 @@ export default function Home({ session }) {
     );
   }
 
+  if (showProfile) {
+    return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
-        {showProfile && (
-  <ProfileScreen 
-    session={session} 
-    onBack={() => setShowProfile(false)} 
-  />
-)}
 
       {/* Header */}
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span 
-  onClick={() => setShowProfile(true)}
-  style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
-  Hi, {parent?.name?.split(" ")[0]}!
-</span>
-          <button onClick={signOut} style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.8rem", borderRadius: "8px", fontSize: "0.8rem", cursor: "pointer" }}>Sign out</button>
+          <span
+            onClick={() => setShowProfile(true)}
+            style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
+            Hi, {parent?.name?.split(" ")[0]}!
+          </span>
+          {parent?.photo_url && (
+            <img
+              src={parent.photo_url}
+              alt="Profile"
+              onClick={() => setShowProfile(true)}
+              style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }}
+            />
+          )}
         </div>
       </div>
 
@@ -203,7 +215,27 @@ export default function Home({ session }) {
             return (
               <div key={child.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem", border: "1px solid #2A4A6B", flex: "1", minWidth: "140px", maxWidth: "180px", position: "relative" }}>
                 <button onClick={() => openEdit(child)} style={{ position: "absolute", top: "8px", right: "8px", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", borderRadius: "6px", padding: "2px 7px", fontSize: "0.75rem", cursor: "pointer" }}>✏️</button>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", margin: "0 auto 0.75rem" }}>👦</div>
+
+                {/* Child photo */}
+                <div
+                  onClick={() => document.getElementById(`child-photo-${child.id}`).click()}
+                  style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", margin: "0 auto 0.75rem", cursor: "pointer", overflow: "hidden", border: "2px solid #02C39A", position: "relative" }}
+                >
+                  {child.photo_url ? (
+                    <img src={child.photo_url} alt={child.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <span>👦</span>
+                  )}
+                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", padding: "2px 0", textAlign: "center", fontSize: "0.55rem", color: "#FFFFFF" }}>edit</div>
+                </div>
+                <input
+                  id={`child-photo-${child.id}`}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => uploadChildPhoto(e, child.id)}
+                />
+
                 <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px", textAlign: "center" }}>{child.name}</p>
                 <p style={{ color: "#02C39A", fontSize: "0.75rem", margin: "0 0 4px", textAlign: "center" }}>{getGradeLabel(child.grade)}</p>
                 {membership?.classrooms?.teacher_name && (
@@ -218,7 +250,7 @@ export default function Home({ session }) {
 
           {/* Add child card */}
           <div onClick={() => setAddingChild(true)} style={{ background: "transparent", borderRadius: "12px", padding: "1rem", border: "1px dashed #2A4A6B", flex: "1", minWidth: "140px", maxWidth: "180px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", gap: "8px" }}>
-            <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
+            <div style={{ width: "56px", height: "56px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
             <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, textAlign: "center" }}>Add a child</p>
           </div>
         </div>
@@ -243,8 +275,12 @@ export default function Home({ session }) {
           classmates.map((member) => (
             <div key={member.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0 }}>
-                  {member.children?.parents?.name?.charAt(0) || "?"}
+                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                  {member.children?.parents?.photo_url ? (
+                    <img src={member.children.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    member.children?.parents?.name?.charAt(0) || "?"
+                  )}
                 </div>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{member.children?.parents?.name || "Unknown Parent"}</p>
@@ -265,32 +301,20 @@ export default function Home({ session }) {
           <div style={modalBox}>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Edit child</h2>
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Child's name</label>
-            <input type="text" value={editingChild.name}
-              onChange={(e) => setEditingChild({ ...editingChild, name: e.target.value })}
-              style={inputStyle} />
+            <input type="text" value={editingChild.name} onChange={(e) => setEditingChild({ ...editingChild, name: e.target.value })} style={inputStyle} />
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
-            <select value={editingChild.grade}
-              onChange={(e) => setEditingChild({ ...editingChild, grade: e.target.value })}
-              style={inputStyle}>
+            <select value={editingChild.grade} onChange={(e) => setEditingChild({ ...editingChild, grade: e.target.value })} style={inputStyle}>
               <option value="">Select grade...</option>
               {grades.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
-            <input type="text" value={editingChild.teacher}
-              onChange={(e) => setEditingChild({ ...editingChild, teacher: e.target.value })}
-              style={inputStyle} />
+            <input type="text" value={editingChild.teacher} onChange={(e) => setEditingChild({ ...editingChild, teacher: e.target.value })} style={inputStyle} />
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
-            <input type="text" placeholder="Sun Valley Elementary" value={editingChild.school || ""}
-              onChange={(e) => setEditingChild({ ...editingChild, school: e.target.value })}
-              style={inputStyle} />
+            <input type="text" value={editingChild.school || ""} onChange={(e) => setEditingChild({ ...editingChild, school: e.target.value })} style={inputStyle} />
             {childError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{childError}</p>}
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => { setEditingChild(null); setChildError(""); }}
-                style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>
-                Cancel
-              </button>
-              <button onClick={saveEdit} disabled={childLoading}
-                style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+              <button onClick={() => { setEditingChild(null); setChildError(""); }} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
+              <button onClick={saveEdit} disabled={childLoading} style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
                 {childLoading ? "Saving..." : "Save changes →"}
               </button>
             </div>
