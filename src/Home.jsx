@@ -1,3 +1,4 @@
+import ProfileScreen from "./ProfileScreen";
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
@@ -15,6 +16,7 @@ export default function Home({ session }) {
   const [newChildSchool, setNewChildSchool] = useState("");
   const [childLoading, setChildLoading] = useState(false);
   const [childError, setChildError] = useState("");
+  const [showProfile, setShowProfile] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -169,12 +171,22 @@ export default function Home({ session }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
+        {showProfile && (
+  <ProfileScreen 
+    session={session} 
+    onBack={() => setShowProfile(false)} 
+  />
+)}
 
       {/* Header */}
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ color: "#8AAEC8", fontSize: "0.85rem" }}>Hi, {parent?.name?.split(" ")[0]}!</span>
+          <span 
+  onClick={() => setShowProfile(true)}
+  style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
+  Hi, {parent?.name?.split(" ")[0]}!
+</span>
           <button onClick={signOut} style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.8rem", borderRadius: "8px", fontSize: "0.8rem", cursor: "pointer" }}>Sign out</button>
         </div>
       </div>
