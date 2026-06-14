@@ -26,6 +26,15 @@ export default function Consent({ session, onConsented }) {
     setLoading(true);
     setError("");
     try {
+      // Ensure a parents row exists BEFORE writing consent records.
+      // parent_consents has a foreign key to parents, so the parent must
+      // exist first. The name is filled in later during profile setup.
+      const { error: parentErr } = await supabase.from("parents").upsert(
+        { id: session.user.id },
+        { onConflict: "id", ignoreDuplicates: true }
+      );
+      if (parentErr && !parentErr.message.includes("duplicate")) throw parentErr;
+
       const { error: tosErr } = await supabase.from("parent_consents").insert({
         parent_id: session.user.id,
         document_type: "terms_of_service",
