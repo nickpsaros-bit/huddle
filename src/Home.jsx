@@ -6,6 +6,8 @@ import PlaydateRequest from "./PlaydateRequest";
 export default function Home({ session, notificationCount, onBellClick }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
+  const [myRole, setMyRole] = useState(null);
+  const [householdMembers, setHouseholdMembers] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [classmates, setClassmates] = useState({});
   const [loading, setLoading] = useState(true);
@@ -22,10 +24,19 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [showNewTeacherDropdown, setShowNewTeacherDropdown] = useState(false);
   const [savingMembership, setSavingMembership] = useState(false);
   const [membershipError, setMembershipError] = useState("");
+  const [householdBusy, setHouseholdBusy] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => { fetchData(); }, []);
+
+  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
+  const shortName = (fullName) => {
+    if (!fullName) return "A parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -38,10 +49,10 @@ export default function Home({ session, notificationCount, onBellClick }) {
       .single();
     setParent(parentData);
 
-    // Get my household
+    // Get my household + my role
     const { data: householdMember } = await supabase
       .from("household_members")
-      .select("household_id")
+      .select("household_id, role")
       .eq("parent_id", session.user.id)
       .single();
 
@@ -52,6 +63,15 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
     const hhId = householdMember.household_id;
     setHouseholdId(hhId);
+    setMyRole(householdMember.role);
+
+    // Get all members of my household (me + co-parents)
+    const { data: members } = await supabase
+      .from("household_members")
+      .select("id, parent_id, role, joined_at, parents(id, name, photo_url)")
+      .eq("household_id", hhId)
+      .order("joined_at", { ascending: true });
+    setHouseholdMembers(members || []);
 
     // Get all classroom memberships for my household
     const { data: membershipData } = await supabase
@@ -74,6 +94,70 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setClassmates(classmatesMap);
 
     setLoading(false);
+  };
+
+  // Detaches a parent from the household, applying lifecycle rules:
+  // - If the leaver was primary and others remain, promote the oldest remaining.
+  // - If no members remain, delete the household and its classroom memberships.
+  const removeMember = async (memberRow) => {
+    setHouseholdBusy(true);
+    try {
+      const leavingParentId = memberRow.parent_id;
+      const wasPrimary = memberRow.role === "primary";
+
+      // Remove the member.
+      const { error: delErr } = await supabase
+        .from("household_members")
+        .delete()
+        .eq("id", memberRow.id);
+      if (delErr) throw delErr;
+
+      // Who's left?
+      const { data: remaining } = await supabase
+        .from("household_members")
+        .select("id, parent_id, role, joined_at")
+        .eq("household_id", householdId)
+        .order("joined_at", { ascending: true });
+
+      if (!remaining || remaining.length === 0) {
+        // Empty household — clean up its classroom memberships, then delete it.
+        await supabase.from("classroom_members").delete().eq("household_id", householdId);
+        await supabase.from("households").delete().eq("id", householdId);
+      } else if (wasPrimary && !remaining.some((m) => m.role === "primary")) {
+        // Promote the oldest remaining member to primary.
+        await supabase
+          .from("household_members")
+          .update({ role: "primary" })
+          .eq("id", remaining[0].id);
+      }
+
+      // If I'm the one who left, reload the whole app so routing re-evaluates
+      // (I now have no household and should go back through setup).
+      if (leavingParentId === session.user.id) {
+        window.location.reload();
+        return;
+      }
+
+      fetchData();
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+    setHouseholdBusy(false);
+  };
+
+  const confirmRemoveOther = (memberRow) => {
+    const nm = shortName(memberRow.parents?.name);
+    if (window.confirm(`Remove ${nm} from your household? They'll need to set up their own household.`)) {
+      removeMember(memberRow);
+    }
+  };
+
+  const confirmLeave = () => {
+    const me = householdMembers.find((m) => m.parent_id === session.user.id);
+    if (!me) return;
+    if (window.confirm("Leave this household? You'll need to set up your own household afterward.")) {
+      removeMember(me);
+    }
   };
 
   const searchNewSchools = async (query) => {
@@ -145,6 +229,24 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setSavingMembership(false);
   };
 
+  // Leaves a classroom (removes this household's membership in it).
+  const leaveClassroom = async (membershipRow) => {
+    const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
+    if (!window.confirm(`Remove your household from ${label}?`)) return;
+    setHouseholdBusy(true);
+    try {
+      const { error } = await supabase
+        .from("classroom_members")
+        .delete()
+        .eq("id", membershipRow.id);
+      if (error) throw error;
+      fetchData();
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+    setHouseholdBusy(false);
+  };
+
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
   // Group memberships by school
@@ -189,6 +291,8 @@ export default function Home({ session, notificationCount, onBellClick }) {
     );
   }
 
+  const isPrimary = myRole === "primary";
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
@@ -224,6 +328,47 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
+        {/* YOUR HOUSEHOLD — only when there's a co-parent (2+ members) */}
+        {householdMembers.length > 1 && (
+          <>
+            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
+              {householdMembers.map((m, idx) => {
+                const isMe = m.parent_id === session.user.id;
+                return (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                        {m.parents?.photo_url ? (
+                          <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : m.parents?.name?.charAt(0) || "?"}
+                      </div>
+                      <div>
+                        <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
+                          {isMe ? "You" : shortName(m.parents?.name)}
+                          {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
+                        </p>
+                        <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
+                      </div>
+                    </div>
+                    {isMe ? (
+                      <button onClick={confirmLeave} disabled={householdBusy}
+                        style={{ background: "transparent", border: "1px solid #F87171", color: "#F87171", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                        Leave
+                      </button>
+                    ) : isPrimary ? (
+                      <button onClick={() => confirmRemoveOther(m)} disabled={householdBusy}
+                        style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                        Remove
+                      </button>
+                    ) : <div style={{ width: "60px" }} />}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
 
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
@@ -237,11 +382,17 @@ export default function Home({ session, notificationCount, onBellClick }) {
                 const otherFamilies = classmates[m.id] || [];
                 return (
                   <div key={m.id} style={{ borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#0F2A45" }}>
-                      <span style={{ fontSize: "1rem" }}>📚</span>
-                      <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0, fontWeight: "500" }}>
-                        {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
-                      </p>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "0.75rem 1rem", background: "#0F2A45" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "1rem" }}>📚</span>
+                        <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0, fontWeight: "500" }}>
+                          {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
+                        </p>
+                      </div>
+                      <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
+                        style={{ background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 6px" }}>
+                        Remove
+                      </button>
                     </div>
                     <div style={{ padding: "0.75rem 1rem" }}>
                       <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.5rem" }}>
@@ -292,7 +443,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
                     ) : hm.parents?.name?.charAt(0) || "?"}
                   </div>
                   <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{hm.parents?.name || "Unknown Parent"}</p>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(hm.parents?.name)}</p>
                     <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent in this classroom</p>
                   </div>
                 </div>
