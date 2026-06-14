@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Auth from "./Auth";
+import Consent from "./Consent";
 import Profile from "./Profile";
 import Home from "./Home";
 import NavBar from "./NavBar";
@@ -8,10 +9,12 @@ import ProfileScreen from "./ProfileScreen";
 import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
+import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hasConsented, setHasConsented] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
@@ -21,6 +24,7 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
+        checkConsent(session.user.id);
         checkProfile(session.user.id);
         fetchNotificationCount(session.user.id);
       }
@@ -31,8 +35,12 @@ export default function App() {
       (_event, session) => {
         setSession(session);
         if (session) {
+          checkConsent(session.user.id);
           checkProfile(session.user.id);
           fetchNotificationCount(session.user.id);
+        } else {
+          setHasConsented(false);
+          setHasProfile(false);
         }
       }
     );
@@ -40,8 +48,19 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const checkConsent = async (userId) => {
+    const { data } = await supabase
+      .from("parent_consents")
+      .select("document_type, document_version")
+      .eq("parent_id", userId);
+
+    const hasTerms = (data || []).some(c => c.document_type === "terms_of_service" && c.document_version === TERMS_VERSION);
+    const hasPrivacy = (data || []).some(c => c.document_type === "privacy_policy" && c.document_version === PRIVACY_VERSION);
+
+    setHasConsented(hasTerms && hasPrivacy);
+  };
+
   const checkProfile = async (userId) => {
-    // Profile is complete if: parent has name AND is in a household AND has at least 1 classroom
     const { data: parentData } = await supabase
       .from("parents")
       .select("id, name")
@@ -96,6 +115,10 @@ export default function App() {
 
   if (!session) {
     return <Auth onAuth={() => {}} />;
+  }
+
+  if (!hasConsented) {
+    return <Consent session={session} onConsented={() => setHasConsented(true)} />;
   }
 
   if (!hasProfile) {
