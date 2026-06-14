@@ -20,6 +20,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [playdateBadge, setPlaydateBadge] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -27,7 +28,7 @@ export default function App() {
       if (session) {
         checkConsent(session.user.id);
         checkProfile(session.user.id);
-        fetchNotificationCount(session.user.id);
+        fetchCounts(session.user.id);
       }
       setLoading(false);
     });
@@ -38,7 +39,7 @@ export default function App() {
         if (session) {
           checkConsent(session.user.id);
           checkProfile(session.user.id);
-          fetchNotificationCount(session.user.id);
+          fetchCounts(session.user.id);
         } else {
           setHasConsented(false);
           setHasProfile(false);
@@ -93,45 +94,52 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  const fetchNotificationCount = async (userId) => {
-    // My household (used for both join requests and playdate invites).
+  // Bell = people/communications (connection + household-link requests).
+  // Playdate badge = un-RSVP'd playdate invites for my household.
+  const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
       .select("household_id")
       .eq("parent_id", userId)
       .maybeSingle();
 
-    // Pending connection requests where I'm the recipient.
+    // --- Bell count ---
     const { data: conns } = await supabase
       .from("connections")
       .select("id")
       .eq("recipient_id", userId)
       .eq("status", "pending");
-    let count = conns ? conns.length : 0;
+    let bell = conns ? conns.length : 0;
 
     if (myHh) {
-      // Pending household-link requests targeting my household.
       const { data: joins } = await supabase
         .from("household_join_requests")
         .select("id")
         .eq("target_household_id", myHh.household_id)
         .eq("status", "pending");
-      count += joins ? joins.length : 0;
+      bell += joins ? joins.length : 0;
+    }
+    setNotificationCount(bell);
 
-      // Playdate invites my household hasn't responded to yet.
+    // --- Playdate badge ---
+    let pd = 0;
+    if (myHh) {
       const { data: invites } = await supabase
         .from("playdate_invites")
         .select("id")
         .eq("household_id", myHh.household_id)
         .eq("rsvp", "invited");
-      count += invites ? invites.length : 0;
+      pd = invites ? invites.length : 0;
     }
-
-    setNotificationCount(count);
+    setPlaydateBadge(pd);
   };
 
   const handleNavigate = (tabId) => {
     setActiveTab(tabId);
+    // Opening Playdates clears the badge after a moment (they've seen it).
+    if (tabId === "playdates" && session) {
+      setTimeout(() => fetchCounts(session.user.id), 1500);
+    }
   };
 
   if (loading) {
@@ -155,7 +163,7 @@ export default function App() {
   }
 
   if (showInbox) {
-    return <Inbox session={session} onBack={() => { setShowInbox(false); fetchNotificationCount(session.user.id); checkProfile(session.user.id); }} />;
+    return <Inbox session={session} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
   }
 
   let screen;
@@ -166,7 +174,7 @@ export default function App() {
   } else if (activeTab === "network") {
     screen = <Network session={session} />;
   } else if (activeTab === "playdates") {
-    screen = <Playdates session={session} />;
+    screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
   } else {
@@ -178,7 +186,7 @@ export default function App() {
       <div style={{ paddingBottom: "70px" }}>
         {screen}
       </div>
-      <NavBar active={activeTab} onNavigate={handleNavigate} />
+      <NavBar active={activeTab} onNavigate={handleNavigate} badges={{ playdates: playdateBadge }} />
     </div>
   );
 }

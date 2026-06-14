@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
-export default function Playdates({ session }) {
+export default function Playdates({ session, onChanged }) {
   const [householdId, setHouseholdId] = useState(null);
   const [organized, setOrganized] = useState([]);
   const [invited, setInvited] = useState([]);
@@ -18,7 +18,6 @@ export default function Playdates({ session }) {
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
-  // Returns a display label for a household: "Nick P. & Angi P."
   const householdLabel = async (hhId) => {
     const { data } = await supabase
       .from("household_members")
@@ -27,6 +26,16 @@ export default function Playdates({ session }) {
     const names = (data || []).map((m) => m.parents?.name).filter(Boolean);
     if (names.length === 0) return "A family";
     return names.map(shortName).join(" & ");
+  };
+
+  const householdInitial = async (hhId) => {
+    const { data } = await supabase
+      .from("household_members")
+      .select("parents(name)")
+      .eq("household_id", hhId)
+      .limit(1);
+    const nm = data?.[0]?.parents?.name;
+    return nm ? nm.charAt(0).toUpperCase() : "?";
   };
 
   const fmtDate = (iso) => {
@@ -48,14 +57,13 @@ export default function Playdates({ session }) {
     const hhId = hm.household_id;
     setHouseholdId(hhId);
 
-    // Playdates my household organized.
+    // Playdates my household organized, with roster.
     const { data: org } = await supabase
       .from("playdates")
       .select("*")
       .eq("organizer_household_id", hhId)
       .order("proposed_date", { ascending: true });
 
-    // For each, load the invite roster + a label per invited household.
     const organizedEnriched = [];
     for (const pd of (org || [])) {
       const { data: invites } = await supabase
@@ -64,13 +72,18 @@ export default function Playdates({ session }) {
         .eq("playdate_id", pd.id);
       const roster = [];
       for (const inv of (invites || [])) {
-        roster.push({ ...inv, label: await householdLabel(inv.household_id) });
+        roster.push({
+          ...inv,
+          label: await householdLabel(inv.household_id),
+          initial: await householdInitial(inv.household_id),
+        });
       }
-      organizedEnriched.push({ ...pd, roster });
+      const goingCount = roster.filter((r) => r.rsvp === "yes").length;
+      organizedEnriched.push({ ...pd, roster, goingCount });
     }
     setOrganized(organizedEnriched);
 
-    // Playdates my household was invited to (not ones I organized).
+    // Invites to my household.
     const { data: myInvites } = await supabase
       .from("playdate_invites")
       .select("*, playdates(*)")
@@ -80,7 +93,7 @@ export default function Playdates({ session }) {
     for (const inv of (myInvites || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === hhId) continue; // skip my own
+      if (pd.organizer_household_id === hhId) continue;
       const organizerLabel = await householdLabel(pd.organizer_household_id);
       invitedEnriched.push({ invite: inv, playdate: pd, organizerLabel });
     }
@@ -97,8 +110,9 @@ export default function Playdates({ session }) {
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString() })
         .eq("id", inviteId);
-      setMessage(rsvp === "yes" ? "You're going!" : rsvp === "maybe" ? "Marked as maybe" : "Declined");
+      setMessage(rsvp === "yes" ? "You're going!" : rsvp === "maybe" ? "Marked as maybe" : "Can't make it");
       await fetchData();
+      if (typeof onChanged === "function") onChanged();
       setTimeout(() => setMessage(""), 3000);
     } catch (err) {
       setMessage("Error: " + err.message);
@@ -111,7 +125,9 @@ export default function Playdates({ session }) {
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
-  const card = { background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" };
+  const card = { background: "#162D50", borderRadius: "12px", padding: "1.1rem 1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" };
+  const sectionLabel = { color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" };
+  const metaRow = { color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 4px" };
 
   if (loading) {
     return (
@@ -122,12 +138,16 @@ export default function Playdates({ session }) {
   }
 
   const nothing = organized.length === 0 && invited.length === 0;
+  const upcomingCount = organized.length + invited.length;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
-      <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B" }}>
+      <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Playdates</h1>
+        {upcomingCount > 0 && (
+          <span style={{ color: "#607080", fontSize: "0.8rem" }}>{upcomingCount} upcoming</span>
+        )}
       </div>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
@@ -142,55 +162,78 @@ export default function Playdates({ session }) {
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>📅</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No playdates yet</p>
-            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Tap "Huddle →" next to a parent on your Home screen to invite them.</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Tap "Huddle →" next to a parent on your Home screen to set one up.</p>
           </div>
         )}
 
-        {/* Invites to my household */}
+        {/* INVITES FOR YOU */}
         {invited.length > 0 && (
           <>
-            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>INVITES FOR YOU</p>
-            {invited.map(({ invite, playdate, organizerLabel }) => (
-              <div key={invite.id} style={card}>
-                <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 4px" }}>{organizerLabel} invited you</p>
-                <p style={{ color: "#02C39A", fontSize: "0.9rem", margin: "0 0 2px" }}>📅 {fmtDate(playdate.proposed_date)}</p>
-                <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 2px" }}>📍 {playdate.location_name}{playdate.location_address ? ` — ${playdate.location_address}` : ""}</p>
-                {playdate.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{playdate.note}"</p>}
+            <p style={sectionLabel}>INVITES FOR YOU</p>
+            {invited.map(({ invite, playdate, organizerLabel }) => {
+              const needsReply = invite.rsvp === "invited";
+              return (
+                <div key={invite.id} style={card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: 0 }}>{organizerLabel} invited you</p>
+                    {needsReply ? (
+                      <span style={{ fontSize: "0.65rem", background: "#3D1F0A", color: "#F59E0B", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap", border: "1px solid #854F0B" }}>Needs reply</span>
+                    ) : (
+                      <span style={{ fontSize: "0.7rem", color: rsvpColor(invite.rsvp), fontWeight: "600", whiteSpace: "nowrap" }}>{rsvpLabel(invite.rsvp)}</span>
+                    )}
+                  </div>
+                  <p style={{ ...metaRow, color: "#02C39A" }}>📅 {fmtDate(playdate.proposed_date)}</p>
+                  <p style={metaRow}>📍 {playdate.location_name}{playdate.location_address ? ` — ${playdate.location_address}` : ""}</p>
+                  {playdate.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{playdate.note}"</p>}
 
-                <div style={{ display: "flex", gap: "8px", marginTop: "1rem" }}>
-                  <button onClick={() => respond(invite.id, "yes")} disabled={busy}
-                    style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "none", background: invite.rsvp === "yes" ? "#02C39A" : "#0F3D2E", color: invite.rsvp === "yes" ? "#0F2044" : "#02C39A", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                    Going
-                  </button>
-                  <button onClick={() => respond(invite.id, "maybe")} disabled={busy}
-                    style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #854F0B", background: invite.rsvp === "maybe" ? "#854F0B" : "transparent", color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                    Maybe
-                  </button>
-                  <button onClick={() => respond(invite.id, "no")} disabled={busy}
-                    style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: invite.rsvp === "no" ? "#3D1515" : "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
-                    Can't go
-                  </button>
+                  <div style={{ display: "flex", gap: "8px", marginTop: "1rem" }}>
+                    <button onClick={() => respond(invite.id, "yes")} disabled={busy}
+                      style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "none", background: invite.rsvp === "yes" ? "#02C39A" : "#0F3D2E", color: invite.rsvp === "yes" ? "#0F2044" : "#02C39A", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                      Going
+                    </button>
+                    <button onClick={() => respond(invite.id, "maybe")} disabled={busy}
+                      style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #854F0B", background: invite.rsvp === "maybe" ? "#854F0B" : "transparent", color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                      Maybe
+                    </button>
+                    <button onClick={() => respond(invite.id, "no")} disabled={busy}
+                      style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: invite.rsvp === "no" ? "#3D1515" : "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
+                      Can't go
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
 
-        {/* Playdates I organized */}
+        {/* YOU'RE HOSTING */}
         {organized.length > 0 && (
           <>
-            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: invited.length > 0 ? "1.5rem 0 0.75rem" : "0 0 0.75rem", letterSpacing: "0.05em" }}>YOU'RE HOSTING</p>
+            <p style={{ ...sectionLabel, marginTop: invited.length > 0 ? "1.5rem" : 0 }}>YOU'RE HOSTING</p>
             {organized.map((pd) => (
               <div key={pd.id} style={card}>
-                <p style={{ color: "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
-                <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 2px" }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
-                {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{pd.note}"</p>}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                  <div>
+                    <p style={{ color: "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
+                  </div>
+                  <span style={{ fontSize: "0.65rem", background: pd.goingCount > 0 ? "#0F3D2E" : "#1A3A5C", color: pd.goingCount > 0 ? "#02C39A" : "#8AAEC8", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
+                    {pd.goingCount > 0 ? `${pd.goingCount} going` : "Pending"}
+                  </span>
+                </div>
 
-                <div style={{ marginTop: "1rem", borderTop: "1px solid #2A4A6B", paddingTop: "0.75rem" }}>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>GUEST LIST</p>
+                {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "6px 0 12px", fontStyle: "italic" }}>"{pd.note}"</p>}
+
+                <div style={{ borderTop: "1px solid #2A4A6B", paddingTop: "0.75rem", marginTop: pd.note ? 0 : "0.75rem" }}>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", letterSpacing: "0.05em", margin: "0 0 0.6rem" }}>GUEST LIST</p>
                   {pd.roster.map((inv) => (
-                    <div key={inv.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-                      <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0 }}>{inv.label}</p>
+                    <div key={inv.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0 }}>
+                          {inv.initial}
+                        </div>
+                        <span style={{ color: "#FFFFFF", fontSize: "0.85rem" }}>{inv.label}</span>
+                      </div>
                       <span style={{ color: rsvpColor(inv.rsvp), fontSize: "0.8rem", fontWeight: "500" }}>{rsvpLabel(inv.rsvp)}</span>
                     </div>
                   ))}

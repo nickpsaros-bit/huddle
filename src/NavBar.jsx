@@ -1,6 +1,7 @@
 export default function NavBar(props) {
   const active = props.active;
   const onNavigate = props.onNavigate;
+  const badges = props.badges || {};
 
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
@@ -23,31 +24,59 @@ export default function NavBar(props) {
       display: "flex", justifyContent: "space-around",
       padding: "0.5rem 0 1rem", zIndex: 50,
     }}>
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => handleClick(tab.id)}
-          style={{
-            background: "transparent",
-            border: "none",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "4px",
-            cursor: "pointer",
-            padding: "0.25rem 0.75rem",
-          }}>
-          <span style={{ fontSize: "1.4rem" }}>{tab.icon}</span>
-          <span style={{
-            fontSize: "0.65rem",
-            color: active === tab.id ? "#02C39A" : "#607080",
-            fontFamily: "system-ui, sans-serif",
-            fontWeight: active === tab.id ? "600" : "400",
-          }}>
-            {tab.label}
-          </span>
-        </button>
-      ))}
+      {tabs.map((tab) => {
+        const badgeCount = badges[tab.id] || 0;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => handleClick(tab.id)}
+            style={{
+              background: "transparent",
+              border: "none",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
+              cursor: "pointer",
+              padding: "0.25rem 0.75rem",
+            }}>
+            <span style={{ position: "relative", fontSize: "1.4rem", lineHeight: 1 }}>
+              {tab.icon}
+              {badgeCount > 0 && (
+                <span style={{
+                  position: "absolute",
+                  top: "-6px",
+                  right: "-10px",
+                  background: "#E05A5A",
+                  color: "#FFFFFF",
+                  fontSize: "0.6rem",
+                  fontWeight: "700",
+                  fontFamily: "system-ui, sans-serif",
+                  borderRadius: "10px",
+                  minWidth: "16px",
+                  height: "16px",
+                  padding: "0 4px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxSizing: "border-box",
+                  border: "2px solid #162D50",
+                }}>
+                  {badgeCount}
+                </span>
+              )}
+            </span>
+            <span style={{
+              fontSize: "0.65rem",
+              color: active === tab.id ? "#02C39A" : "#607080",
+              fontFamily: "system-ui, sans-serif",
+              fontWeight: active === tab.id ? "600" : "400",
+            }}>
+              {tab.label}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
