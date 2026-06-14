@@ -45,8 +45,8 @@ export default function Network({ session }) {
     setLoading(false);
   };
 
-  const removeConnection = async (connectionId) => {
-    if (!confirm("Remove this connection?")) return;
+ const removeConnection = async (connectionId) => {
+    if (!window.confirm("Remove this connection?")) return;
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
   };
