@@ -63,8 +63,9 @@ export default function Home({ session, notificationCount, onBellClick }) {
     const filePath = `child-${childId}.${fileExt}`;
     const { error: uploadError } = await supabase.storage.from("avatars").upload(filePath, file, { upsert: true });
     if (uploadError) { console.error(uploadError); return; }
-    const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(filePath);
-    await supabase.from("children").update({ photo_url: publicUrl }).eq("id", childId);
+const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(filePath);
+    const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
+    await supabase.from("children").update({ photo_url: cacheBustedUrl }).eq("id", childId);
     fetchData();
   };
 
