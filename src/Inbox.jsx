@@ -9,7 +9,6 @@ export default function Inbox({ session, onBack }) {
 
   useEffect(() => { fetchRequests(); }, []);
 
-  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
   const shortName = (fullName) => {
     if (!fullName) return "A parent";
     const parts = fullName.trim().split(/\s+/);
@@ -20,7 +19,6 @@ export default function Inbox({ session, onBack }) {
   const fetchRequests = async () => {
     setLoading(true);
 
-    // Pending connection requests where I am the recipient.
     const { data: conns } = await supabase
       .from("connections")
       .select("*, requester:parents!connections_requester_id_fkey(*)")
@@ -28,7 +26,6 @@ export default function Inbox({ session, onBack }) {
       .eq("status", "pending");
     setConnectionRequests(conns || []);
 
-    // Pending household-link requests targeting the household I'm in.
     const { data: myHh } = await supabase
       .from("household_members")
       .select("household_id")
@@ -70,51 +67,97 @@ export default function Inbox({ session, onBack }) {
   const approveJoin = async (req) => {
     setMessage("");
     try {
-      // Find my household (any member can approve).
+      const requesterId = req.requesting_parent_id;
+
+      // 1. My (approver's) household — the destination.
       const { data: myHh, error: hhErr } = await supabase
         .from("household_members")
         .select("household_id")
         .eq("parent_id", session.user.id)
         .single();
       if (hhErr) throw hhErr;
+      const destHouseholdId = myHh.household_id;
 
-      // Add the requester to my household as a co-parent.
+      // 2. Requester's current household + their role there.
+      const { data: theirMembership } = await supabase
+        .from("household_members")
+        .select("id, household_id, role")
+        .eq("parent_id", requesterId)
+        .maybeSingle();
+
+      const oldHouseholdId = theirMembership?.household_id || null;
+
+      // Guard: if they're somehow already in my household, just mark approved.
+      if (oldHouseholdId === destHouseholdId) {
+        await supabase.from("household_join_requests")
+          .update({ status: "approved", resolved_at: new Date().toISOString() })
+          .eq("id", req.id);
+        setMessage(`${shortName(req.requester?.name)} is already in your household.`);
+        fetchRequests();
+        return;
+      }
+
+      // 3. Move the requester's old household's classroom memberships into mine
+      //    (union — skip any my household already has).
+      if (oldHouseholdId) {
+        const { data: oldCms } = await supabase
+          .from("classroom_members")
+          .select("classroom_id, school_year")
+          .eq("household_id", oldHouseholdId);
+
+        const { data: myCms } = await supabase
+          .from("classroom_members")
+          .select("classroom_id")
+          .eq("household_id", destHouseholdId);
+        const haveClassroom = new Set((myCms || []).map((c) => c.classroom_id));
+
+        for (const c of (oldCms || [])) {
+          if (!haveClassroom.has(c.classroom_id)) {
+            await supabase.from("classroom_members").insert({
+              household_id: destHouseholdId,
+              classroom_id: c.classroom_id,
+              school_year: c.school_year,
+            });
+            haveClassroom.add(c.classroom_id);
+          }
+        }
+      }
+
+      // 4. Remove the requester from their old household.
+      if (theirMembership) {
+        await supabase.from("household_members").delete().eq("id", theirMembership.id);
+
+        // 5. Clean up their old household: delete if empty, else promote if needed.
+        const { data: remaining } = await supabase
+          .from("household_members")
+          .select("id, role, joined_at")
+          .eq("household_id", oldHouseholdId)
+          .order("joined_at", { ascending: true });
+
+        if (!remaining || remaining.length === 0) {
+          await supabase.from("classroom_members").delete().eq("household_id", oldHouseholdId);
+          await supabase.from("households").delete().eq("id", oldHouseholdId);
+        } else if (theirMembership.role === "primary" && !remaining.some((m) => m.role === "primary")) {
+          await supabase.from("household_members")
+            .update({ role: "primary" })
+            .eq("id", remaining[0].id);
+        }
+      }
+
+      // 6. Add the requester to my household as co-parent.
       const { error: memberErr } = await supabase
         .from("household_members")
         .insert({
-          household_id: myHh.household_id,
-          parent_id: req.requesting_parent_id,
+          household_id: destHouseholdId,
+          parent_id: requesterId,
           role: "co_parent",
         });
       if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
 
-      // Merge in the classroom they entered, if provided and the household lacks it.
-      if (req.classroom_id) {
-        const { data: existing } = await supabase
-          .from("classroom_members")
-          .select("id")
-          .eq("household_id", myHh.household_id)
-          .eq("classroom_id", req.classroom_id)
-          .maybeSingle();
-
-        if (!existing) {
-          const { error: cmErr } = await supabase
-            .from("classroom_members")
-            .insert({
-              household_id: myHh.household_id,
-              classroom_id: req.classroom_id,
-              school_year: req.pending_school_year,
-            });
-          if (cmErr && !cmErr.message.includes("duplicate")) throw cmErr;
-        }
-      }
-
-      // Mark the request approved.
-      const { error: updErr } = await supabase
-        .from("household_join_requests")
+      // 7. Mark the request approved.
+      await supabase.from("household_join_requests")
         .update({ status: "approved", resolved_at: new Date().toISOString() })
         .eq("id", req.id);
-      if (updErr) throw updErr;
 
       setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
       fetchRequests();
