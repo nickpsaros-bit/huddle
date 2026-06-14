@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 
 export default function Playdates({ session, onChanged }) {
   const [householdId, setHouseholdId] = useState(null);
-  const [items, setItems] = useState([]); // unified list of playdates I'm in
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,7 +58,6 @@ export default function Playdates({ session, onChanged }) {
 
     const all = [];
 
-    // Playdates my household hosts.
     const { data: hosting } = await supabase
       .from("playdates")
       .select("*")
@@ -85,7 +84,6 @@ export default function Playdates({ session, onChanged }) {
       });
     }
 
-    // Playdates my household is invited to.
     const { data: myInvites } = await supabase
       .from("playdate_invites")
       .select("*, playdates(*)")
@@ -94,7 +92,7 @@ export default function Playdates({ session, onChanged }) {
     for (const inv of (myInvites || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === hhId) continue; // already in hosting
+      if (pd.organizer_household_id === hhId) continue;
       const organizerLabel = await householdLabel(pd.organizer_household_id);
       all.push({ kind: "invited", playdate: pd, invite: inv, organizerLabel });
     }
@@ -125,11 +123,20 @@ export default function Playdates({ session, onChanged }) {
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
+  // Host badge: accurate event state from the roster.
+  const hostBadge = (roster, dim) => {
+    if (dim) return { text: "Hosted", bg: "#1A3A5C", color: "#8AAEC8" };
+    if (!roster || roster.length === 0) return { text: "No guests yet", bg: "#1A3A5C", color: "#8AAEC8" };
+    const going = roster.filter((r) => r.rsvp === "yes").length;
+    if (going > 0) return { text: `${going} going`, bg: "#0F3D2E", color: "#02C39A" };
+    const anyOpen = roster.some((r) => r.rsvp === "invited" || r.rsvp === "maybe");
+    if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
+    return { text: "Declined", bg: "#3D1515", color: "#F87171" };
+  };
+
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
-  const myRsvp = (it) => (it.kind === "invited" ? it.invite.rsvp : "yes"); // host treated as "going"
 
-  // Partition into zones (declined invites hidden entirely).
   const visible = items.filter((it) => !(it.kind === "invited" && it.invite.rsvp === "no"));
 
   const needsAttention = visible
@@ -142,7 +149,7 @@ export default function Playdates({ session, onChanged }) {
 
   const past = visible
     .filter((it) => isPast(it))
-    .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date)); // newest past first
+    .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
   const card = (dim) => ({
     background: dim ? "#13233F" : "#162D50",
@@ -165,7 +172,6 @@ export default function Playdates({ session, onChanged }) {
 
   const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0;
 
-  // Renders the body of a card (shared between zones). `dim` removes action buttons.
   const renderCard = (it, dim) => {
     const pd = it.playdate;
     if (it.kind === "invited") {
@@ -205,6 +211,7 @@ export default function Playdates({ session, onChanged }) {
     }
 
     // hosting card
+    const badge = hostBadge(it.roster, dim);
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -212,8 +219,8 @@ export default function Playdates({ session, onChanged }) {
             <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
-          <span style={{ fontSize: "0.65rem", background: it.goingCount > 0 ? "#0F3D2E" : "#1A3A5C", color: it.goingCount > 0 ? "#02C39A" : "#8AAEC8", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-            {dim ? "Hosted" : (it.goingCount > 0 ? `${it.goingCount} going` : "Pending")}
+          <span style={{ fontSize: "0.65rem", background: badge.bg, color: badge.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
+            {badge.text}
           </span>
         </div>
 
@@ -221,6 +228,9 @@ export default function Playdates({ session, onChanged }) {
 
         <div style={{ borderTop: "1px solid #2A4A6B", paddingTop: "0.75rem", marginTop: pd.note ? 0 : "0.75rem" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.7rem", letterSpacing: "0.05em", margin: "0 0 0.6rem" }}>GUEST LIST</p>
+          {it.roster.length === 0 && (
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, fontStyle: "italic" }}>No families invited yet.</p>
+          )}
           {it.roster.map((inv) => (
             <div key={inv.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
