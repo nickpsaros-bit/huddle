@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
@@ -27,32 +27,77 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     setLoading(true);
     setError("");
 
-    const proposedDate = new Date(`${date}T${time}`).toISOString();
+    try {
+      // My household (the organizer).
+      const { data: myHm, error: myErr } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", session.user.id)
+        .single();
+      if (myErr) throw myErr;
 
-    const { error: reqError } = await supabase
-      .from("playdates")
-      .insert({
-        requester_id: session.user.id,
-        recipient_id: recipient.id,
-        proposed_date: proposedDate,
-        location_name: locationName,
-        location_address: locationAddress,
-        status: "pending",
-      });
+      // The recipient's household (the first invitee).
+      const { data: theirHm, error: theirErr } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", recipient.id)
+        .single();
+      if (theirErr) throw theirErr;
 
-    if (reqError) {
-      setError(reqError.message);
+      if (theirHm.household_id === myHm.household_id) {
+        setError("That parent is in your own household.");
+        setLoading(false);
+        return;
+      }
+
+      const proposedDate = new Date(`${date}T${time}`).toISOString();
+
+      // Create the playdate event (household-level).
+      const { data: playdate, error: pdErr } = await supabase
+        .from("playdates")
+        .insert({
+          organizer_household_id: myHm.household_id,
+          organizer_parent_id: session.user.id,
+          proposed_date: proposedDate,
+          location_name: locationName,
+          location_address: locationAddress,
+          note: note || null,
+          status: "pending",
+        })
+        .select()
+        .single();
+      if (pdErr) throw pdErr;
+
+      // Invite the recipient's household.
+      const { error: invErr } = await supabase
+        .from("playdate_invites")
+        .insert({
+          playdate_id: playdate.id,
+          household_id: theirHm.household_id,
+          invited_by_household_id: myHm.household_id,
+          rsvp: "invited",
+        });
+      if (invErr) throw invErr;
+
+      onSent();
+    } catch (err) {
+      setError(err.message);
       setLoading(false);
-      return;
     }
-
-    onSent();
   };
 
   const inputStyle = {
     width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
+  };
+
+  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
+  const shortName = (fullName) => {
+    if (!fullName) return "this family";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
   return (
@@ -77,8 +122,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             )}
           </div>
           <div>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{recipient.name}</p>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Sending a playdate request</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(recipient.name)}'s family</p>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Sending a playdate invite</p>
           </div>
         </div>
 
@@ -155,7 +200,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
           }}
         >
-          {loading ? "Sending..." : "Send playdate request →"}
+          {loading ? "Sending..." : "Send playdate invite →"}
         </button>
 
       </div>

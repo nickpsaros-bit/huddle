@@ -9,6 +9,7 @@ import ProfileScreen from "./ProfileScreen";
 import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
+import Playdates from "./Playdates";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
 export default function App() {
@@ -93,31 +94,40 @@ export default function App() {
   };
 
   const fetchNotificationCount = async (userId) => {
-    // Pending connection requests where I'm the recipient.
-    const { data: conns } = await supabase
-      .from("connections")
-      .select("id")
-      .eq("recipient_id", userId)
-      .eq("status", "pending");
-
-    // Pending household-link requests targeting a household I'm in.
-    let joinCount = 0;
+    // My household (used for both join requests and playdate invites).
     const { data: myHh } = await supabase
       .from("household_members")
       .select("household_id")
       .eq("parent_id", userId)
       .maybeSingle();
 
+    // Pending connection requests where I'm the recipient.
+    const { data: conns } = await supabase
+      .from("connections")
+      .select("id")
+      .eq("recipient_id", userId)
+      .eq("status", "pending");
+    let count = conns ? conns.length : 0;
+
     if (myHh) {
+      // Pending household-link requests targeting my household.
       const { data: joins } = await supabase
         .from("household_join_requests")
         .select("id")
         .eq("target_household_id", myHh.household_id)
         .eq("status", "pending");
-      joinCount = joins ? joins.length : 0;
+      count += joins ? joins.length : 0;
+
+      // Playdate invites my household hasn't responded to yet.
+      const { data: invites } = await supabase
+        .from("playdate_invites")
+        .select("id")
+        .eq("household_id", myHh.household_id)
+        .eq("rsvp", "invited");
+      count += invites ? invites.length : 0;
     }
 
-    setNotificationCount((conns ? conns.length : 0) + joinCount);
+    setNotificationCount(count);
   };
 
   const handleNavigate = (tabId) => {
@@ -156,13 +166,7 @@ export default function App() {
   } else if (activeTab === "network") {
     screen = <Network session={session} />;
   } else if (activeTab === "playdates") {
-    screen = (
-      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
-        <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>📅</p>
-        <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Playdates</p>
-        <p style={{ color: "#607080", fontSize: "0.9rem" }}>Coming soon!</p>
-      </div>
-    );
+    screen = <Playdates session={session} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
   } else {
