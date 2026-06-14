@@ -28,7 +28,7 @@ export default function Inbox({ session, onBack }) {
       .eq("status", "pending");
     setConnectionRequests(conns || []);
 
-    // Pending household-join requests targeting the household I'm in.
+    // Pending household-link requests targeting the household I'm in.
     const { data: myHh } = await supabase
       .from("household_members")
       .select("household_id")
@@ -70,7 +70,7 @@ export default function Inbox({ session, onBack }) {
   const approveJoin = async (req) => {
     setMessage("");
     try {
-      // 1. Find my household.
+      // Find my household (any member can approve).
       const { data: myHh, error: hhErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -78,7 +78,7 @@ export default function Inbox({ session, onBack }) {
         .single();
       if (hhErr) throw hhErr;
 
-      // 2. Add the requester to my household as a co-parent.
+      // Add the requester to my household as a co-parent.
       const { error: memberErr } = await supabase
         .from("household_members")
         .insert({
@@ -86,10 +86,9 @@ export default function Inbox({ session, onBack }) {
           parent_id: req.requesting_parent_id,
           role: "co_parent",
         });
-      // Ignore duplicate (already a member somehow); throw anything else.
       if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
 
-      // 3. Merge in the classroom they entered, if the household lacks it.
+      // Merge in the classroom they entered, if provided and the household lacks it.
       if (req.classroom_id) {
         const { data: existing } = await supabase
           .from("classroom_members")
@@ -110,14 +109,14 @@ export default function Inbox({ session, onBack }) {
         }
       }
 
-      // 4. Mark the request approved.
+      // Mark the request approved.
       const { error: updErr } = await supabase
         .from("household_join_requests")
         .update({ status: "approved", resolved_at: new Date().toISOString() })
         .eq("id", req.id);
       if (updErr) throw updErr;
 
-      setMessage(`${shortName(req.requester?.name)} joined your household!`);
+      setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
       fetchRequests();
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
@@ -130,7 +129,7 @@ export default function Inbox({ session, onBack }) {
       .from("household_join_requests")
       .update({ status: "declined", resolved_at: new Date().toISOString() })
       .eq("id", req.id);
-    setMessage("Join request declined");
+    setMessage("Link request declined");
     fetchRequests();
     setTimeout(() => setMessage(""), 3000);
   };
@@ -166,7 +165,7 @@ export default function Inbox({ session, onBack }) {
           <>
             {joinRequests.length > 0 && (
               <>
-                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>HOUSEHOLD REQUESTS</p>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>HOUSEHOLD LINK REQUESTS</p>
                 {joinRequests.map((req) => (
                   <div key={req.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>

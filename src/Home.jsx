@@ -26,6 +26,13 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [membershipError, setMembershipError] = useState("");
   const [householdBusy, setHouseholdBusy] = useState(false);
 
+  // Find-a-household-member flow
+  const [findingMember, setFindingMember] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberCandidates, setMemberCandidates] = useState([]);
+  const [linkMessage, setLinkMessage] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => { fetchData(); }, []);
@@ -41,7 +48,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const fetchData = async () => {
     setLoading(true);
 
-    // Get parent info
     const { data: parentData } = await supabase
       .from("parents")
       .select("*")
@@ -49,7 +55,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
       .single();
     setParent(parentData);
 
-    // Get my household + my role
     const { data: householdMember } = await supabase
       .from("household_members")
       .select("household_id, role")
@@ -65,7 +70,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setHouseholdId(hhId);
     setMyRole(householdMember.role);
 
-    // Get all members of my household (me + co-parents)
     const { data: members } = await supabase
       .from("household_members")
       .select("id, parent_id, role, joined_at, parents(id, name, photo_url)")
@@ -73,14 +77,12 @@ export default function Home({ session, notificationCount, onBellClick }) {
       .order("joined_at", { ascending: true });
     setHouseholdMembers(members || []);
 
-    // Get all classroom memberships for my household
     const { data: membershipData } = await supabase
       .from("classroom_members")
       .select("*, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
       .eq("household_id", hhId);
     setMemberships(membershipData || []);
 
-    // For each classroom, get other households in that classroom
     const classmatesMap = {};
     for (const m of (membershipData || [])) {
       const { data: otherMembers } = await supabase
@@ -96,23 +98,84 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setLoading(false);
   };
 
-  // Detaches a parent from the household, applying lifecycle rules:
-  // - If the leaver was primary and others remain, promote the oldest remaining.
-  // - If no members remain, delete the household and its classroom memberships.
+  // Search parents who share a classroom with me (excludes my own household).
+  // Returns candidates as { parentId, name, photo_url, householdId }.
+  const runMemberSearch = async (query) => {
+    setMemberSearch(query);
+    if (query.trim().length < 2) { setMemberCandidates([]); return; }
+
+    // My classroom IDs.
+    const classroomIds = memberships.map((m) => m.classroom_id);
+    if (classroomIds.length === 0) { setMemberCandidates([]); return; }
+
+    // Other households in those classrooms.
+    const { data: cms } = await supabase
+      .from("classroom_members")
+      .select("household_id")
+      .in("classroom_id", classroomIds)
+      .neq("household_id", householdId);
+
+    const otherHouseholdIds = [...new Set((cms || []).map((c) => c.household_id))];
+    if (otherHouseholdIds.length === 0) { setMemberCandidates([]); return; }
+
+    // Parents in those households.
+    const { data: hms } = await supabase
+      .from("household_members")
+      .select("parent_id, household_id, parents(id, name, photo_url)")
+      .in("household_id", otherHouseholdIds);
+
+    const q = query.trim().toLowerCase();
+    const seen = new Set();
+    const candidates = [];
+    (hms || []).forEach((h) => {
+      const p = h.parents;
+      if (!p) return;
+      if (seen.has(p.id)) return;
+      if (!p.name || !p.name.toLowerCase().includes(q)) return;
+      seen.add(p.id);
+      candidates.push({ parentId: p.id, name: p.name, photo_url: p.photo_url, householdId: h.household_id });
+    });
+    setMemberCandidates(candidates);
+  };
+
+  const askToLink = async (candidate) => {
+    setLinkBusy(true);
+    setLinkMessage("");
+    try {
+      // Use the household_join_requests table: I'm requesting to join THEIR household.
+      const { error } = await supabase.from("household_join_requests").insert({
+        requesting_parent_id: session.user.id,
+        target_household_id: candidate.householdId,
+      });
+      if (error) {
+        if (error.message.includes("duplicate") || error.message.includes("one_pending")) {
+          setLinkMessage("You already have a pending request.");
+        } else {
+          throw error;
+        }
+      } else {
+        setLinkMessage(`Request sent to ${shortName(candidate.name)}'s household. They'll approve from their notifications.`);
+        setMemberCandidates([]);
+        setMemberSearch("");
+      }
+    } catch (err) {
+      setLinkMessage("Error: " + err.message);
+    }
+    setLinkBusy(false);
+  };
+
   const removeMember = async (memberRow) => {
     setHouseholdBusy(true);
     try {
       const leavingParentId = memberRow.parent_id;
       const wasPrimary = memberRow.role === "primary";
 
-      // Remove the member.
       const { error: delErr } = await supabase
         .from("household_members")
         .delete()
         .eq("id", memberRow.id);
       if (delErr) throw delErr;
 
-      // Who's left?
       const { data: remaining } = await supabase
         .from("household_members")
         .select("id, parent_id, role, joined_at")
@@ -120,19 +183,15 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .order("joined_at", { ascending: true });
 
       if (!remaining || remaining.length === 0) {
-        // Empty household — clean up its classroom memberships, then delete it.
         await supabase.from("classroom_members").delete().eq("household_id", householdId);
         await supabase.from("households").delete().eq("id", householdId);
       } else if (wasPrimary && !remaining.some((m) => m.role === "primary")) {
-        // Promote the oldest remaining member to primary.
         await supabase
           .from("household_members")
           .update({ role: "primary" })
           .eq("id", remaining[0].id);
       }
 
-      // If I'm the one who left, reload the whole app so routing re-evaluates
-      // (I now have no household and should go back through setup).
       if (leavingParentId === session.user.id) {
         window.location.reload();
         return;
@@ -213,7 +272,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
         classroom = newClassroom;
       }
 
-      // Insert membership for this household
       const { error: memberErr } = await supabase.from("classroom_members").insert({
         household_id: householdId,
         classroom_id: classroom.id,
@@ -229,7 +287,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setSavingMembership(false);
   };
 
-  // Leaves a classroom (removes this household's membership in it).
   const leaveClassroom = async (membershipRow) => {
     const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
     if (!window.confirm(`Remove your household from ${label}?`)) return;
@@ -249,7 +306,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
-  // Group memberships by school
   const membershipsBySchool = memberships.reduce((acc, m) => {
     const schoolName = m.classrooms?.schools?.name || "Unknown School";
     const schoolKey = schoolName.toLowerCase().replace(/\s+/g, "-");
@@ -328,48 +384,51 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* YOUR HOUSEHOLD — only when there's a co-parent (2+ members) */}
-        {householdMembers.length > 1 && (
-          <>
-            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
-            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
-              {householdMembers.map((m, idx) => {
-                const isMe = m.parent_id === session.user.id;
-                return (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                        {m.parents?.photo_url ? (
-                          <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        ) : m.parents?.name?.charAt(0) || "?"}
-                      </div>
-                      <div>
-                        <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
-                          {isMe ? "You" : shortName(m.parents?.name)}
-                          {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
-                        </p>
-                        <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
-                      </div>
-                    </div>
-                    {isMe ? (
-                      <button onClick={confirmLeave} disabled={householdBusy}
-                        style={{ background: "transparent", border: "1px solid #F87171", color: "#F87171", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                        Leave
-                      </button>
-                    ) : isPrimary ? (
-                      <button onClick={() => confirmRemoveOther(m)} disabled={householdBusy}
-                        style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                        Remove
-                      </button>
-                    ) : <div style={{ width: "60px" }} />}
+        {/* YOUR HOUSEHOLD */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
+          {householdMembers.map((m, idx) => {
+            const isMe = m.parent_id === session.user.id;
+            return (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {m.parents?.photo_url ? (
+                      <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : m.parents?.name?.charAt(0) || "?"}
                   </div>
-                );
-              })}
-            </div>
-          </>
-        )}
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
+                      {isMe ? "You" : shortName(m.parents?.name)}
+                      {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
+                  </div>
+                </div>
+                {isMe ? (
+                  householdMembers.length > 1 ? (
+                    <button onClick={confirmLeave} disabled={householdBusy}
+                      style={{ background: "transparent", border: "1px solid #F87171", color: "#F87171", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                      Leave
+                    </button>
+                  ) : <div style={{ width: "60px" }} />
+                ) : isPrimary ? (
+                  <button onClick={() => confirmRemoveOther(m)} disabled={householdBusy}
+                    style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                    Remove
+                  </button>
+                ) : <div style={{ width: "60px" }} />}
+              </div>
+            );
+          })}
+          <div onClick={() => { setFindingMember(true); setLinkMessage(""); setMemberSearch(""); setMemberCandidates([]); }}
+            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
+            <div style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", color: "#607080", fontSize: "1rem" }}>+</div>
+            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Find a household member</p>
+          </div>
+        </div>
 
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
 
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
@@ -456,6 +515,51 @@ export default function Home({ session, notificationCount, onBellClick }) {
           })
         )}
       </div>
+
+      {/* Find a household member modal */}
+      {findingMember && (
+        <div style={overlay}>
+          <div style={modalBox}>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Find a household member</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+              Search for a parent already in Huddle who shares a classroom with you. They'll approve from their notifications, then you'll share a household.
+            </p>
+
+            <input type="text" placeholder="Search by name..." value={memberSearch}
+              onChange={(e) => runMemberSearch(e.target.value)} style={inputStyle} />
+
+            {linkMessage && (
+              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
+                <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0 }}>{linkMessage}</p>
+              </div>
+            )}
+
+            {memberCandidates.map((c) => (
+              <div key={c.parentId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0F2A45", borderRadius: "10px", padding: "0.6rem 0.85rem", marginBottom: "8px", border: "1px solid #2A4A6B" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : c.name?.charAt(0) || "?"}
+                  </div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>{shortName(c.name)}</p>
+                </div>
+                <button onClick={() => askToLink(c)} disabled={linkBusy}
+                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.8rem", fontWeight: "600", cursor: "pointer" }}>
+                  Ask to link
+                </button>
+              </div>
+            ))}
+
+            {memberSearch.trim().length >= 2 && memberCandidates.length === 0 && !linkMessage && (
+              <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0 0 1rem" }}>No matching parents in your classrooms.</p>
+            )}
+
+            <button onClick={() => setFindingMember(false)}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer", marginTop: "0.5rem" }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add classroom modal */}
       {addingClassroom && (
