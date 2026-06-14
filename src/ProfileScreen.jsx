@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import { supabase } from "./supabase";
+import { TERMS_OF_SERVICE, PRIVACY_POLICY, TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
 export default function ProfileScreen({ session, onBack }) {
   const [parent, setParent] = useState(null);
@@ -8,8 +10,13 @@ export default function ProfileScreen({ session, onBack }) {
   const [newName, setNewName] = useState("");
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const [consents, setConsents] = useState([]);
+  const [view, setView] = useState("main");
 
-  useEffect(() => { fetchProfile(); }, []);
+  useEffect(() => {
+    fetchProfile();
+    fetchConsents();
+  }, []);
 
   const fetchProfile = async () => {
     setLoading(true);
@@ -21,6 +28,15 @@ export default function ProfileScreen({ session, onBack }) {
     setParent(data);
     setNewName(data?.name || "");
     setLoading(false);
+  };
+
+  const fetchConsents = async () => {
+    const { data } = await supabase
+      .from("parent_consents")
+      .select("*")
+      .eq("parent_id", session.user.id)
+      .order("consented_at", { ascending: false });
+    setConsents(data || []);
   };
 
   const uploadPhoto = async (e) => {
@@ -59,6 +75,28 @@ export default function ProfileScreen({ session, onBack }) {
   const signOut = async () => {
     await supabase.auth.signOut();
   };
+
+  const tosConsent = consents.find(c => c.document_type === "terms_of_service");
+  const privacyConsent = consents.find(c => c.document_type === "privacy_policy");
+
+  if (view === "terms" || view === "privacy") {
+    const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
+    const title = view === "terms" ? "Terms of Service" : "Privacy Policy";
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B", position: "sticky", top: 0, zIndex: 10 }}>
+          <button onClick={() => setView("main")} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{title}</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+        <div style={{ padding: "1.5rem", maxWidth: "700px", margin: "0 auto" }}>
+          <div style={{ color: "#FFFFFF", fontSize: "0.9rem", lineHeight: "1.6" }}>
+            <ReactMarkdown>{doc}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -134,6 +172,41 @@ export default function ProfileScreen({ session, onBack }) {
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 4px", letterSpacing: "0.05em" }}>MEMBER SINCE</p>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
               {new Date(parent?.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+            </p>
+          </div>
+        </div>
+
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>LEGAL</p>
+
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem" }}>
+          <div onClick={() => setView("terms")}
+            style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>Terms of Service</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>
+                {tosConsent
+                  ? `v${tosConsent.document_version} · agreed ${new Date(tosConsent.consented_at).toLocaleDateString()}`
+                  : "Not yet agreed"}
+              </p>
+            </div>
+            <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+          </div>
+          <div onClick={() => setView("privacy")}
+            style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>Privacy Policy</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>
+                {privacyConsent
+                  ? `v${privacyConsent.document_version} · agreed ${new Date(privacyConsent.consented_at).toLocaleDateString()}`
+                  : "Not yet agreed"}
+              </p>
+            </div>
+            <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+          </div>
+          <div style={{ padding: "1rem 1.25rem" }}>
+            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 4px" }}>Request data deletion</p>
+            <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>
+              Email <span style={{ color: "#02C39A" }}>admin@huddlefamilies.com</span> to request account and data deletion
             </p>
           </div>
         </div>
