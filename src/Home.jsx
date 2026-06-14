@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
 
-export default function Home({ session }) {
+export default function Home({ session, notificationCount, onBellClick }) {
   const [parent, setParent] = useState(null);
   const [children, setChildren] = useState([]);
   const [classmates, setClassmates] = useState([]);
@@ -162,7 +162,6 @@ export default function Home({ session }) {
     setChildLoading(false);
   };
 
-  const signOut = async () => { await supabase.auth.signOut(); };
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
   const childrenBySchool = children.reduce((acc, child) => {
@@ -222,6 +221,22 @@ export default function Home({ session }) {
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <button
+            onClick={onBellClick}
+            style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
+            🔔
+            {notificationCount > 0 && (
+              <span style={{
+                position: "absolute", top: 0, right: 0,
+                background: "#E05A5A", color: "#FFFFFF",
+                fontSize: "0.6rem", fontWeight: "700",
+                borderRadius: "50%", width: "16px", height: "16px",
+                display: "flex", alignItems: "center", justifyContent: "center"
+              }}>
+                {notificationCount}
+              </span>
+            )}
+          </button>
           <span onClick={() => setShowProfile(true)} style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
             Hi, {parent?.name?.split(" ")[0]}!
           </span>
@@ -373,9 +388,7 @@ export default function Home({ session }) {
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
                   {newSchoolResults.map(school => (
                     <div key={school.id} onClick={() => selectNewSchool(school)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
                       🏫 {school.name}
                     </div>
                   ))}
@@ -405,9 +418,7 @@ export default function Home({ session }) {
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
                   {newTeacherResults.filter(t => t.toLowerCase().includes(newChildTeacher.toLowerCase())).map(teacher => (
                     <div key={teacher} onClick={() => { setNewChildTeacher(teacher); setShowNewTeacherDropdown(false); }}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
                       📚 {teacher}
                     </div>
                   ))}
