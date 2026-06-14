@@ -12,6 +12,11 @@ export default function NavBar(props) {
     { id: "profile", label: "Profile", icon: "👤" },
   ];
 
+  const haloStyles = {
+    teal: { background: "rgba(2, 195, 154, 0.22)", border: "1px solid rgba(2, 195, 154, 0.45)" },
+    amber: { background: "rgba(245, 158, 11, 0.22)", border: "1px solid rgba(245, 158, 11, 0.55)" },
+  };
+
   const handleClick = (tabId) => {
     if (typeof onNavigate === "function") {
       onNavigate(tabId);
@@ -27,7 +32,8 @@ export default function NavBar(props) {
     }}>
       {tabs.map((tab) => {
         const badgeCount = badges[tab.id] || 0;
-        const hasHalo = !!halos[tab.id];
+        const haloColor = halos[tab.id];
+        const halo = haloColor ? haloStyles[haloColor] : null;
         return (
           <button
             key={tab.id}
@@ -43,7 +49,7 @@ export default function NavBar(props) {
               padding: "0.25rem 0.75rem",
             }}>
             <span style={{ position: "relative", fontSize: "1.4rem", lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              {hasHalo && (
+              {halo && (
                 <span style={{
                   position: "absolute",
                   top: "50%",
@@ -52,8 +58,8 @@ export default function NavBar(props) {
                   width: "38px",
                   height: "38px",
                   borderRadius: "50%",
-                  background: "rgba(2, 195, 154, 0.22)",
-                  border: "1px solid rgba(2, 195, 154, 0.45)",
+                  background: halo.background,
+                  border: halo.border,
                   zIndex: 0,
                 }} />
               )}

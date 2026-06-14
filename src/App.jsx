@@ -21,7 +21,7 @@ export default function App() {
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
-  const [hasActivePlaydates, setHasActivePlaydates] = useState(false);
+  const [playdateHalo, setPlaydateHalo] = useState(null); // "amber" | "teal" | null
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -96,7 +96,9 @@ export default function App() {
   };
 
   // Bell = people/communications. Playdate badge = un-RSVP'd invites (needs action).
-  // Halo = any future, non-declined playdate my household is part of (in motion).
+  // Halo color: amber if any live playdate is unsettled (maybe/unanswered),
+  //   teal if there's ≥1 live settled playdate (going/hosting) and no unsettled ones,
+  //   null if nothing live.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -124,42 +126,55 @@ export default function App() {
 
     if (!myHh) {
       setPlaydateBadge(0);
-      setHasActivePlaydates(false);
+      setPlaydateHalo(null);
       return;
     }
 
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
 
-    // --- Playdate badge: un-RSVP'd invites ---
-    const { data: invites } = await supabase
+    // --- Playdate badge: un-RSVP'd invites (future only) ---
+    // --- Halo: scan all my household's future playdates ---
+    let hasUnsettled = false; // maybe OR unanswered invite
+    let hasSettled = false;   // going, or hosting an active event
+    let unrepliedCount = 0;
+
+    // Invites to my household.
+    const { data: myInv } = await supabase
       .from("playdate_invites")
-      .select("id")
-      .eq("household_id", myHh.household_id)
-      .eq("rsvp", "invited");
-    setPlaydateBadge(invites ? invites.length : 0);
+      .select("rsvp, playdates(proposed_date, organizer_household_id)")
+      .eq("household_id", myHh.household_id);
 
-    // --- Halo: any future playdate my household is in (hosting or invited, not declined) ---
-    // Playdates I host that are in the future.
-    const { data: hosting } = await supabase
-      .from("playdates")
-      .select("id")
-      .eq("organizer_household_id", myHh.household_id)
-      .gte("proposed_date", nowIso)
-      .limit(1);
-
-    let active = (hosting && hosting.length > 0);
-
-    if (!active) {
-      // Invites to me (not declined) whose playdate is in the future.
-      const { data: myInv } = await supabase
-        .from("playdate_invites")
-        .select("rsvp, playdates(proposed_date)")
-        .eq("household_id", myHh.household_id)
-        .neq("rsvp", "no");
-      active = (myInv || []).some((i) => i.playdates && new Date(i.playdates.proposed_date) >= new Date(nowIso));
+    for (const inv of (myInv || [])) {
+      const pd = inv.playdates;
+      if (!pd) continue;
+      if (pd.organizer_household_id === myHh.household_id) continue; // counted as hosting below
+      const future = new Date(pd.proposed_date).getTime() >= nowMs;
+      if (!future) continue;
+      if (inv.rsvp === "invited") { hasUnsettled = true; unrepliedCount++; }
+      else if (inv.rsvp === "maybe") { hasUnsettled = true; }
+      else if (inv.rsvp === "yes") { hasSettled = true; }
+      // "no" → ignored
     }
 
-    setHasActivePlaydates(active);
+    // Playdates I host that are in the future and still have a live guest
+    // (at least one invite that isn't declined).
+    const { data: hosting } = await supabase
+      .from("playdates")
+      .select("id, proposed_date")
+      .eq("organizer_household_id", myHh.household_id)
+      .gte("proposed_date", new Date(nowMs).toISOString());
+
+    for (const pd of (hosting || [])) {
+      const { data: invs } = await supabase
+        .from("playdate_invites")
+        .select("rsvp")
+        .eq("playdate_id", pd.id);
+      const anyLive = (invs || []).some((i) => i.rsvp !== "no");
+      if (anyLive) hasSettled = true; // host is "set" for their own active event
+    }
+
+    setPlaydateBadge(unrepliedCount);
+    setPlaydateHalo(hasUnsettled ? "amber" : (hasSettled ? "teal" : null));
   };
 
   const handleNavigate = (tabId) => {
@@ -217,7 +232,7 @@ export default function App() {
         active={activeTab}
         onNavigate={handleNavigate}
         badges={{ playdates: playdateBadge }}
-        halos={{ playdates: hasActivePlaydates }}
+        halos={{ playdates: playdateHalo }}
       />
     </div>
   );
