@@ -14,8 +14,15 @@ export default function Search({ session }) {
     fetchMyData();
   }, []);
 
+  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
+  const shortName = (fullName) => {
+    if (!fullName) return "A parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
   const fetchMyData = async () => {
-    // Get my household
     const { data: hm } = await supabase
       .from("household_members")
       .select("household_id")
@@ -25,7 +32,6 @@ export default function Search({ session }) {
     if (!hm) return;
     setMyHouseholdId(hm.household_id);
 
-    // Get my classroom memberships to find my school IDs
     const { data: memberships } = await supabase
       .from("classroom_members")
       .select("classrooms(school_id)")
@@ -34,7 +40,6 @@ export default function Search({ session }) {
     const schoolIds = [...new Set((memberships || []).map(m => m.classrooms?.school_id).filter(Boolean))];
     setMySchoolIds(schoolIds);
 
-    // Get my connections
     const { data: conns } = await supabase
       .from("connections")
       .select("*")
@@ -50,7 +55,6 @@ export default function Search({ session }) {
     }
     setLoading(true);
 
-    // Find parents whose name matches
     const { data: parents } = await supabase
       .from("parents")
       .select("*")
@@ -64,7 +68,6 @@ export default function Search({ session }) {
       return;
     }
 
-    // For each parent, find their household and check if they share a school with me
     const enriched = [];
     for (const parent of parents) {
       const { data: hm } = await supabase
@@ -155,7 +158,7 @@ export default function Search({ session }) {
         />
       </div>
 
-      <div style={{ padding: "1rem 1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+      <div style={{ padding: "1rem 1.5rem", maxWidth: "600px", margin: "0 auto"}}>
 
         {message && (
           <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "10px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
@@ -192,7 +195,7 @@ export default function Search({ session }) {
           return (
             <div key={parent.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent:"center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
                   {parent.photo_url ? (
                     <img src={parent.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
@@ -200,7 +203,7 @@ export default function Search({ session }) {
                   )}
                 </div>
                 <div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{parent.name}</p>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(parent.name)}</p>
                   <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{classroomLabel || "Same school"}</p>
                 </div>
               </div>

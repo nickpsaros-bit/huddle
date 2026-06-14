@@ -69,7 +69,7 @@ If another user makes you feel unsafe or behaves inappropriately, you can discon
 
 ## 6. Safety and child welfare
 
-Huddle takes child safety seriously. If you ever witness or suspect any activity on Huddle that could harm a child — including grooming, predatory behavior, attempts to identify or contact children, or sharing of inappropriate content about minors — report it immediately to nickpsaros@gmail.com and to local law enforcement.
+Huddle takes child safety seriously. If you ever witness or suspect any activity on Huddle that could harm a child — including grooming, predatory behavior, attempts to identify or contact children, or sharing of inappropriate content about minors — report it immediately to admin@huddlefamilies.com and to local law enforcement.
 
 We will cooperate fully with law enforcement and may suspend or terminate accounts at any time, without notice, if we believe a user poses a risk to child safety.
 
@@ -113,7 +113,7 @@ These Terms are governed by the laws of the State of California, without regard 
 If you have questions about these Terms, contact:
 
 **Huddle**
-Email: nickpsaros@gmail.com
+Email: admin@huddlefamilies.com
 
 ---
 
@@ -214,7 +214,7 @@ We may update this Privacy Policy from time to time. If we make material changes
 If you have questions or concerns about this Privacy Policy or your information, please contact:
 
 **Huddle**
-Email: nickpsaros@gmail.com
+Email: admin@huddlefamilies.com
 
 ---
 
