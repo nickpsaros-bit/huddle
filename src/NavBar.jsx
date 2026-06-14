@@ -1,11 +1,20 @@
-export default function NavBar({ active, onNavigate }) {
+export default function NavBar(props) {
+  const active = props.active;
+  const onNavigate = props.onNavigate;
+
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
     { id: "search", label: "Search", icon: "🔍" },
+    { id: "network", label: "Network", icon: "🤝" },
     { id: "playdates", label: "Playdates", icon: "📅" },
-    { id: "messages", label: "Messages", icon: "💬" },
     { id: "profile", label: "Profile", icon: "👤" },
   ];
+
+  const handleClick = (tabId) => {
+    if (typeof onNavigate === "function") {
+      onNavigate(tabId);
+    }
+  };
 
   return (
     <div style={{
@@ -15,11 +24,18 @@ export default function NavBar({ active, onNavigate }) {
       padding: "0.5rem 0 1rem", zIndex: 50,
     }}>
       {tabs.map((tab) => (
-        <button key={tab.id} onClick={() => onNavigate(tab.id)}
+        <button
+          key={tab.id}
+          onClick={() => handleClick(tab.id)}
           style={{
-            background: "transparent", border: "none",
-            display: "flex", flexDirection: "column", alignItems: "center",
-            gap: "4px", cursor: "pointer", padding: "0.25rem 0.75rem",
+            background: "transparent",
+            border: "none",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "4px",
+            cursor: "pointer",
+            padding: "0.25rem 0.75rem",
           }}>
           <span style={{ fontSize: "1.4rem" }}>{tab.icon}</span>
           <span style={{

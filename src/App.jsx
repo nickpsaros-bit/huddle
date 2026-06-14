@@ -1,37 +1,114 @@
-export default function NavBar({ active, onNavigate }) {
-  const tabs = [
-    { id: "home", label: "Home", icon: "🏠" },
-    { id: "search", label: "Search", icon: "🔍" },
-    { id: "network", label: "Network", icon: "🤝" },
-    { id: "playdates", label: "Playdates", icon: "📅" },
-    { id: "profile", label: "Profile", icon: "👤" },
-  ];
+import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
+import Auth from "./Auth";
+import Profile from "./Profile";
+import Home from "./Home";
+import NavBar from "./NavBar";
+import ProfileScreen from "./ProfileScreen";
+import Search from "./Search";
+import Inbox from "./Inbox";
+import Network from "./Network";
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [hasProfile, setHasProfile] = useState(false);
+  const [activeTab, setActiveTab] = useState("home");
+  const [showInbox, setShowInbox] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) {
+        checkProfile(session.user.id);
+        fetchNotificationCount(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        if (session) {
+          checkProfile(session.user.id);
+          fetchNotificationCount(session.user.id);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const checkProfile = async (userId) => {
+    const { data } = await supabase
+      .from("parents")
+      .select("id, name")
+      .eq("id", userId)
+      .single();
+    if (data && data.name) setHasProfile(true);
+  };
+
+  const fetchNotificationCount = async (userId) => {
+    const { data } = await supabase
+      .from("connections")
+      .select("id")
+      .eq("recipient_id", userId)
+      .eq("status", "pending");
+    setNotificationCount(data ? data.length : 0);
+  };
+
+  const handleNavigate = (tabId) => {
+    setActiveTab(tabId);
+  };
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.5rem" }}>Huddle</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Auth onAuth={() => {}} />;
+  }
+
+  if (!hasProfile) {
+    return <Profile session={session} onComplete={() => setHasProfile(true)} />;
+  }
+
+  if (showInbox) {
+    return <Inbox session={session} onBack={() => { setShowInbox(false); fetchNotificationCount(session.user.id); }} />;
+  }
+
+  let screen;
+  if (activeTab === "home") {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+  } else if (activeTab === "search") {
+    screen = <Search session={session} />;
+  } else if (activeTab === "network") {
+    screen = <Network session={session} />;
+  } else if (activeTab === "playdates") {
+    screen = (
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>📅</p>
+        <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Playdates</p>
+        <p style={{ color: "#607080", fontSize: "0.9rem" }}>Coming soon!</p>
+      </div>
+    );
+  } else if (activeTab === "profile") {
+    screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
+  } else {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+  }
 
   return (
-    <div style={{
-      position: "fixed", bottom: 0, left: 0, right: 0,
-      background: "#162D50", borderTop: "1px solid #2A4A6B",
-      display: "flex", justifyContent: "space-around",
-      padding: "0.5rem 0 1rem", zIndex: 50,
-    }}>
-      {tabs.map((tab) => (
-        <button key={tab.id} onClick={() => onNavigate(tab.id)}
-          style={{
-            background: "transparent", border: "none",
-            display: "flex", flexDirection: "column", alignItems: "center",
-            gap: "4px", cursor: "pointer", padding: "0.25rem 0.75rem",
-          }}>
-          <span style={{ fontSize: "1.4rem" }}>{tab.icon}</span>
-          <span style={{
-            fontSize: "0.65rem",
-            color: active === tab.id ? "#02C39A" : "#607080",
-            fontFamily: "system-ui, sans-serif",
-            fontWeight: active === tab.id ? "600" : "400",
-          }}>
-            {tab.label}
-          </span>
-        </button>
-      ))}
+    <div>
+      <div style={{ paddingBottom: "70px" }}>
+        {screen}
+      </div>
+      <NavBar active={activeTab} onNavigate={handleNavigate} />
     </div>
   );
 }
