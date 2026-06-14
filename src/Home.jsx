@@ -33,10 +33,10 @@ export default function Home({ session, notificationCount, onBellClick }) {
     const { data: parentData } = await supabase.from("parents").select("*").eq("id", session.user.id).single();
     setParent(parentData);
 
-    const { data: childrenData } = await supabase
+   const { data: childrenData } = await supabase
       .from("children")
       .select("*, classroom_members(*, classrooms(id, teacher_name, grade, school_year, school_id, schools(id, name)))")
-      .eq("parent_id", session.user.id);
+      .or(`parent_id.eq.${session.user.id},co_parent_id.eq.${session.user.id}`);
     setChildren(childrenData || []);
 
     if (!childrenData || childrenData.length === 0) { setLoading(false); return; }
