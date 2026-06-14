@@ -95,10 +95,10 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Bell = people/communications. Playdate badge = un-RSVP'd invites (needs action).
-  // Halo color: amber if any live playdate is unsettled (maybe/unanswered),
-  //   teal if there's ≥1 live settled playdate (going/hosting) and no unsettled ones,
-  //   null if nothing live.
+  // Bell = people/communications. Playdate badge = un-RSVP'd invites.
+  // Halo: amber if ANY live (upcoming, non-declined) invite — mine or, when I
+  //   host, any guest's — is "maybe" or unanswered. Teal if there's a confirmed
+  //   "going" and no maybes/unanswered. Null if nothing live.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -131,14 +131,11 @@ export default function App() {
     }
 
     const nowMs = Date.now();
-
-    // --- Playdate badge: un-RSVP'd invites (future only) ---
-    // --- Halo: scan all my household's future playdates ---
-    let hasUnsettled = false; // maybe OR unanswered invite
-    let hasSettled = false;   // going, or hosting an active event
+    let hasMaybeOrUnanswered = false;
+    let hasGoing = false;
     let unrepliedCount = 0;
 
-    // Invites to my household.
+    // Invites TO my household.
     const { data: myInv } = await supabase
       .from("playdate_invites")
       .select("rsvp, playdates(proposed_date, organizer_household_id)")
@@ -147,17 +144,14 @@ export default function App() {
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue; // counted as hosting below
-      const future = new Date(pd.proposed_date).getTime() >= nowMs;
-      if (!future) continue;
-      if (inv.rsvp === "invited") { hasUnsettled = true; unrepliedCount++; }
-      else if (inv.rsvp === "maybe") { hasUnsettled = true; }
-      else if (inv.rsvp === "yes") { hasSettled = true; }
-      // "no" → ignored
+      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
+      if (new Date(pd.proposed_date).getTime() < nowMs) continue; // past
+      if (inv.rsvp === "invited") { hasMaybeOrUnanswered = true; unrepliedCount++; }
+      else if (inv.rsvp === "maybe") { hasMaybeOrUnanswered = true; }
+      else if (inv.rsvp === "yes") { hasGoing = true; }
     }
 
-    // Playdates I host that are in the future and still have a live guest
-    // (at least one invite that isn't declined).
+    // Playdates I HOST (future) — inspect each guest's RSVP.
     const { data: hosting } = await supabase
       .from("playdates")
       .select("id, proposed_date")
@@ -169,12 +163,15 @@ export default function App() {
         .from("playdate_invites")
         .select("rsvp")
         .eq("playdate_id", pd.id);
-      const anyLive = (invs || []).some((i) => i.rsvp !== "no");
-      if (anyLive) hasSettled = true; // host is "set" for their own active event
+      const list = invs || [];
+      const anyMaybeOrUnanswered = list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited");
+      const anyGoing = list.some((i) => i.rsvp === "yes");
+      if (anyMaybeOrUnanswered) hasMaybeOrUnanswered = true;
+      if (anyGoing) hasGoing = true;
     }
 
     setPlaydateBadge(unrepliedCount);
-    setPlaydateHalo(hasUnsettled ? "amber" : (hasSettled ? "teal" : null));
+    setPlaydateHalo(hasMaybeOrUnanswered ? "amber" : (hasGoing ? "teal" : null));
   };
 
   const handleNavigate = (tabId) => {
