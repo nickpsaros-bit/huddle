@@ -21,6 +21,7 @@ export default function App() {
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
+  const [hasActivePlaydates, setHasActivePlaydates] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -94,8 +95,8 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Bell = people/communications (connection + household-link requests).
-  // Playdate badge = un-RSVP'd playdate invites for my household.
+  // Bell = people/communications. Playdate badge = un-RSVP'd invites (needs action).
+  // Halo = any future, non-declined playdate my household is part of (in motion).
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -121,22 +122,48 @@ export default function App() {
     }
     setNotificationCount(bell);
 
-    // --- Playdate badge ---
-    let pd = 0;
-    if (myHh) {
-      const { data: invites } = await supabase
-        .from("playdate_invites")
-        .select("id")
-        .eq("household_id", myHh.household_id)
-        .eq("rsvp", "invited");
-      pd = invites ? invites.length : 0;
+    if (!myHh) {
+      setPlaydateBadge(0);
+      setHasActivePlaydates(false);
+      return;
     }
-    setPlaydateBadge(pd);
+
+    const nowIso = new Date().toISOString();
+
+    // --- Playdate badge: un-RSVP'd invites ---
+    const { data: invites } = await supabase
+      .from("playdate_invites")
+      .select("id")
+      .eq("household_id", myHh.household_id)
+      .eq("rsvp", "invited");
+    setPlaydateBadge(invites ? invites.length : 0);
+
+    // --- Halo: any future playdate my household is in (hosting or invited, not declined) ---
+    // Playdates I host that are in the future.
+    const { data: hosting } = await supabase
+      .from("playdates")
+      .select("id")
+      .eq("organizer_household_id", myHh.household_id)
+      .gte("proposed_date", nowIso)
+      .limit(1);
+
+    let active = (hosting && hosting.length > 0);
+
+    if (!active) {
+      // Invites to me (not declined) whose playdate is in the future.
+      const { data: myInv } = await supabase
+        .from("playdate_invites")
+        .select("rsvp, playdates(proposed_date)")
+        .eq("household_id", myHh.household_id)
+        .neq("rsvp", "no");
+      active = (myInv || []).some((i) => i.playdates && new Date(i.playdates.proposed_date) >= new Date(nowIso));
+    }
+
+    setHasActivePlaydates(active);
   };
 
   const handleNavigate = (tabId) => {
     setActiveTab(tabId);
-    // Opening Playdates clears the badge after a moment (they've seen it).
     if (tabId === "playdates" && session) {
       setTimeout(() => fetchCounts(session.user.id), 1500);
     }
@@ -186,7 +213,12 @@ export default function App() {
       <div style={{ paddingBottom: "70px" }}>
         {screen}
       </div>
-      <NavBar active={activeTab} onNavigate={handleNavigate} badges={{ playdates: playdateBadge }} />
+      <NavBar
+        active={activeTab}
+        onNavigate={handleNavigate}
+        badges={{ playdates: playdateBadge }}
+        halos={{ playdates: hasActivePlaydates }}
+      />
     </div>
   );
 }

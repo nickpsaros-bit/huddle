@@ -2,6 +2,7 @@ export default function NavBar(props) {
   const active = props.active;
   const onNavigate = props.onNavigate;
   const badges = props.badges || {};
+  const halos = props.halos || {};
 
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
@@ -26,6 +27,7 @@ export default function NavBar(props) {
     }}>
       {tabs.map((tab) => {
         const badgeCount = badges[tab.id] || 0;
+        const hasHalo = !!halos[tab.id];
         return (
           <button
             key={tab.id}
@@ -40,13 +42,28 @@ export default function NavBar(props) {
               cursor: "pointer",
               padding: "0.25rem 0.75rem",
             }}>
-            <span style={{ position: "relative", fontSize: "1.4rem", lineHeight: 1 }}>
-              {tab.icon}
+            <span style={{ position: "relative", fontSize: "1.4rem", lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              {hasHalo && (
+                <span style={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  width: "38px",
+                  height: "38px",
+                  borderRadius: "50%",
+                  background: "rgba(2, 195, 154, 0.22)",
+                  border: "1px solid rgba(2, 195, 154, 0.45)",
+                  zIndex: 0,
+                }} />
+              )}
+              <span style={{ position: "relative", zIndex: 1 }}>{tab.icon}</span>
               {badgeCount > 0 && (
                 <span style={{
                   position: "absolute",
                   top: "-6px",
                   right: "-10px",
+                  zIndex: 2,
                   background: "#E05A5A",
                   color: "#FFFFFF",
                   fontSize: "0.6rem",
