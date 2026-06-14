@@ -2,16 +2,16 @@ import { useState } from "react";
 import { supabase } from "./supabase";
 
 export default function Profile({ session, onComplete }) {
-  const [step, setStep] = useState("parent");
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Step 1: parent info
   const [parentName, setParentName] = useState("");
-  const [childName, setChildName] = useState("");
-  const [childGrade, setChildGrade] = useState("");
-  const [allergies, setAllergies] = useState("");
-  const [medicalNotes, setMedicalNotes] = useState("");
-  const [teacherName, setTeacherName] = useState("");
+
+  // Step 2: classroom info
+  const [grade, setGrade] = useState("");
+  const [teacher, setTeacher] = useState("");
   const [schoolSearch, setSchoolSearch] = useState("");
   const [schoolResults, setSchoolResults] = useState([]);
   const [selectedSchool, setSelectedSchool] = useState(null);
@@ -19,14 +19,13 @@ export default function Profile({ session, onComplete }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const [showTeacherDropdown, setShowTeacherDropdown] = useState(false);
 
-  const grades = [
-    "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade",
-    "4th Grade", "5th Grade", "6th Grade"
-  ];
+  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   const searchSchools = async (query) => {
     setSchoolSearch(query);
     setSelectedSchool(null);
+    setTeacherResults([]);
+    setTeacher("");
     if (query.length < 2) { setSchoolResults([]); setShowSchoolDropdown(false); return; }
     const { data } = await supabase.from("schools").select("*").ilike("name", `%${query}%`).limit(5);
     setSchoolResults(data || []);
@@ -42,159 +41,174 @@ export default function Profile({ session, onComplete }) {
     setTeacherResults(unique);
   };
 
+  const teacherMismatch = teacherResults.length > 0 && teacher &&
+    !teacherResults.find(t => t.toLowerCase() === teacher.toLowerCase());
+
+  const saveStep1 = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      // Insert or update parent record
+      const { error: parentErr } = await supabase.from("parents").upsert({
+        id: session.user.id,
+        name: parentName,
+      });
+      if (parentErr) throw parentErr;
+
+      // Create a new household for this parent
+      const { data: household, error: hhErr } = await supabase
+        .from("households")
+        .insert({})
+        .select()
+        .single();
+      if (hhErr) throw hhErr;
+
+      // Add this parent to the household
+      const { error: memberErr } = await supabase
+        .from("household_members")
+        .insert({
+          household_id: household.id,
+          parent_id: session.user.id,
+          role: "primary",
+        });
+      if (memberErr) throw memberErr;
+
+      setStep(2);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  const saveStep2 = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      // Get my household_id
+      const { data: hm, error: hmErr } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", session.user.id)
+        .single();
+      if (hmErr) throw hmErr;
+
+      // School: either existing or new
+      let school;
+      if (selectedSchool) {
+        school = selectedSchool;
+      } else {
+        const code = schoolSearch.toUpperCase().replace(/\s+/g, "").slice(0, 10) + Date.now().toString().slice(-4);
+        const { data: newSchool, error: schoolErr } = await supabase.from("schools")
+          .insert({ name: schoolSearch, activation_code: code })
+          .select().single();
+        if (schoolErr) throw schoolErr;
+        school = newSchool;
+      }
+
+      const currentYear = new Date().getFullYear();
+      const schoolYear = `${currentYear}-${currentYear + 1}`;
+
+      // Classroom: either existing or new
+      let classroom;
+      const { data: existing } = await supabase.from("classrooms").select()
+        .eq("school_id", school.id)
+        .eq("teacher_name", teacher)
+        .eq("school_year", schoolYear)
+        .maybeSingle();
+      if (existing) {
+        classroom = existing;
+      } else {
+        const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
+          .insert({ school_id: school.id, teacher_name: teacher, grade: grades.indexOf(grade), school_year: schoolYear })
+          .select().single();
+        if (classroomErr) throw classroomErr;
+        classroom = newClassroom;
+      }
+
+      // Add the household as a classroom member
+      const { error: memberErr } = await supabase.from("classroom_members").insert({
+        household_id: hm.household_id,
+        classroom_id: classroom.id,
+        school_year: schoolYear,
+      });
+      if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
+
+      onComplete();
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
   const inputStyle = {
     width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  const labelStyle = {
-    color: "#8AAEC8", fontSize: "0.85rem", marginBottom: "0.4rem", display: "block"
-  };
-
-  const buttonStyle = {
-    width: "100%", padding: "0.85rem", borderRadius: "10px",
-    border: "none", background: "#02C39A", color: "#0F2044",
-    fontSize: "1rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem"
-  };
-
-  const saveProfile = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const { error: parentError } = await supabase
-        .from("parents").upsert({ id: session.user.id, name: parentName });
-      if (parentError) throw parentError;
-
-      const { data: child, error: childError } = await supabase
-        .from("children")
-        .insert({
-          parent_id: session.user.id, name: childName,
-          grade: grades.indexOf(childGrade),
-          allergies: allergies || null, medical_notes: medicalNotes || null,
-        }).select().single();
-      if (childError) throw childError;
-
-      let school;
-      if (selectedSchool) {
-        school = selectedSchool;
-      } else {
-        const code = schoolSearch.toUpperCase().replace(/\s+/g, "").slice(0, 10) + Date.now().toString().slice(-4);
-        const { data: newSchool, error: schoolError } = await supabase
-          .from("schools").insert({ name: schoolSearch, activation_code: code }).select().single();
-        if (schoolError) throw schoolError;
-        school = newSchool;
-      }
-
-      const currentYear = new Date().getFullYear();
-      const schoolYear = `${currentYear}-${currentYear + 1}`;
-      let classroom;
-      const { data: existingClassroom } = await supabase.from("classrooms").select()
-        .eq("school_id", school.id).eq("teacher_name", teacherName).eq("school_year", schoolYear).maybeSingle();
-      if (existingClassroom) {
-        classroom = existingClassroom;
-      } else {
-        const { data: newClassroom, error: classroomError } = await supabase.from("classrooms")
-          .insert({ school_id: school.id, teacher_name: teacherName, grade: grades.indexOf(childGrade), school_year: schoolYear })
-          .select().single();
-        if (classroomError) throw classroomError;
-        classroom = newClassroom;
-      }
-
-      await supabase.from("classroom_members").insert({
-        child_id: child.id, classroom_id: classroom.id, school_year: schoolYear,
-      });
-
-      onComplete();
-    } catch (err) { setError(err.message); }
-    setLoading(false);
-  };
-
-  const teacherMismatch = teacherResults.length > 0 && teacherName &&
-    !teacherResults.find(t => t.toLowerCase() === teacherName.toLowerCase());
-
   return (
-    <div style={{
-      minHeight: "100vh", background: "#0F2044", display: "flex",
-      flexDirection: "column", alignItems: "center", justifyContent: "center",
-      padding: "2rem", fontFamily: "system-ui, sans-serif"
-    }}>
-      <h1 style={{ color: "#02C39A", fontSize: "2rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Huddle</h1>
-      <p style={{ color: "#B0C4D8", fontSize: "0.9rem", margin: "0 0 2rem" }}>Let's set up your profile</p>
+    <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: "1.5rem" }}>
+      <div style={{ width: "100%", maxWidth: "440px" }}>
 
-      <div style={{ background: "#162D50", borderRadius: "16px", padding: "2rem", width: "100%", maxWidth: "400px" }}>
+        <h1 style={{ color: "#02C39A", fontSize: "2rem", fontWeight: "700", margin: "0 0 0.5rem", textAlign: "center" }}>Huddle</h1>
+        <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 2rem", textAlign: "center" }}>The social app for school families</p>
 
-        {/* Progress bar */}
-        <div style={{ display: "flex", gap: "8px", marginBottom: "1.5rem" }}>
-          {["parent", "child", "school"].map((s, i) => (
-            <div key={s} style={{
-              flex: 1, height: "4px", borderRadius: "2px",
-              background: s === step ? "#02C39A" :
-                (["parent", "child", "school"].indexOf(step) > i ? "#028090" : "#2A4A6B")
+        {/* Step indicator */}
+        <div style={{ display: "flex", gap: "8px", marginBottom: "2rem", justifyContent: "center" }}>
+          {[1, 2].map(n => (
+            <div key={n} style={{
+              width: step >= n ? "32px" : "8px",
+              height: "8px",
+              borderRadius: "4px",
+              background: step >= n ? "#02C39A" : "#2A4A6B",
+              transition: "all 0.3s"
             }} />
           ))}
         </div>
 
-        {step === "parent" && (
-          <>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>About you</h2>
-            <label style={labelStyle}>Your full name</label>
+        {/* Step 1: Parent info */}
+        {step === 1 && (
+          <div>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>Welcome!</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem" }}>Let's get to know you. What's your name?</p>
+
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Your full name</label>
             <input type="text" placeholder="Jane Smith" value={parentName}
               onChange={(e) => setParentName(e.target.value)} style={inputStyle} />
-            <button onClick={() => setStep("child")} disabled={!parentName}
-              style={{ ...buttonStyle, background: !parentName ? "#2A4A6B" : "#02C39A", cursor: !parentName ? "not-allowed" : "pointer" }}>
-              Next →
+
+            {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
+
+            <button onClick={saveStep1} disabled={!parentName || loading}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none",
+                background: !parentName ? "#2A4A6B" : "#02C39A", color: "#0F2044",
+                fontSize: "1rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem" }}>
+              {loading ? "Saving..." : "Continue →"}
             </button>
-          </>
+          </div>
         )}
 
-        {step === "child" && (
-          <>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>About your child</h2>
-            <label style={labelStyle}>Child's name</label>
-            <input type="text" placeholder="Emma Smith" value={childName}
-              onChange={(e) => setChildName(e.target.value)} style={inputStyle} />
-            <label style={labelStyle}>Grade</label>
-            <select value={childGrade} onChange={(e) => setChildGrade(e.target.value)}
-              style={{ ...inputStyle, appearance: "none" }}>
+        {/* Step 2: Classroom info */}
+        {step === 2 && (
+          <div>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>Add a classroom</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem" }}>Tell us about your child's classroom. You can add more later.</p>
+
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
+            <select value={grade} onChange={(e) => setGrade(e.target.value)} style={inputStyle}>
               <option value="">Select grade...</option>
               {grades.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
-            <label style={labelStyle}>Allergies (optional)</label>
-            <input type="text" placeholder="e.g. peanuts, dairy" value={allergies}
-              onChange={(e) => setAllergies(e.target.value)} style={inputStyle} />
-            <label style={labelStyle}>Medical notes (optional)</label>
-            <input type="text" placeholder="e.g. carries EpiPen" value={medicalNotes}
-              onChange={(e) => setMedicalNotes(e.target.value)} style={inputStyle} />
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setStep("parent")}
-                style={{ ...buttonStyle, background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", flex: 1 }}>
-                ← Back
-              </button>
-              <button onClick={() => setStep("school")} disabled={!childName || !childGrade}
-                style={{ ...buttonStyle, background: (!childName || !childGrade) ? "#2A4A6B" : "#02C39A", cursor: (!childName || !childGrade) ? "not-allowed" : "pointer", flex: 2 }}>
-                Next →
-              </button>
-            </div>
-          </>
-        )}
 
-        {step === "school" && (
-          <>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Your school</h2>
-
-            <label style={labelStyle}>School name</label>
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
             <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text" placeholder="Start typing your school name..."
-                value={schoolSearch} onChange={(e) => searchSchools(e.target.value)}
+              <input type="text" placeholder="Start typing school name..." value={schoolSearch}
+                onChange={(e) => searchSchools(e.target.value)}
                 style={{ ...inputStyle, marginBottom: 0 }} />
               {showSchoolDropdown && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
                   {schoolResults.map(school => (
                     <div key={school.id} onClick={() => selectSchool(school)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
                       🏫 {school.name}
                     </div>
                   ))}
@@ -212,28 +226,26 @@ export default function Profile({ session, onComplete }) {
               </div>
             )}
 
-            <label style={labelStyle}>Teacher's name</label>
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
             <div style={{ position: "relative", marginBottom: "1rem" }}>
               <input type="text"
                 placeholder={teacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
-                value={teacherName}
-                onChange={(e) => { setTeacherName(e.target.value); setShowTeacherDropdown(e.target.value.length > 0); }}
+                value={teacher}
+                onChange={(e) => { setTeacher(e.target.value); setShowTeacherDropdown(e.target.value.length > 0); }}
                 onFocus={() => { if (teacherResults.length > 0) setShowTeacherDropdown(true); }}
                 style={{ ...inputStyle, marginBottom: 0, borderColor: teacherMismatch ? "#854F0B" : "#2A4A6B" }} />
               {showTeacherDropdown && teacherResults.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
-                  {teacherResults.filter(t => t.toLowerCase().includes(teacherName.toLowerCase())).map(teacher => (
-                    <div key={teacher} onClick={() => { setTeacherName(teacher); setShowTeacherDropdown(false); }}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#2A4A6B"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      📚 {teacher}
+                  {teacherResults.filter(t => t.toLowerCase().includes(teacher.toLowerCase())).map(t => (
+                    <div key={t} onClick={() => { setTeacher(t); setShowTeacherDropdown(false); }}
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                      📚 {t}
                     </div>
                   ))}
                   {teacherMismatch && (
                     <div onClick={() => setShowTeacherDropdown(false)}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
-                      + Add "{teacherName}" as a new teacher
+                      + Add "{teacher}" as a new teacher
                     </div>
                   )}
                 </div>
@@ -248,23 +260,15 @@ export default function Profile({ session, onComplete }) {
               </div>
             )}
 
-            <p style={{ color: "#607080", fontSize: "0.8rem", marginBottom: "1rem" }}>
-              Select your school then pick your teacher from the list, or add a new one.
-            </p>
-
             {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
 
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setStep("child")}
-                style={{ ...buttonStyle, background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", flex: 1 }}>
-                ← Back
-              </button>
-              <button onClick={saveProfile} disabled={!schoolSearch || !teacherName || loading}
-                style={{ ...buttonStyle, background: (!schoolSearch || !teacherName) ? "#2A4A6B" : "#02C39A", cursor: loading ? "not-allowed" : "pointer", flex: 2 }}>
-                {loading ? "Saving..." : "Let's go! →"}
-              </button>
-            </div>
-          </>
+            <button onClick={saveStep2} disabled={!grade || !schoolSearch || !teacher || loading}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none",
+                background: (!grade || !schoolSearch || !teacher) ? "#2A4A6B" : "#02C39A",
+                color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+              {loading ? "Saving..." : "Finish setup →"}
+            </button>
+          </div>
         )}
       </div>
     </div>

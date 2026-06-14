@@ -41,12 +41,36 @@ export default function App() {
   }, []);
 
   const checkProfile = async (userId) => {
-    const { data } = await supabase
+    // Profile is complete if: parent has name AND is in a household AND has at least 1 classroom
+    const { data: parentData } = await supabase
       .from("parents")
       .select("id, name")
       .eq("id", userId)
       .single();
-    if (data && data.name) setHasProfile(true);
+
+    if (!parentData || !parentData.name) {
+      setHasProfile(false);
+      return;
+    }
+
+    const { data: hm } = await supabase
+      .from("household_members")
+      .select("household_id")
+      .eq("parent_id", userId)
+      .single();
+
+    if (!hm) {
+      setHasProfile(false);
+      return;
+    }
+
+    const { data: memberships } = await supabase
+      .from("classroom_members")
+      .select("id")
+      .eq("household_id", hm.household_id)
+      .limit(1);
+
+    setHasProfile(memberships && memberships.length > 0);
   };
 
   const fetchNotificationCount = async (userId) => {

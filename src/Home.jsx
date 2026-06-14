@@ -5,24 +5,23 @@ import PlaydateRequest from "./PlaydateRequest";
 
 export default function Home({ session, notificationCount, onBellClick }) {
   const [parent, setParent] = useState(null);
-  const [children, setChildren] = useState([]);
-  const [classmates, setClassmates] = useState([]);
+  const [householdId, setHouseholdId] = useState(null);
+  const [memberships, setMemberships] = useState([]);
+  const [classmates, setClassmates] = useState({});
   const [loading, setLoading] = useState(true);
-  const [addingChild, setAddingChild] = useState(false);
-  const [editingChild, setEditingChild] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
-  const [newChildName, setNewChildName] = useState("");
-  const [newChildGrade, setNewChildGrade] = useState("");
-  const [newChildTeacher, setNewChildTeacher] = useState("");
+  const [addingClassroom, setAddingClassroom] = useState(false);
+  const [newGrade, setNewGrade] = useState("");
+  const [newTeacher, setNewTeacher] = useState("");
   const [newSchoolSearch, setNewSchoolSearch] = useState("");
   const [newSchoolResults, setNewSchoolResults] = useState([]);
   const [newSelectedSchool, setNewSelectedSchool] = useState(null);
   const [newTeacherResults, setNewTeacherResults] = useState([]);
   const [showNewSchoolDropdown, setShowNewSchoolDropdown] = useState(false);
   const [showNewTeacherDropdown, setShowNewTeacherDropdown] = useState(false);
-  const [childLoading, setChildLoading] = useState(false);
-  const [childError, setChildError] = useState("");
+  const [savingMembership, setSavingMembership] = useState(false);
+  const [membershipError, setMembershipError] = useState("");
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -30,50 +29,58 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
   const fetchData = async () => {
     setLoading(true);
-    const { data: parentData } = await supabase.from("parents").select("*").eq("id", session.user.id).single();
+
+    // Get parent info
+    const { data: parentData } = await supabase
+      .from("parents")
+      .select("*")
+      .eq("id", session.user.id)
+      .single();
     setParent(parentData);
 
-   const { data: childrenData } = await supabase
-      .from("children")
-      .select("*, classroom_members(*, classrooms(id, teacher_name, grade, school_year, school_id, schools(id, name)))")
-      .or(`parent_id.eq.${session.user.id},co_parent_id.eq.${session.user.id}`);
-    setChildren(childrenData || []);
+    // Get my household
+    const { data: householdMember } = await supabase
+      .from("household_members")
+      .select("household_id")
+      .eq("parent_id", session.user.id)
+      .single();
 
-    if (!childrenData || childrenData.length === 0) { setLoading(false); return; }
+    if (!householdMember) {
+      setLoading(false);
+      return;
+    }
 
-    const currentYear = new Date().getFullYear();
-    const schoolYear = `${currentYear}-${currentYear + 1}`;
-    const member = childrenData[0]?.classroom_members?.find(m => m.school_year === schoolYear);
-    if (!member) { setLoading(false); return; }
+    const hhId = householdMember.household_id;
+    setHouseholdId(hhId);
 
-    const { data: classmateMembers } = await supabase
+    // Get all classroom memberships for my household
+    const { data: membershipData } = await supabase
       .from("classroom_members")
-      .select("*, children(*, parents(*))")
-      .eq("classroom_id", member.classroom_id)
-      .eq("school_year", schoolYear);
+      .select("*, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
+      .eq("household_id", hhId);
+    setMemberships(membershipData || []);
 
-    setClassmates(classmateMembers?.filter(m => m.children?.parent_id !== session.user.id) || []);
+    // For each classroom, get other households in that classroom
+    const classmatesMap = {};
+    for (const m of (membershipData || [])) {
+      const { data: otherMembers } = await supabase
+        .from("classroom_members")
+        .select("*, households(id, household_members(parent_id, parents(id, name, photo_url)))")
+        .eq("classroom_id", m.classroom_id)
+        .eq("school_year", m.school_year)
+        .neq("household_id", hhId);
+      classmatesMap[m.id] = otherMembers || [];
+    }
+    setClassmates(classmatesMap);
+
     setLoading(false);
-  };
-
-  const uploadChildPhoto = async (e, childId) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const fileExt = file.name.split(".").pop();
-    const filePath = `child-${childId}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage.from("avatars").upload(filePath, file, { upsert: true });
-    if (uploadError) { console.error(uploadError); return; }
-const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(filePath);
-    const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
-    await supabase.from("children").update({ photo_url: cacheBustedUrl }).eq("id", childId);
-    fetchData();
   };
 
   const searchNewSchools = async (query) => {
     setNewSchoolSearch(query);
     setNewSelectedSchool(null);
     setNewTeacherResults([]);
-    setNewChildTeacher("");
+    setNewTeacher("");
     if (query.length < 2) { setNewSchoolResults([]); setShowNewSchoolDropdown(false); return; }
     const { data } = await supabase.from("schools").select("*").ilike("name", `%${query}%`).limit(5);
     setNewSchoolResults(data || []);
@@ -89,19 +96,13 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
     setNewTeacherResults(unique);
   };
 
-  const newTeacherMismatch = newTeacherResults.length > 0 && newChildTeacher &&
-    !newTeacherResults.find(t => t.toLowerCase() === newChildTeacher.toLowerCase());
+  const newTeacherMismatch = newTeacherResults.length > 0 && newTeacher &&
+    !newTeacherResults.find(t => t.toLowerCase() === newTeacher.toLowerCase());
 
-  const saveNewChild = async () => {
-    setChildLoading(true);
-    setChildError("");
+  const saveNewClassroom = async () => {
+    setSavingMembership(true);
+    setMembershipError("");
     try {
-      const { data: child, error: childErr } = await supabase
-        .from("children")
-        .insert({ parent_id: session.user.id, name: newChildName, grade: grades.indexOf(newChildGrade) })
-        .select().single();
-      if (childErr) throw childErr;
-
       let school;
       if (newSelectedSchool) {
         school = newSelectedSchool;
@@ -117,68 +118,41 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
       const schoolYear = `${currentYear}-${currentYear + 1}`;
       let classroom;
       const { data: existingClassroom } = await supabase.from("classrooms").select()
-        .eq("school_id", school.id).eq("teacher_name", newChildTeacher).eq("school_year", schoolYear).maybeSingle();
-      if (existingClassroom) { classroom = existingClassroom; }
-      else {
+        .eq("school_id", school.id).eq("teacher_name", newTeacher).eq("school_year", schoolYear).maybeSingle();
+      if (existingClassroom) {
+        classroom = existingClassroom;
+      } else {
         const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
-          .insert({ school_id: school.id, teacher_name: newChildTeacher, grade: grades.indexOf(newChildGrade), school_year: schoolYear })
+          .insert({ school_id: school.id, teacher_name: newTeacher, grade: grades.indexOf(newGrade), school_year: schoolYear })
           .select().single();
         if (classroomErr) throw classroomErr;
         classroom = newClassroom;
       }
 
-      await supabase.from("classroom_members").insert({ child_id: child.id, classroom_id: classroom.id, school_year: schoolYear });
-      setAddingChild(false);
-      setNewChildName(""); setNewChildGrade(""); setNewChildTeacher("");
+      // Insert membership for this household
+      const { error: memberErr } = await supabase.from("classroom_members").insert({
+        household_id: householdId,
+        classroom_id: classroom.id,
+        school_year: schoolYear,
+      });
+      if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
+
+      setAddingClassroom(false);
+      setNewGrade(""); setNewTeacher("");
       setNewSchoolSearch(""); setNewSelectedSchool(null); setNewTeacherResults([]);
       fetchData();
-    } catch (err) { setChildError(err.message); }
-    setChildLoading(false);
-  };
-
-  const openEdit = (child) => {
-    const currentYear = new Date().getFullYear();
-    const schoolYear = `${currentYear}-${currentYear + 1}`;
-    const membership = child.classroom_members?.find(m => m.school_year === schoolYear);
-    setEditingChild({
-      id: child.id, name: child.name, grade: grades[child.grade] || "",
-      teacher: membership?.classrooms?.teacher_name || "",
-      school: membership?.classrooms?.schools?.name || "",
-      classroomId: membership?.classrooms?.id || null,
-      schoolId: membership?.classrooms?.schools?.id || null,
-    });
-  };
-
-  const saveEdit = async () => {
-    setChildLoading(true);
-    setChildError("");
-    try {
-      const { error: childErr } = await supabase.from("children")
-        .update({ name: editingChild.name, grade: grades.indexOf(editingChild.grade) }).eq("id", editingChild.id);
-      if (childErr) throw childErr;
-      if (editingChild.classroomId) await supabase.from("classrooms").update({ teacher_name: editingChild.teacher }).eq("id", editingChild.classroomId);
-      if (editingChild.schoolId) await supabase.from("schools").update({ name: editingChild.school }).eq("id", editingChild.schoolId);
-      setEditingChild(null); setChildError(""); fetchData();
-    } catch (err) { setChildError(err.message); }
-    setChildLoading(false);
+    } catch (err) { setMembershipError(err.message); }
+    setSavingMembership(false);
   };
 
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
-  const childrenBySchool = children.reduce((acc, child) => {
-    const currentYear = new Date().getFullYear();
-    const schoolYear = `${currentYear}-${currentYear + 1}`;
-    const membership = child.classroom_members?.find(m => m.school_year === schoolYear);
-    const schoolName = membership?.classrooms?.schools?.name || "Unknown School";
+  // Group memberships by school
+  const membershipsBySchool = memberships.reduce((acc, m) => {
+    const schoolName = m.classrooms?.schools?.name || "Unknown School";
     const schoolKey = schoolName.toLowerCase().replace(/\s+/g, "-");
-    if (!acc[schoolKey]) acc[schoolKey] = { name: schoolName, classrooms: {} };
-    const classroomId = membership?.classrooms?.id || "unknown";
-    const classroomName = membership?.classrooms?.teacher_name || "Unknown Teacher";
-    const grade = membership?.classrooms?.grade;
-    if (!acc[schoolKey].classrooms[classroomId]) {
-      acc[schoolKey].classrooms[classroomId] = { teacher: classroomName, grade, children: [] };
-    }
-    acc[schoolKey].classrooms[classroomId].children.push(child);
+    if (!acc[schoolKey]) acc[schoolKey] = { name: schoolName, classrooms: [] };
+    acc[schoolKey].classrooms.push(m);
     return acc;
   }, {});
 
@@ -250,132 +224,96 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>YOUR CHILDREN</p>
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
 
-        {Object.entries(childrenBySchool).map(([schoolKey, school]) => (
+        {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
               <span style={{ fontSize: "1.2rem" }}>🏫</span>
               <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
             </div>
             <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
-              {Object.entries(school.classrooms).map(([classroomId, classroom], idx, arr) => (
-                <div key={classroomId} style={{ borderBottom: idx < arr.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.6rem 1rem", background: "#0F2A45" }}>
-                    <span style={{ fontSize: "1rem" }}>📚</span>
-                    <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0 }}>
-                      {classroom.teacher} · {getGradeLabel(classroom.grade)}
-                    </p>
+              {school.classrooms.map((m, idx) => {
+                const otherFamilies = classmates[m.id] || [];
+                return (
+                  <div key={m.id} style={{ borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#0F2A45" }}>
+                      <span style={{ fontSize: "1rem" }}>📚</span>
+                      <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0, fontWeight: "500" }}>
+                        {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
+                      </p>
+                    </div>
+                    <div style={{ padding: "0.75rem 1rem" }}>
+                      <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.5rem" }}>
+                        {otherFamilies.length} other {otherFamilies.length === 1 ? "family" : "families"} in this class
+                      </p>
+                      {otherFamilies.length === 0 && (
+                        <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, fontStyle: "italic" }}>
+                          Share Huddle with other parents to get started!
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: "10px", padding: "1rem", flexWrap: "wrap" }}>
-                    {classroom.children.map((child) => (
-                      <div key={child.id} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", minWidth: "100px" }}>
-                        <button onClick={() => openEdit(child)} style={{ position: "absolute", top: "-4px", right: "-4px", background: "#162D50", border: "1px solid #2A4A6B", color: "#8AAEC8", borderRadius: "50%", width: "22px", height: "22px", fontSize: "0.65rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>✏️</button>
-                        <div onClick={() => document.getElementById(`child-photo-${child.id}`).click()}
-                          style={{ width: "64px", height: "64px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.6rem", cursor: "pointer", overflow: "hidden", border: "3px solid #02C39A", position: "relative", marginBottom: "0.5rem" }}>
-                          {child.photo_url ? (
-                            <img src={child.photo_url} alt={child.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          ) : <span>👦</span>}
-                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", padding: "2px 0", textAlign: "center", fontSize: "0.5rem", color: "#FFFFFF" }}>edit</div>
-                        </div>
-                        <input id={`child-photo-${child.id}`} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => uploadChildPhoto(e, child.id)} />
-                        <p style={{ color: "#FFFFFF", fontSize: "0.85rem", fontWeight: "600", margin: "0 0 2px", textAlign: "center" }}>{child.name}</p>
-                        <p style={{ color: "#02C39A", fontSize: "0.7rem", margin: 0, textAlign: "center" }}>{getGradeLabel(child.grade)}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <div onClick={() => setAddingChild(true)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
+                );
+              })}
+              <div onClick={() => setAddingClassroom(true)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
                 <div style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", color: "#607080", fontSize: "1rem" }}>+</div>
-                <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add another child</p>
+                <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add another classroom</p>
               </div>
             </div>
           </div>
         ))}
 
-        {children.length === 0 && (
-          <div onClick={() => setAddingChild(true)} style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
+        {memberships.length === 0 && (
+          <div onClick={() => setAddingClassroom(true)} style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
             <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
-            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first child</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first classroom</p>
           </div>
         )}
 
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CLASSROOM</p>
-        <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
-          <p style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>
-            {classmates.length > 0 ? `${classmates.length} ${classmates.length === 1 ? "family" : "families"} in your class` : "You're the first one here!"}
-          </p>
-          <p style={{ color: "#607080", fontSize: "0.8rem", margin: "4px 0 0" }}>Share Huddle with other parents to get started</p>
-        </div>
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1rem 0 0.75rem", letterSpacing: "0.05em" }}>PARENTS IN YOUR CLASSROOMS</p>
 
-        {classmates.length === 0 ? (
+        {Object.values(classmates).flat().length === 0 ? (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
-            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No classmates yet</p>
-            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Share Huddle with other parents in your class to get started!</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No other parents yet</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Share Huddle to get other families to join!</p>
           </div>
         ) : (
-          classmates.map((member) => (
-            <div key={member.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
-                  {member.children?.parents?.photo_url ? (
-                    <img src={member.children.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : member.children?.parents?.name?.charAt(0) || "?"}
+          Object.values(classmates).flat().map((cm) => {
+            const household = cm.households;
+            const members = household?.household_members || [];
+            return members.map((hm) => (
+              <div key={`${cm.id}-${hm.parent_id}`} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                    {hm.parents?.photo_url ? (
+                      <img src={hm.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : hm.parents?.name?.charAt(0) || "?"}
+                  </div>
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{hm.parents?.name || "Unknown Parent"}</p>
+                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent in this classroom</p>
+                  </div>
                 </div>
-                <div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{member.children?.parents?.name || "Unknown Parent"}</p>
-                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent of {member.children?.name}</p>
-                </div>
+                <button onClick={() => setRequestingPlaydate(hm.parents)}
+                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                  Huddle →
+                </button>
               </div>
-              <button onClick={() => setRequestingPlaydate(member.children?.parents)}
-                style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                Huddle →
-              </button>
-            </div>
-          ))
+            ));
+          })
         )}
       </div>
 
-      {/* Edit child modal */}
-      {editingChild && (
+      {/* Add classroom modal */}
+      {addingClassroom && (
         <div style={overlay}>
           <div style={modalBox}>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Edit child</h2>
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Child's name</label>
-            <input type="text" value={editingChild.name} onChange={(e) => setEditingChild({ ...editingChild, name: e.target.value })} style={inputStyle} />
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
-            <select value={editingChild.grade} onChange={(e) => setEditingChild({ ...editingChild, grade: e.target.value })} style={inputStyle}>
-              <option value="">Select grade...</option>
-              {grades.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
-            <input type="text" value={editingChild.teacher} onChange={(e) => setEditingChild({ ...editingChild, teacher: e.target.value })} style={inputStyle} />
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
-            <input type="text" value={editingChild.school || ""} onChange={(e) => setEditingChild({ ...editingChild, school: e.target.value })} style={inputStyle} />
-            {childError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{childError}</p>}
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => { setEditingChild(null); setChildError(""); }} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-              <button onClick={saveEdit} disabled={childLoading} style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
-                {childLoading ? "Saving..." : "Save changes →"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add child modal */}
-      {addingChild && (
-        <div style={overlay}>
-          <div style={modalBox}>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add another child</h2>
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Child's name</label>
-            <input type="text" placeholder="Child's name" value={newChildName} onChange={(e) => setNewChildName(e.target.value)} style={inputStyle} />
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a classroom</h2>
 
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
-            <select value={newChildGrade} onChange={(e) => setNewChildGrade(e.target.value)} style={inputStyle}>
+            <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
               <option value="">Select grade...</option>
               {grades.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
@@ -411,14 +349,14 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
             <div style={{ position: "relative", marginBottom: "1rem" }}>
               <input type="text"
                 placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
-                value={newChildTeacher}
-                onChange={(e) => { setNewChildTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
+                value={newTeacher}
+                onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
                 onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
                 style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
               {showNewTeacherDropdown && newTeacherResults.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
-                  {newTeacherResults.filter(t => t.toLowerCase().includes(newChildTeacher.toLowerCase())).map(teacher => (
-                    <div key={teacher} onClick={() => { setNewChildTeacher(teacher); setShowNewTeacherDropdown(false); }}
+                  {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
+                    <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
                       📚 {teacher}
                     </div>
@@ -426,7 +364,7 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
                   {newTeacherMismatch && (
                     <div onClick={() => setShowNewTeacherDropdown(false)}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
-                      + Add "{newChildTeacher}" as a new teacher
+                      + Add "{newTeacher}" as a new teacher
                     </div>
                   )}
                 </div>
@@ -441,12 +379,12 @@ const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fi
               </div>
             )}
 
-            {childError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{childError}</p>}
+            {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setAddingChild(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-              <button onClick={saveNewChild} disabled={!newChildName || !newChildGrade || !newSchoolSearch || !newChildTeacher || childLoading}
-                style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newChildName || !newChildGrade || !newSchoolSearch || !newChildTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
-                {childLoading ? "Saving..." : "Add child →"}
+              <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
+              <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
+                style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+                {savingMembership ? "Saving..." : "Add classroom →"}
               </button>
             </div>
           </div>

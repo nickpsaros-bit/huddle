@@ -32,26 +32,45 @@ export default function Network({ session }) {
       };
     });
 
-    // For each connection, fetch their children
+    // For each connection, find their household and classrooms
     for (const conn of network) {
-      const { data: kids } = await supabase
-        .from("children")
-        .select("*, classroom_members(*, classrooms(teacher_name, grade, schools(name)))")
-        .or(`parent_id.eq.${conn.person.id},co_parent_id.eq.${conn.person.id}`);
-      conn.children = kids || [];
+      const { data: hm } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", conn.person.id)
+        .single();
+
+      if (hm) {
+        const { data: memberships } = await supabase
+          .from("classroom_members")
+          .select("*, classrooms(teacher_name, grade, schools(name))")
+          .eq("household_id", hm.household_id);
+        conn.classrooms = memberships || [];
+
+        // Also get other household members (co-parents)
+        const { data: coParents } = await supabase
+          .from("household_members")
+          .select("parents(id, name, photo_url)")
+          .eq("household_id", hm.household_id)
+          .neq("parent_id", conn.person.id);
+        conn.coParents = (coParents || []).map(c => c.parents).filter(Boolean);
+      } else {
+        conn.classrooms = [];
+        conn.coParents = [];
+      }
     }
 
     setConnections(network);
     setLoading(false);
   };
 
- const removeConnection = async (connectionId) => {
+  const removeConnection = async (connectionId) => {
     if (!window.confirm("Remove this connection?")) return;
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
   };
 
-  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
+  const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -76,7 +95,9 @@ export default function Network({ session }) {
         ) : (
           connections.map((conn) => (
             <div key={conn.connectionId} style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: conn.children.length > 0 ? "1rem" : 0 }}>
+
+              {/* Primary person */}
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
                 <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
                   {conn.person?.photo_url ? (
                     <img src={conn.person.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -94,22 +115,34 @@ export default function Network({ session }) {
                 </button>
               </div>
 
-              {conn.children.length > 0 && (
-                <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B" }}>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>FAMILY</p>
+              {/* Co-parents in their household */}
+              {conn.coParents.length > 0 && (
+                <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: conn.classrooms.length > 0 ? "0.5rem" : 0 }}>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CO-PARENTS</p>
                   <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                    {conn.children.map((child) => (
-                      <div key={child.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "70px" }}>
-                        <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", overflow: "hidden", border: "2px solid #02C39A", marginBottom: "4px" }}>
-                          {child.photo_url ? (
-                            <img src={child.photo_url} alt={child.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          ) : <span>👦</span>}
+                    {conn.coParents.map((cp) => (
+                      <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", overflow: "hidden", border: "2px solid #02C39A" }}>
+                          {cp.photo_url ? (
+                            <img src={cp.photo_url} alt={cp.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : <span style={{ color: "#FFFFFF" }}>{cp.name?.charAt(0) || "?"}</span>}
                         </div>
-                        <p style={{ color: "#FFFFFF", fontSize: "0.75rem", fontWeight: "500", margin: 0, textAlign: "center" }}>{child.name?.split(" ")[0]}</p>
-                        <p style={{ color: "#02C39A", fontSize: "0.65rem", margin: 0, textAlign: "center" }}>{grades[child.grade]?.replace(" Grade", "") || "—"}</p>
+                        <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0 }}>{cp.name}</p>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Classrooms */}
+              {conn.classrooms.length > 0 && (
+                <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B" }}>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CLASSROOMS</p>
+                  {conn.classrooms.map((c, idx) => (
+                    <p key={idx} style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: idx > 0 ? "4px 0 0" : 0 }}>
+                      🏫 {c.classrooms?.schools?.name} · {c.classrooms?.teacher_name} · {grades[c.classrooms?.grade] || "?"}
+                    </p>
+                  ))}
                 </div>
               )}
             </div>

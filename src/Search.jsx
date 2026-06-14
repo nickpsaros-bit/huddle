@@ -5,39 +5,41 @@ export default function Search({ session }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [mySchoolId, setMySchoolId] = useState(null);
+  const [mySchoolIds, setMySchoolIds] = useState([]);
+  const [myHouseholdId, setMyHouseholdId] = useState(null);
   const [connections, setConnections] = useState([]);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    fetchMySchool();
-    fetchConnections();
+    fetchMyData();
   }, []);
 
-  const fetchMySchool = async () => {
-    const { data: children } = await supabase
-      .from("children")
-      .select("*, classroom_members(*, classrooms(*, schools(*)))")
+  const fetchMyData = async () => {
+    // Get my household
+    const { data: hm } = await supabase
+      .from("household_members")
+      .select("household_id")
       .eq("parent_id", session.user.id)
-      .limit(1);
+      .single();
 
-    const currentYear = new Date().getFullYear();
-    const schoolYear = currentYear + "-" + (currentYear + 1);
-    const membership = children && children[0] && children[0].classroom_members
-      ? children[0].classroom_members.find(m => m.school_year === schoolYear)
-      : null;
-    const schoolId = membership && membership.classrooms && membership.classrooms.schools
-      ? membership.classrooms.schools.id
-      : null;
-    setMySchoolId(schoolId);
-  };
+    if (!hm) return;
+    setMyHouseholdId(hm.household_id);
 
-  const fetchConnections = async () => {
-    const { data } = await supabase
+    // Get my classroom memberships to find my school IDs
+    const { data: memberships } = await supabase
+      .from("classroom_members")
+      .select("classrooms(school_id)")
+      .eq("household_id", hm.household_id);
+
+    const schoolIds = [...new Set((memberships || []).map(m => m.classrooms?.school_id).filter(Boolean))];
+    setMySchoolIds(schoolIds);
+
+    // Get my connections
+    const { data: conns } = await supabase
       .from("connections")
       .select("*")
-      .or("requester_id.eq." + session.user.id + ",recipient_id.eq." + session.user.id);
-    setConnections(data || []);
+      .or(`requester_id.eq.${session.user.id},recipient_id.eq.${session.user.id}`);
+    setConnections(conns || []);
   };
 
   const search = async (q) => {
@@ -48,30 +50,48 @@ export default function Search({ session }) {
     }
     setLoading(true);
 
-    const { data } = await supabase
+    // Find parents whose name matches
+    const { data: parents } = await supabase
       .from("parents")
-      .select("*, children(*, classroom_members(*, classrooms(*, schools(*))))")
+      .select("*")
       .ilike("name", "%" + q + "%")
       .neq("id", session.user.id)
-      .limit(10);
+      .limit(20);
 
-    const currentYear = new Date().getFullYear();
-    const schoolYear = currentYear + "-" + (currentYear + 1);
+    if (!parents || parents.length === 0) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
 
-    const filtered = (data || []).filter(parent => {
-      if (!mySchoolId) return true;
-      if (!parent.children) return false;
-      return parent.children.some(child => {
-        if (!child.classroom_members) return false;
-        return child.classroom_members.some(m =>
-          m.school_year === schoolYear &&
-          m.classrooms && m.classrooms.schools &&
-          m.classrooms.schools.id === mySchoolId
-        );
-      });
-    });
+    // For each parent, find their household and check if they share a school with me
+    const enriched = [];
+    for (const parent of parents) {
+      const { data: hm } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", parent.id)
+        .single();
+      if (!hm) continue;
 
-    setResults(filtered);
+      const { data: memberships } = await supabase
+        .from("classroom_members")
+        .select("classrooms(teacher_name, grade, schools(id, name))")
+        .eq("household_id", hm.household_id);
+
+      const sharedClassrooms = (memberships || []).filter(m =>
+        mySchoolIds.includes(m.classrooms?.schools?.id)
+      );
+
+      if (sharedClassrooms.length > 0) {
+        enriched.push({
+          ...parent,
+          classrooms: sharedClassrooms,
+        });
+      }
+    }
+
+    setResults(enriched);
     setLoading(false);
   };
 
@@ -95,7 +115,7 @@ export default function Search({ session }) {
     });
     if (!error) {
       setMessage("Connection request sent!");
-      fetchConnections();
+      fetchMyData();
       setTimeout(() => setMessage(""), 3000);
     }
   };
@@ -105,10 +125,12 @@ export default function Search({ session }) {
       .update({ status: "accepted" })
       .eq("requester_id", requesterId)
       .eq("recipient_id", session.user.id);
-    fetchConnections();
+    fetchMyData();
     setMessage("Connection accepted!");
     setTimeout(() => setMessage(""), 3000);
   };
+
+  const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -163,13 +185,9 @@ export default function Search({ session }) {
 
         {results.map((parent) => {
           const conn = getConnectionStatus(parent.id);
-          const currentYear = new Date().getFullYear();
-          const schoolYear = currentYear + "-" + (currentYear + 1);
-          const childInfo = (parent.children || []).map(child => {
-            const membership = (child.classroom_members || []).find(m => m.school_year === schoolYear);
-            const teacherName = membership && membership.classrooms ? membership.classrooms.teacher_name : "";
-            return child.name + " · " + teacherName;
-          }).join(", ");
+          const classroomLabel = (parent.classrooms || []).map(c =>
+            `${c.classrooms?.teacher_name} (${grades[c.classrooms?.grade] || "?"})`
+          ).join(", ");
 
           return (
             <div key={parent.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -183,7 +201,7 @@ export default function Search({ session }) {
                 </div>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{parent.name}</p>
-                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{childInfo || "No children listed"}</p>
+                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{classroomLabel || "Same school"}</p>
                 </div>
               </div>
 
