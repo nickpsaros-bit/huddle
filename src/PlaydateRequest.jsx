@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { supabase } from "./supabase";
 
 export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
@@ -27,6 +27,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     setLoading(true);
     setError("");
 
+    let createdPlaydateId = null;
     try {
       // My household (the organizer).
       const { data: myHm, error: myErr } = await supabase
@@ -52,7 +53,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       const proposedDate = new Date(`${date}T${time}`).toISOString();
 
-      // Create the playdate event (household-level).
+      // Create the playdate event.
       const { data: playdate, error: pdErr } = await supabase
         .from("playdates")
         .insert({
@@ -67,8 +68,9 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         .select()
         .single();
       if (pdErr) throw pdErr;
+      createdPlaydateId = playdate.id;
 
-      // Invite the recipient's household.
+      // Invite the recipient's household. If this fails, roll back the playdate.
       const { error: invErr } = await supabase
         .from("playdate_invites")
         .insert({
@@ -81,6 +83,10 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       onSent();
     } catch (err) {
+      // Roll back an orphaned playdate so we never leave a guest-less event.
+      if (createdPlaydateId) {
+        await supabase.from("playdates").delete().eq("id", createdPlaydateId);
+      }
       setError(err.message);
       setLoading(false);
     }
@@ -92,7 +98,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
   const shortName = (fullName) => {
     if (!fullName) return "this family";
     const parts = fullName.trim().split(/\s+/);

@@ -118,12 +118,28 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
+  // Remove a dead hosted playdate (all guests declined). Deletes invites + playdate.
+  const removeDeadPlaydate = async (playdateId) => {
+    if (!window.confirm("Remove this playdate? Everyone declined, so it'll be deleted.")) return;
+    setBusy(true);
+    try {
+      await supabase.from("playdate_invites").delete().eq("playdate_id", playdateId);
+      await supabase.from("playdates").delete().eq("id", playdateId);
+      setMessage("Playdate removed");
+      await fetchData();
+      if (typeof onChanged === "function") onChanged();
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setBusy(false);
+  };
+
   const rsvpColor = (rsvp) =>
     rsvp === "yes" ? "#02C39A" : rsvp === "maybe" ? "#F59E0B" : rsvp === "no" ? "#F87171" : "#607080";
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
-  // Host badge: accurate event state from the roster.
   const hostBadge = (roster, dim) => {
     if (dim) return { text: "Hosted", bg: "#1A3A5C", color: "#8AAEC8" };
     if (!roster || roster.length === 0) return { text: "No guests yet", bg: "#1A3A5C", color: "#8AAEC8" };
@@ -133,6 +149,10 @@ export default function Playdates({ session, onChanged }) {
     if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
     return { text: "Declined", bg: "#3D1515", color: "#F87171" };
   };
+
+  // A hosted playdate is "dead" if it has guests and ALL of them declined.
+  const isDead = (roster) =>
+    roster && roster.length > 0 && roster.every((r) => r.rsvp === "no");
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
@@ -212,6 +232,7 @@ export default function Playdates({ session, onChanged }) {
 
     // hosting card
     const badge = hostBadge(it.roster, dim);
+    const dead = !dim && isDead(it.roster);
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -243,6 +264,13 @@ export default function Playdates({ session, onChanged }) {
             </div>
           ))}
         </div>
+
+        {dead && (
+          <button onClick={() => removeDeadPlaydate(pd.id)} disabled={busy}
+            style={{ width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
+            Remove playdate
+          </button>
+        )}
       </div>
     );
   };
