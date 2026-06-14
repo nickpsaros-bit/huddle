@@ -16,7 +16,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasConsented, setHasConsented] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
-  const [pendingJoinRequest, setPendingJoinRequest] = useState(null);
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -42,7 +41,6 @@ export default function App() {
         } else {
           setHasConsented(false);
           setHasProfile(false);
-          setPendingJoinRequest(null);
         }
       }
     );
@@ -71,52 +69,27 @@ export default function App() {
 
     if (!parentData || !parentData.name) {
       setHasProfile(false);
-      setPendingJoinRequest(null);
       return;
     }
 
-    // Already in a household with at least one classroom? Then they're set up.
     const { data: hm } = await supabase
       .from("household_members")
       .select("household_id")
       .eq("parent_id", userId)
       .single();
 
-    if (hm) {
-      const { data: memberships } = await supabase
-        .from("classroom_members")
-        .select("id")
-        .eq("household_id", hm.household_id)
-        .limit(1);
-
-      if (memberships && memberships.length > 0) {
-        setPendingJoinRequest(null);
-        setHasProfile(true);
-        return;
-      }
-    }
-
-    // Not in a set-up household. Are they waiting on a join request?
-    const { data: pending } = await supabase
-      .from("household_join_requests")
-      .select("id, target_household_id, households!household_join_requests_target_household_id_fkey(id, household_members(parents(name)))")
-      .eq("requesting_parent_id", userId)
-      .eq("status", "pending")
-      .maybeSingle();
-
-    if (pending) {
-      // Build a privacy-safe label for the household they asked to join.
-      const names = (pending.households?.household_members || [])
-        .map((m) => m.parents?.name)
-        .filter(Boolean);
-      setPendingJoinRequest({ id: pending.id, names });
+    if (!hm) {
       setHasProfile(false);
       return;
     }
 
-    // No household, no pending request → send them through signup.
-    setPendingJoinRequest(null);
-    setHasProfile(false);
+    const { data: memberships } = await supabase
+      .from("classroom_members")
+      .select("id")
+      .eq("household_id", hm.household_id)
+      .limit(1);
+
+    setHasProfile(memberships && memberships.length > 0);
   };
 
   const fetchNotificationCount = async (userId) => {
@@ -127,7 +100,7 @@ export default function App() {
       .eq("recipient_id", userId)
       .eq("status", "pending");
 
-    // Pending household-join requests targeting a household I'm in.
+    // Pending household-link requests targeting a household I'm in.
     let joinCount = 0;
     const { data: myHh } = await supabase
       .from("household_members")
@@ -145,24 +118,6 @@ export default function App() {
     }
 
     setNotificationCount((conns ? conns.length : 0) + joinCount);
-  };
-
-  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
-  const shortName = (fullName) => {
-    if (!fullName) return "this family";
-    const parts = fullName.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0];
-    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
-  };
-
-  const cancelJoinRequest = async () => {
-    if (!pendingJoinRequest) return;
-    await supabase
-      .from("household_join_requests")
-      .update({ status: "cancelled", resolved_at: new Date().toISOString() })
-      .eq("id", pendingJoinRequest.id);
-    setPendingJoinRequest(null);
-    // Falls through to the Profile signup flow on next render.
   };
 
   const handleNavigate = (tabId) => {
@@ -183,33 +138,6 @@ export default function App() {
 
   if (!hasConsented) {
     return <Consent session={session} onConsented={() => setHasConsented(true)} />;
-  }
-
-  // Waiting on a co-parent / household approval.
-  if (pendingJoinRequest) {
-    const label = pendingJoinRequest.names.length
-      ? pendingJoinRequest.names.map(shortName).join(" & ")
-      : "this family";
-    return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: "1.5rem" }}>
-        <div style={{ width: "100%", maxWidth: "440px", textAlign: "center" }}>
-          <h1 style={{ color: "#02C39A", fontSize: "2rem", fontWeight: "700", margin: "0 0 2rem" }}>Huddle</h1>
-          <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>⏳</p>
-          <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>Waiting for approval</h2>
-          <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
-            You've asked to join {label}'s household. Once they approve, you'll share their classrooms and connections automatically.
-          </p>
-          <button onClick={() => checkProfile(session.user.id)}
-            style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem" }}>
-            Check again
-          </button>
-          <button onClick={cancelJoinRequest}
-            style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.95rem", cursor: "pointer" }}>
-            Cancel & set up my own household instead
-          </button>
-        </div>
-      </div>
-    );
   }
 
   if (!hasProfile) {
