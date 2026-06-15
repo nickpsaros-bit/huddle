@@ -10,7 +10,10 @@ import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
 import Playdates from "./Playdates";
+import InviteLanding from "./InviteLanding";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
+
+const INVITE_KEY = "huddle_pending_invite_token";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -21,7 +24,28 @@ export default function App() {
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
-  const [playdateHalo, setPlaydateHalo] = useState(null); // "amber" | "teal" | null
+  const [playdateHalo, setPlaydateHalo] = useState(null);
+
+  // Invite handling.
+  const [inviteToken, setInviteToken] = useState(null);     // token captured from URL or storage
+const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // true once they tap "Join"
+
+  // On first load: capture an invite token from the URL (/invite/{token}).
+  useEffect(() => {
+    const path = window.location.pathname || "";
+    const match = path.match(/^\/invite\/([A-Za-z0-9]+)/);
+    if (match && match[1]) {
+      const token = match[1];
+      localStorage.setItem(INVITE_KEY, token);
+      setInviteToken(token);
+      // Clean the URL so the token isn't left sitting in the address bar.
+      window.history.replaceState({}, "", "/");
+    } else {
+      // Maybe one is already pending from a previous step (survived a redirect).
+      const stored = localStorage.getItem(INVITE_KEY);
+      if (stored) setInviteToken(stored);
+    }
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -34,7 +58,7 @@ export default function App() {
       setLoading(false);
     });
 
-const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
         if (session) {
@@ -48,7 +72,6 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
       }
     );
 
-    // Refresh counts when the user returns to the app (tab focus / visibility).
     const refreshOnFocus = () => {
       if (document.visibilityState === "visible") {
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -110,8 +133,75 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Bell = pending connection requests + pending household-link requests + unread notifications.
-  // Playdate badge = un-RSVP'd invites. Halo = amber/teal/null per playdate state.
+  // Consume a pending invite: mark accepted + create the connection to the inviter.
+  // Safe to call multiple times (no-ops if already consumed / already connected).
+  const consumeInvite = async (userId) => {
+    const token = localStorage.getItem(INVITE_KEY);
+    if (!token) return;
+
+    try {
+      const { data: invite } = await supabase
+        .from("invites")
+        .select("*")
+        .eq("token", token)
+        .maybeSingle();
+
+      // No invite, already accepted, or expired -> clear and stop.
+      if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
+        localStorage.removeItem(INVITE_KEY);
+        setInviteToken(null);
+        return;
+      }
+
+      // Don't connect someone to themselves.
+      if (invite.inviter_id === userId) {
+        localStorage.removeItem(INVITE_KEY);
+        setInviteToken(null);
+        return;
+      }
+
+      // Create the connection if one doesn't already exist (either direction).
+      const { data: existing } = await supabase
+        .from("connections")
+        .select("id")
+        .or(`and(requester_id.eq.${invite.inviter_id},recipient_id.eq.${userId}),and(requester_id.eq.${userId},recipient_id.eq.${invite.inviter_id})`);
+
+      if (!existing || existing.length === 0) {
+        await supabase.from("connections").insert({
+          requester_id: invite.inviter_id,
+          recipient_id: userId,
+          status: "accepted",
+        });
+
+        // Notify the inviter that their invite was accepted.
+        try {
+          const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
+          const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
+          const label = nm.length === 1 ? nm[0] : `${nm[0]} ${nm[nm.length - 1].charAt(0)}.`;
+          await supabase.from("notifications").insert({
+            recipient_id: invite.inviter_id,
+            type: "invite_accepted",
+            title: "Your invite was accepted 🎉",
+            body: `${label} joined Huddle from your invite. You're now connected!`,
+          });
+        } catch (e) { /* best-effort */ }
+      }
+
+      // Mark the invite consumed.
+      await supabase.from("invites")
+        .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
+        .eq("id", invite.id);
+
+      localStorage.removeItem(INVITE_KEY);
+      setInviteToken(null);
+    } catch (err) {
+      // Best-effort — never block the user's entry into the app.
+      localStorage.removeItem(INVITE_KEY);
+      setInviteToken(null);
+    }
+  };
+
+  // Bell = pending requests + unread notifications. Playdate badge + halo as before.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -119,7 +209,6 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
       .eq("parent_id", userId)
       .maybeSingle();
 
-    // --- Bell count ---
     const { data: conns } = await supabase
       .from("connections")
       .select("id")
@@ -183,10 +272,8 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
         .select("rsvp")
         .eq("playdate_id", pd.id);
       const list = invs || [];
-      const anyMaybeOrUnanswered = list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited");
-      const anyGoing = list.some((i) => i.rsvp === "yes");
-      if (anyMaybeOrUnanswered) hasMaybeOrUnanswered = true;
-      if (anyGoing) hasGoing = true;
+      if (list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited")) hasMaybeOrUnanswered = true;
+      if (list.some((i) => i.rsvp === "yes")) hasGoing = true;
     }
 
     setPlaydateBadge(unrepliedCount);
@@ -208,6 +295,9 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
     );
   }
 
+  // Logged-OUT user with a pending invite: show the landing page first.
+
+
   if (!session) {
     return <Auth onAuth={() => {}} />;
   }
@@ -217,7 +307,12 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(
   }
 
   if (!hasProfile) {
-    return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
+    return <Profile session={session} onComplete={() => { setHasProfile(true); consumeInvite(session.user.id).then(() => fetchCounts(session.user.id)); }} />;
+  }
+
+  // Logged-in + fully set up: if there's a pending invite, consume it now (auto-connect), then Home.
+  if (inviteToken) {
+    consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
   }
 
   if (showInbox) {
