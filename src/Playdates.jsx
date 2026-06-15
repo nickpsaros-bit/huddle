@@ -43,6 +43,41 @@ export default function Playdates({ session, onChanged }) {
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
+  // Build and download an .ics file for a playdate (2-hour default duration).
+  const addToCalendar = (pd) => {
+    const start = new Date(pd.proposed_date);
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const toIcs = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const esc = (s) => (s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+    const loc = [pd.location_name, pd.location_address].filter(Boolean).join(", ");
+
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Huddle//Playdate//EN",
+      "BEGIN:VEVENT",
+      `UID:huddle-${pd.id}@huddlefamilies.com`,
+      `DTSTAMP:${toIcs(new Date())}`,
+      `DTSTART:${toIcs(start)}`,
+      `DTEND:${toIcs(end)}`,
+      "SUMMARY:Playdate",
+      loc ? `LOCATION:${esc(loc)}` : "",
+      pd.note ? `DESCRIPTION:${esc(pd.note)}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].filter(Boolean);
+
+    const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "playdate.ics";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const fetchData = async () => {
     setLoading(true);
 
@@ -118,7 +153,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Remove a dead hosted playdate (all guests declined). Deletes invites + playdate.
   const removeDeadPlaydate = async (playdateId) => {
     if (!window.confirm("Remove this playdate? Everyone declined, so it'll be deleted.")) return;
     setBusy(true);
@@ -150,7 +184,6 @@ export default function Playdates({ session, onChanged }) {
     return { text: "Declined", bg: "#3D1515", color: "#F87171" };
   };
 
-  // A hosted playdate is "dead" if it has guests and ALL of them declined.
   const isDead = (roster) =>
     roster && roster.length > 0 && roster.every((r) => r.rsvp === "no");
 
@@ -182,6 +215,12 @@ export default function Playdates({ session, onChanged }) {
   const sectionLabel = { color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" };
   const metaRow = { color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 4px" };
 
+  const calButtonStyle = {
+    width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px",
+    border: "1px solid #02C39A", background: "transparent", color: "#02C39A",
+    fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
@@ -196,6 +235,8 @@ export default function Playdates({ session, onChanged }) {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
+      // Guest sees "Add to calendar" if they're going (host + them = confirmed).
+      const showCal = !dim && it.invite.rsvp === "yes";
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
@@ -226,6 +267,12 @@ export default function Playdates({ session, onChanged }) {
               </button>
             </div>
           )}
+
+          {showCal && (
+            <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
+              📆 Add to calendar
+            </button>
+          )}
         </div>
       );
     }
@@ -233,6 +280,8 @@ export default function Playdates({ session, onChanged }) {
     // hosting card
     const badge = hostBadge(it.roster, dim);
     const dead = !dim && isDead(it.roster);
+    // Host sees "Add to calendar" once at least one guest is going (confirmed).
+    const showCal = !dim && it.goingCount > 0;
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -265,9 +314,15 @@ export default function Playdates({ session, onChanged }) {
           ))}
         </div>
 
+        {showCal && (
+          <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
+            📆 Add to calendar
+          </button>
+        )}
+
         {dead && (
           <button onClick={() => removeDeadPlaydate(pd.id)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
+            style={{ width: "100%", marginTop: "0.6rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
             Remove playdate
           </button>
         )}
