@@ -91,7 +91,11 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .eq("classroom_id", m.classroom_id)
         .eq("school_year", m.school_year)
         .neq("household_id", hhId);
-      classmatesMap[m.id] = otherMembers || [];
+      // Attach the classroom label for each classmate group (which of MY classes this is).
+      classmatesMap[m.id] = {
+        classroomLabel: `${m.classrooms?.teacher_name} · ${grades[m.classrooms?.grade] || "Unknown grade"}`,
+        rows: otherMembers || [],
+      };
     }
     setClassmates(classmatesMap);
 
@@ -99,16 +103,13 @@ export default function Home({ session, notificationCount, onBellClick }) {
   };
 
   // Search parents who share a classroom with me (excludes my own household).
-  // Returns candidates as { parentId, name, photo_url, householdId }.
   const runMemberSearch = async (query) => {
     setMemberSearch(query);
     if (query.trim().length < 2) { setMemberCandidates([]); return; }
 
-    // My classroom IDs.
     const classroomIds = memberships.map((m) => m.classroom_id);
     if (classroomIds.length === 0) { setMemberCandidates([]); return; }
 
-    // Other households in those classrooms.
     const { data: cms } = await supabase
       .from("classroom_members")
       .select("household_id")
@@ -118,7 +119,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     const otherHouseholdIds = [...new Set((cms || []).map((c) => c.household_id))];
     if (otherHouseholdIds.length === 0) { setMemberCandidates([]); return; }
 
-    // Parents in those households.
     const { data: hms } = await supabase
       .from("household_members")
       .select("parent_id, household_id, parents(id, name, photo_url)")
@@ -142,7 +142,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setLinkBusy(true);
     setLinkMessage("");
     try {
-      // Use the household_join_requests table: I'm requesting to join THEIR household.
       const { error } = await supabase.from("household_join_requests").insert({
         requesting_parent_id: session.user.id,
         target_household_id: candidate.householdId,
@@ -164,18 +163,29 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setLinkBusy(false);
   };
 
+  // Remove a member. The removed member lands in a fresh household of their own
+  // (as primary), carrying over the household's classroom memberships so they
+  // stay connected to their kids' classes. No one gets stranded.
   const removeMember = async (memberRow) => {
     setHouseholdBusy(true);
     try {
       const leavingParentId = memberRow.parent_id;
       const wasPrimary = memberRow.role === "primary";
 
+      // Snapshot the household's classroom memberships BEFORE we change anything.
+      const { data: classMemberships } = await supabase
+        .from("classroom_members")
+        .select("classroom_id, school_year")
+        .eq("household_id", householdId);
+
+      // Detach the member from this household.
       const { error: delErr } = await supabase
         .from("household_members")
         .delete()
         .eq("id", memberRow.id);
       if (delErr) throw delErr;
 
+      // Who's left in the original household?
       const { data: remaining } = await supabase
         .from("household_members")
         .select("id, parent_id, role, joined_at")
@@ -183,13 +193,45 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .order("joined_at", { ascending: true });
 
       if (!remaining || remaining.length === 0) {
+        // Last member left: tear down the now-empty original household.
         await supabase.from("classroom_members").delete().eq("household_id", householdId);
         await supabase.from("households").delete().eq("id", householdId);
       } else if (wasPrimary && !remaining.some((m) => m.role === "primary")) {
+        // Primary left: promote the oldest remaining member.
         await supabase
           .from("household_members")
           .update({ role: "primary" })
           .eq("id", remaining[0].id);
+      }
+
+      // Give the removed member their OWN new household, as primary,
+      // and copy over the classroom memberships (interpretation B).
+      // (Only when the original household still exists / had members — if they
+      // were the last member, the original household IS effectively theirs already
+      // and was torn down above, so we still create a fresh one for them.)
+      const { data: newHh, error: hhErr } = await supabase
+        .from("households")
+        .insert({})
+        .select()
+        .single();
+      if (hhErr) throw hhErr;
+
+      const { error: addErr } = await supabase
+        .from("household_members")
+        .insert({
+          household_id: newHh.id,
+          parent_id: leavingParentId,
+          role: "primary",
+        });
+      if (addErr) throw addErr;
+
+      if (classMemberships && classMemberships.length > 0) {
+        const rows = classMemberships.map((c) => ({
+          household_id: newHh.id,
+          classroom_id: c.classroom_id,
+          school_year: c.school_year,
+        }));
+        await supabase.from("classroom_members").insert(rows);
       }
 
       if (leavingParentId === session.user.id) {
@@ -206,7 +248,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
   const confirmRemoveOther = (memberRow) => {
     const nm = shortName(memberRow.parents?.name);
-    if (window.confirm(`Remove ${nm} from your household? They'll need to set up their own household.`)) {
+    if (window.confirm(`Remove ${nm} from your household? They'll get their own household and stay in your shared classrooms.`)) {
       removeMember(memberRow);
     }
   };
@@ -214,7 +256,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const confirmLeave = () => {
     const me = householdMembers.find((m) => m.parent_id === session.user.id);
     if (!me) return;
-    if (window.confirm("Leave this household? You'll need to set up your own household afterward.")) {
+    if (window.confirm("Leave this household? You'll get your own household and stay in your current classrooms.")) {
       removeMember(me);
     }
   };
@@ -313,6 +355,21 @@ export default function Home({ session, notificationCount, onBellClick }) {
     acc[schoolKey].classrooms.push(m);
     return acc;
   }, {});
+
+  // Flatten classmates into renderable cards, each carrying its classroom label.
+  const classmateCards = [];
+  Object.values(classmates).forEach((group) => {
+    (group.rows || []).forEach((cm) => {
+      const members = cm.households?.household_members || [];
+      members.forEach((hm) => {
+        classmateCards.push({
+          key: `${cm.id}-${hm.parent_id}`,
+          parents: hm.parents,
+          classroomLabel: group.classroomLabel,
+        });
+      });
+    });
+  });
 
   const inputStyle = {
     width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
@@ -428,17 +485,19 @@ export default function Home({ session, notificationCount, onBellClick }) {
           </div>
         </div>
 
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 1rem", letterSpacing: "0.05em" }}>YOUR SCHOOL</p>
 
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
               <span style={{ fontSize: "1.2rem" }}>🏫</span>
-              <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
             </div>
             <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
+              <p style={{ color: "#607080", fontSize: "0.7rem", letterSpacing: "0.05em", margin: 0, padding: "0.75rem 1rem 0.25rem" }}>CLASSROOMS</p>
               {school.classrooms.map((m, idx) => {
-                const otherFamilies = classmates[m.id] || [];
+                const group = classmates[m.id];
+                const otherFamilies = group?.rows || [];
                 return (
                   <div key={m.id} style={{ borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "0.75rem 1rem", background: "#0F2A45" }}>
@@ -483,36 +542,32 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1rem 0 0.75rem", letterSpacing: "0.05em" }}>PARENTS IN YOUR CLASSROOMS</p>
 
-        {Object.values(classmates).flat().length === 0 ? (
+        {classmateCards.length === 0 ? (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No other parents yet</p>
             <p style={{ color: "#607080", fontSize: "0.9rem" }}>Share Huddle to get other families to join!</p>
           </div>
         ) : (
-          Object.values(classmates).flat().map((cm) => {
-            const household = cm.households;
-            const members = household?.household_members || [];
-            return members.map((hm) => (
-              <div key={`${cm.id}-${hm.parent_id}`} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
-                    {hm.parents?.photo_url ? (
-                      <img src={hm.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : hm.parents?.name?.charAt(0) || "?"}
-                  </div>
-                  <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(hm.parents?.name)}</p>
-                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent in this classroom</p>
-                  </div>
+          classmateCards.map((card) => (
+            <div key={card.key} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                  {card.parents?.photo_url ? (
+                    <img src={card.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : card.parents?.name?.charAt(0) || "?"}
                 </div>
-                <button onClick={() => setRequestingPlaydate(hm.parents)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                  Huddle →
-                </button>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(card.parents?.name)}</p>
+                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{card.classroomLabel}</p>
+                </div>
               </div>
-            ));
-          })
+              <button onClick={() => setRequestingPlaydate(card.parents)}
+                style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                Huddle →
+              </button>
+            </div>
+          ))
         )}
       </div>
 
