@@ -34,7 +34,7 @@ export default function App() {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
         if (session) {
@@ -48,7 +48,22 @@ export default function App() {
       }
     );
 
-    return () => subscription.unsubscribe();
+    // Refresh counts when the user returns to the app (tab focus / visibility).
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "visible") {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session) fetchCounts(session.user.id);
+        });
+      }
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
   }, []);
 
   const checkConsent = async (userId) => {
