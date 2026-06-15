@@ -114,14 +114,27 @@ export default function Profile({ session, onComplete }) {
         });
       if (memberErr) throw memberErr;
 
-      const { error: cmErr } = await supabase.from("classroom_members").insert({
+  const { error: cmErr } = await supabase.from("classroom_members").insert({
         household_id: household.id,
         classroom_id: classroom.id,
         school_year: schoolYear,
       });
       if (cmErr && !cmErr.message.includes("duplicate")) throw cmErr;
 
+      // Welcome notification (non-blocking — a failed insert shouldn't stop signup).
+      try {
+        await supabase.from("notifications").insert({
+          recipient_id: session.user.id,
+          type: "welcome",
+          title: "Welcome to Huddle! 👋",
+          body: "Huddle helps you connect with other parents in your kid's classroom. A few tips to get started: add all your classrooms so you see every family, tap \"Huddle →\" next to a parent to set up a playdate, and check this bell for playdate invites and updates. Your privacy is protected — other parents only ever see your first name and last initial, never your full name, email, or phone.",
+        });
+      } catch (notifErr) {
+        // Ignore — welcome note is best-effort.
+      }
+
       onComplete();
+
     } catch (err) {
       setError(err.message);
     }

@@ -4,10 +4,11 @@ import { supabase } from "./supabase";
 export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  useEffect(() => { fetchRequests(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   const shortName = (fullName) => {
     if (!fullName) return "A parent";
@@ -16,7 +17,13 @@ export default function Inbox({ session, onBack }) {
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
-  const fetchRequests = async () => {
+  const fmtWhen = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+
+  const fetchAll = async () => {
     setLoading(true);
 
     const { data: conns } = await supabase
@@ -43,24 +50,43 @@ export default function Inbox({ session, onBack }) {
       setJoinRequests([]);
     }
 
+    const { data: notifs } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("recipient_id", session.user.id)
+      .order("created_at", { ascending: false });
+    setNotifications(notifs || []);
+
     setLoading(false);
+
+    // Auto-mark unread notifications as read shortly after they're seen.
+    const unreadIds = (notifs || []).filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length > 0) {
+      setTimeout(async () => {
+        await supabase.from("notifications").update({ read: true }).in("id", unreadIds);
+        setNotifications((prev) => prev.map((n) => unreadIds.includes(n.id) ? { ...n, read: true } : n));
+      }, 1200);
+    }
+  };
+
+  const markUnread = async (notifId) => {
+    await supabase.from("notifications").update({ read: false }).eq("id", notifId);
+    setNotifications((prev) => prev.map((n) => n.id === notifId ? { ...n, read: false } : n));
+    setMessage("Marked as unread — we'll remind you.");
+    setTimeout(() => setMessage(""), 2500);
   };
 
   const accept = async (connectionId) => {
-    await supabase.from("connections")
-      .update({ status: "accepted" })
-      .eq("id", connectionId);
+    await supabase.from("connections").update({ status: "accepted" }).eq("id", connectionId);
     setMessage("Connection accepted!");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
   const decline = async (connectionId) => {
-    await supabase.from("connections")
-      .delete()
-      .eq("id", connectionId);
+    await supabase.from("connections").delete().eq("id", connectionId);
     setMessage("Request declined");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
@@ -69,7 +95,6 @@ export default function Inbox({ session, onBack }) {
     try {
       const requesterId = req.requesting_parent_id;
 
-      // 1. My (approver's) household — the destination.
       const { data: myHh, error: hhErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -78,7 +103,6 @@ export default function Inbox({ session, onBack }) {
       if (hhErr) throw hhErr;
       const destHouseholdId = myHh.household_id;
 
-      // 2. Requester's current household + their role there.
       const { data: theirMembership } = await supabase
         .from("household_members")
         .select("id, household_id, role")
@@ -87,18 +111,15 @@ export default function Inbox({ session, onBack }) {
 
       const oldHouseholdId = theirMembership?.household_id || null;
 
-      // Guard: if they're somehow already in my household, just mark approved.
       if (oldHouseholdId === destHouseholdId) {
         await supabase.from("household_join_requests")
           .update({ status: "approved", resolved_at: new Date().toISOString() })
           .eq("id", req.id);
         setMessage(`${shortName(req.requester?.name)} is already in your household.`);
-        fetchRequests();
+        fetchAll();
         return;
       }
 
-      // 3. Move the requester's old household's classroom memberships into mine
-      //    (union — skip any my household already has).
       if (oldHouseholdId) {
         const { data: oldCms } = await supabase
           .from("classroom_members")
@@ -123,11 +144,9 @@ export default function Inbox({ session, onBack }) {
         }
       }
 
-      // 4. Remove the requester from their old household.
       if (theirMembership) {
         await supabase.from("household_members").delete().eq("id", theirMembership.id);
 
-        // 5. Clean up their old household: delete if empty, else promote if needed.
         const { data: remaining } = await supabase
           .from("household_members")
           .select("id, role, joined_at")
@@ -144,7 +163,6 @@ export default function Inbox({ session, onBack }) {
         }
       }
 
-      // 6. Add the requester to my household as co-parent.
       const { error: memberErr } = await supabase
         .from("household_members")
         .insert({
@@ -154,13 +172,12 @@ export default function Inbox({ session, onBack }) {
         });
       if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
 
-      // 7. Mark the request approved.
       await supabase.from("household_join_requests")
         .update({ status: "approved", resolved_at: new Date().toISOString() })
         .eq("id", req.id);
 
       setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
-      fetchRequests();
+      fetchAll();
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
       setMessage("Error: " + err.message);
@@ -173,11 +190,11 @@ export default function Inbox({ session, onBack }) {
       .update({ status: "declined", resolved_at: new Date().toISOString() })
       .eq("id", req.id);
     setMessage("Link request declined");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const nothingPending = connectionRequests.length === 0 && joinRequests.length === 0;
+  const nothing = connectionRequests.length === 0 && joinRequests.length === 0 && notifications.length === 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -198,7 +215,7 @@ export default function Inbox({ session, onBack }) {
 
         {loading ? (
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
-        ) : nothingPending ? (
+        ) : nothing ? (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🔔</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No new notifications</p>
@@ -206,6 +223,7 @@ export default function Inbox({ session, onBack }) {
           </div>
         ) : (
           <>
+            {/* Actionable requests first */}
             {joinRequests.length > 0 && (
               <>
                 <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>HOUSEHOLD LINK REQUESTS</p>
@@ -263,6 +281,33 @@ export default function Inbox({ session, onBack }) {
                         Accept
                       </button>
                     </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* Informational notifications */}
+            {notifications.length > 0 && (
+              <>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: (joinRequests.length + connectionRequests.length) > 0 ? "1.5rem 0 0.75rem" : "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
+                {notifications.map((n) => (
+                  <div key={n.id} style={{ background: n.read ? "#13233F" : "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: n.read ? "1px solid #2A4A6B" : "1px solid #02C39A" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                          {!n.read && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
+                          <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{n.title}</p>
+                        </div>
+                        {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
+                        <p style={{ color: "#607080", fontSize: "0.7rem", margin: 0 }}>{fmtWhen(n.created_at)}</p>
+                      </div>
+                    </div>
+                    {n.read && (
+                      <button onClick={() => markUnread(n.id)}
+                        style={{ marginTop: "0.75rem", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.35rem 0.7rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                        Mark unread
+                      </button>
+                    )}
                   </div>
                 ))}
               </>

@@ -95,10 +95,8 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Bell = people/communications. Playdate badge = un-RSVP'd invites.
-  // Halo: amber if ANY live (upcoming, non-declined) invite — mine or, when I
-  //   host, any guest's — is "maybe" or unanswered. Teal if there's a confirmed
-  //   "going" and no maybes/unanswered. Null if nothing live.
+  // Bell = pending connection requests + pending household-link requests + unread notifications.
+  // Playdate badge = un-RSVP'd invites. Halo = amber/teal/null per playdate state.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -122,6 +120,14 @@ export default function App() {
         .eq("status", "pending");
       bell += joins ? joins.length : 0;
     }
+
+    const { data: unreadNotifs } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("recipient_id", userId)
+      .eq("read", false);
+    bell += unreadNotifs ? unreadNotifs.length : 0;
+
     setNotificationCount(bell);
 
     if (!myHh) {
@@ -135,7 +141,6 @@ export default function App() {
     let hasGoing = false;
     let unrepliedCount = 0;
 
-    // Invites TO my household.
     const { data: myInv } = await supabase
       .from("playdate_invites")
       .select("rsvp, playdates(proposed_date, organizer_household_id)")
@@ -144,14 +149,13 @@ export default function App() {
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
-      if (new Date(pd.proposed_date).getTime() < nowMs) continue; // past
+      if (pd.organizer_household_id === myHh.household_id) continue;
+      if (new Date(pd.proposed_date).getTime() < nowMs) continue;
       if (inv.rsvp === "invited") { hasMaybeOrUnanswered = true; unrepliedCount++; }
       else if (inv.rsvp === "maybe") { hasMaybeOrUnanswered = true; }
       else if (inv.rsvp === "yes") { hasGoing = true; }
     }
 
-    // Playdates I HOST (future) — inspect each guest's RSVP.
     const { data: hosting } = await supabase
       .from("playdates")
       .select("id, proposed_date")
@@ -198,7 +202,7 @@ export default function App() {
   }
 
   if (!hasProfile) {
-    return <Profile session={session} onComplete={() => setHasProfile(true)} />;
+    return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
   }
 
   if (showInbox) {
