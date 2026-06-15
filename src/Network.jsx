@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
+import InviteFamily from "./InviteFamily";
 
 export default function Network({ session }) {
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  const [inviting, setInviting] = useState(false);
+  const [myName, setMyName] = useState("");
 
   useEffect(() => { fetchConnections(); }, []);
 
@@ -20,6 +23,13 @@ export default function Network({ session }) {
   const fetchConnections = async () => {
     setLoading(true);
     const userId = session.user.id;
+
+    const { data: me } = await supabase
+      .from("parents")
+      .select("name")
+      .eq("id", userId)
+      .single();
+    setMyName(me?.name || "");
 
     const { data } = await supabase
       .from("connections")
@@ -102,13 +112,19 @@ export default function Network({ session }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
+        {/* Invite a family */}
+        <button onClick={() => setInviting(true)}
+          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          ➕ Invite a family to Huddle
+        </button>
+
         {loading ? (
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
         ) : connections.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+          <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🤝</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No connections yet</p>
-            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school and connect with them. They'll show up here so you can set up playdates across classrooms.</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school, or invite a family above. They'll show up here so you can set up playdates across classrooms.</p>
           </div>
         ) : (
           <>
@@ -137,7 +153,7 @@ export default function Network({ session }) {
                   </button>
                 </div>
 
-                {/* Their classrooms (context: who they are / which class) */}
+                {/* Their classrooms (context) */}
                 {conn.classrooms.length > 0 && (
                   <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: conn.coParents.length > 0 ? "0.5rem" : 0 }}>
                     <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CLASSROOMS</p>
@@ -149,7 +165,7 @@ export default function Network({ session }) {
                   </div>
                 )}
 
-                {/* Co-parents in their household (privacy-safe names) */}
+                {/* Co-parents (privacy-safe) */}
                 {conn.coParents.length > 0 && (
                   <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B" }}>
                     <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CO-PARENTS</p>
@@ -168,7 +184,7 @@ export default function Network({ session }) {
                   </div>
                 )}
 
-                {/* Remove (subtle, at bottom) */}
+                {/* Remove */}
                 <button onClick={() => removeConnection(conn.connectionId)}
                   style={{ marginTop: "0.75rem", background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0" }}>
                   Remove connection
@@ -178,6 +194,14 @@ export default function Network({ session }) {
           </>
         )}
       </div>
+
+      {inviting && (
+        <InviteFamily
+          session={session}
+          inviterName={myName}
+          onClose={() => setInviting(false)}
+        />
+      )}
     </div>
   );
 }
