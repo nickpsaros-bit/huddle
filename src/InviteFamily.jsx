@@ -2,7 +2,7 @@ import { useState } from "react";
 import { supabase } from "./supabase";
 
 // Reusable "Invite a family" modal. Generates a sender-locked, single-use,
-// 48h invite token (max 3/day), then hands off to the device share sheet.
+// 48h invite token (max 3/day), then offers copy + share.
 // Pass an optional playdateId to attach a pending playdate (Layer 3).
 export default function InviteFamily({ session, inviterName, playdateId = null, onClose }) {
   const [loading, setLoading] = useState(false);
@@ -12,13 +12,12 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
   const [copied, setCopied] = useState(false);
 
   const firstName = (inviterName || "").trim().split(/\s+/)[0] || "A parent";
+  const canNativeShare = typeof navigator !== "undefined" && !!navigator.share;
 
   const makeToken = () => {
-    // Long, unguessable token.
     if (window.crypto && window.crypto.randomUUID) {
       return (window.crypto.randomUUID() + window.crypto.randomUUID()).replace(/-/g, "");
     }
-    // Fallback.
     return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2)).join("");
   };
 
@@ -26,7 +25,6 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
     setLoading(true);
     setError("");
     try {
-      // Enforce 3 invites/day.
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const { data: todays, error: countErr } = await supabase
@@ -64,29 +62,24 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
     setLoading(false);
   };
 
-const share = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: "Join me on Huddle", text: shareMsg });
-        // Share completed — close the modal.
-        onClose();
-      } catch (e) {
-        // User cancelled the share — keep the modal open so they can retry.
-      }
-    } else {
-      // Desktop fallback: copy, then close shortly after so they see the confirmation.
-      copy();
-      setTimeout(() => onClose(), 1200);
-    }
-  };
-
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(shareMsg);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      setTimeout(() => setCopied(false), 3000);
     } catch (e) {
-      setError("Couldn't copy automatically — select and copy the message manually.");
+      setError("Couldn't copy automatically — select the message above and copy it manually.");
+    }
+  };
+
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Join me on Huddle", text: shareMsg, url: link });
+        onClose();
+      } catch (e) {
+        // User cancelled — keep modal open.
+      }
     }
   };
 
@@ -126,21 +119,38 @@ const share = async () => {
           </>
         ) : (
           <>
-            <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1rem" }}>
-              <p style={{ color: "#02C39A", fontSize: "0.85rem", margin: "0 0 0.5rem", fontWeight: "500" }}>Invite ready! Valid for 48 hours.</p>
-              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, wordBreak: "break-all" }}>{link}</p>
+            <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "10px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
+              <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0, fontWeight: "500" }}>✓ Invite ready — valid for 48 hours</p>
             </div>
 
-            <button onClick={share}
-              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
-              📤 Share invite
-            </button>
+            {/* Message preview — selectable */}
+            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.4rem" }}>YOUR INVITE MESSAGE</p>
+            <div style={{ background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1rem", userSelect: "all", WebkitUserSelect: "all", cursor: "text" }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0, lineHeight: "1.5", wordBreak: "break-word" }}>{shareMsg}</p>
+            </div>
+
+            {/* Primary: Copy (reliable everywhere) */}
             <button onClick={copy}
-              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", cursor: "pointer", marginTop: "0.75rem" }}>
-              {copied ? "✓ Copied!" : "Copy message"}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: copied ? "#0F3D2E" : "#02C39A", color: copied ? "#02C39A" : "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer", border: copied ? "1px solid #02C39A" : "none" }}>
+              {copied ? "✓ Copied! Now paste it into a text or email" : "📋 Copy invite message"}
             </button>
+
+            {/* Secondary: native share (mobile) */}
+            {canNativeShare && (
+              <button onClick={share}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #02C39A", background: "transparent", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "0.75rem" }}>
+                📤 Or share directly
+              </button>
+            )}
+
+            <p style={{ color: "#607080", fontSize: "0.75rem", margin: "0.85rem 0 0", textAlign: "center", lineHeight: "1.5" }}>
+              {canNativeShare
+                ? "Copy and paste into any app, or tap share to pick one."
+                : "Copy the message, then paste it into a text or email to the family you're inviting."}
+            </p>
+
             <button onClick={onClose}
-              style={{ width: "100%", padding: "0.6rem", borderRadius: "10px", border: "none", background: "transparent", color: "#607080", fontSize: "0.85rem", cursor: "pointer", marginTop: "0.5rem" }}>
+              style={{ width: "100%", padding: "0.6rem", borderRadius: "10px", border: "none", background: "transparent", color: "#607080", fontSize: "0.85rem", cursor: "pointer", marginTop: "0.75rem" }}>
               Done
             </button>
           </>
