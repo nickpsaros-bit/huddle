@@ -136,13 +136,65 @@ export default function Playdates({ session, onChanged }) {
     setLoading(false);
   };
 
-  const respond = async (inviteId, rsvp) => {
+const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
       await supabase
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString() })
         .eq("id", inviteId);
+
+      // Notify the host's household that a guest responded (non-blocking).
+      try {
+        // The invite row -> its playdate -> the organizer household.
+        const { data: inv } = await supabase
+          .from("playdate_invites")
+          .select("playdate_id, household_id, playdates(organizer_household_id)")
+          .eq("id", inviteId)
+          .single();
+
+        const organizerHouseholdId = inv?.playdates?.organizer_household_id;
+        const respondingHouseholdId = inv?.household_id;
+
+        if (organizerHouseholdId && respondingHouseholdId && organizerHouseholdId !== respondingHouseholdId) {
+          // Responding household's display name.
+          const { data: respMembers } = await supabase
+            .from("household_members")
+            .select("parents(name)")
+            .eq("household_id", respondingHouseholdId);
+          const respNames = (respMembers || [])
+            .map((m) => {
+              const n = m.parents?.name;
+              if (!n) return null;
+              const parts = n.trim().split(/\s+/);
+              return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+            })
+            .filter(Boolean);
+          const respLabel = respNames.length > 0 ? respNames.join(" & ") : "A family";
+
+          const verb = rsvp === "yes" ? "is going to" : rsvp === "maybe" ? "might come to" : "can't make";
+          const emoji = rsvp === "yes" ? "✅" : rsvp === "maybe" ? "🤔" : "😔";
+
+          // Parents in the host household.
+          const { data: hostMembers } = await supabase
+            .from("household_members")
+            .select("parent_id")
+            .eq("household_id", organizerHouseholdId);
+
+          const rows = (hostMembers || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "playdate_rsvp",
+            title: `Playdate RSVP ${emoji}`,
+            body: `${respLabel} ${verb} your playdate.`,
+          }));
+          if (rows.length > 0) {
+            await supabase.from("notifications").insert(rows);
+          }
+        }
+      } catch (notifErr) {
+        // Best-effort — don't block the RSVP.
+      }
+
       setMessage(rsvp === "yes" ? "You're going!" : rsvp === "maybe" ? "Marked as maybe" : "Can't make it");
       await fetchData();
       if (typeof onChanged === "function") onChanged();

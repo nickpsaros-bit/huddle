@@ -71,6 +71,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       createdPlaydateId = playdate.id;
 
       // Invite the recipient's household. If this fails, roll back the playdate.
+
+// Invite the recipient's household. If this fails, roll back the playdate.
       const { error: invErr } = await supabase
         .from("playdate_invites")
         .insert({
@@ -81,7 +83,44 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         });
       if (invErr) throw invErr;
 
+      // Notify every parent in the invited household (non-blocking).
+      try {
+        // My household's display name (the inviter).
+        const { data: myMembers } = await supabase
+          .from("household_members")
+          .select("parents(name)")
+          .eq("household_id", myHm.household_id);
+        const inviterNames = (myMembers || [])
+          .map((m) => {
+            const n = m.parents?.name;
+            if (!n) return null;
+            const parts = n.trim().split(/\s+/);
+            return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+          })
+          .filter(Boolean);
+        const inviterLabel = inviterNames.length > 0 ? inviterNames.join(" & ") : "A family";
+
+        // Parents in the invited household.
+        const { data: theirMembers } = await supabase
+          .from("household_members")
+          .select("parent_id")
+          .eq("household_id", theirHm.household_id);
+
+        const rows = (theirMembers || []).map((m) => ({
+          recipient_id: m.parent_id,
+          type: "playdate_invite",
+          title: "New playdate invite 🎉",
+          body: `${inviterLabel} invited you to a playdate. Open the Playdates tab to RSVP.`,
+        }));
+        if (rows.length > 0) {
+          await supabase.from("notifications").insert(rows);
+        }
+      } catch (notifErr) {
+        // Best-effort — don't block the invite.
+      }
+
       onSent();
+
     } catch (err) {
       // Roll back an orphaned playdate so we never leave a guest-less event.
       if (createdPlaydateId) {
