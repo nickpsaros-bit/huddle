@@ -64,16 +64,19 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
     setLoading(false);
   };
 
-  const share = async () => {
+const share = async () => {
     if (navigator.share) {
       try {
         await navigator.share({ title: "Join me on Huddle", text: shareMsg });
+        // Share completed — close the modal.
+        onClose();
       } catch (e) {
-        // user cancelled share — ignore
+        // User cancelled the share — keep the modal open so they can retry.
       }
     } else {
-      // Desktop fallback: copy.
+      // Desktop fallback: copy, then close shortly after so they see the confirmation.
       copy();
+      setTimeout(() => onClose(), 1200);
     }
   };
 
