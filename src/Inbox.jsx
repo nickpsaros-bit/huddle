@@ -76,8 +76,37 @@ export default function Inbox({ session, onBack }) {
     setTimeout(() => setMessage(""), 2500);
   };
 
-  const accept = async (connectionId) => {
+const accept = async (connectionId) => {
     await supabase.from("connections").update({ status: "accepted" }).eq("id", connectionId);
+
+    // Notify the requester that I accepted (non-blocking).
+    try {
+      const { data: conn } = await supabase
+        .from("connections")
+        .select("requester_id")
+        .eq("id", connectionId)
+        .single();
+
+      // My display name (the accepter).
+      const { data: me } = await supabase
+        .from("parents")
+        .select("name")
+        .eq("id", session.user.id)
+        .single();
+      const myLabel = shortName(me?.name);
+
+      if (conn?.requester_id) {
+        await supabase.from("notifications").insert({
+          recipient_id: conn.requester_id,
+          type: "connection_accepted",
+          title: "Connection accepted 🤝",
+          body: `${myLabel} accepted your connection. You can now set up playdates together.`,
+        });
+      }
+    } catch (notifErr) {
+      // Best-effort.
+    }
+
     setMessage("Connection accepted!");
     fetchAll();
     setTimeout(() => setMessage(""), 3000);
@@ -112,10 +141,30 @@ export default function Inbox({ session, onBack }) {
       const oldHouseholdId = theirMembership?.household_id || null;
 
       if (oldHouseholdId === destHouseholdId) {
-        await supabase.from("household_join_requests")
-          .update({ status: "approved", resolved_at: new Date().toISOString() })
-          .eq("id", req.id);
-        setMessage(`${shortName(req.requester?.name)} is already in your household.`);
+       await supabase.from("household_join_requests")
+        .update({ status: "approved", resolved_at: new Date().toISOString() })
+        .eq("id", req.id);
+
+      // Notify the requester that they were added (non-blocking).
+      try {
+        const { data: me } = await supabase
+          .from("parents")
+          .select("name")
+          .eq("id", session.user.id)
+          .single();
+        const myLabel = shortName(me?.name);
+
+        await supabase.from("notifications").insert({
+          recipient_id: requesterId,
+          type: "household_joined",
+          title: "You joined a household 🏡",
+          body: `${myLabel} added you to their household. Your classrooms are now shared.`,
+        });
+      } catch (notifErr) {
+        // Best-effort.
+      }
+
+      setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
         fetchAll();
         return;
       }
