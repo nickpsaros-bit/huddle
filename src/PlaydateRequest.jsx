@@ -9,9 +9,9 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [coords, setCoords] = useState(null); // organizer's school { latitude, longitude }
+  const [coords, setCoords] = useState(null);
 
-const locations = [
+  const locations = [
     { name: "Local Park", address: "Nearby park" },
     { name: "School Playground", address: "School grounds" },
     { name: "Community Center", address: "Community center" },
@@ -19,8 +19,6 @@ const locations = [
     { name: "Their House", address: "Their home" },
   ];
 
-  // Fetch the organizer's school coordinates (for the sunrise/sunset gradient).
-  // Gracefully no-ops if the school has no coordinates yet.
   useEffect(() => {
     (async () => {
       try {
@@ -47,8 +45,6 @@ const locations = [
     })();
   }, [session]);
 
-  // Inline sunrise/sunset calculation (NOAA approximation) — no dependency.
-  // Returns { sunriseMin, sunsetMin } as minutes-from-midnight in local time, or null.
   const computeSunTimes = (dateStr, lat, lng) => {
     if (!dateStr || lat == null || lng == null) return null;
     try {
@@ -91,8 +87,6 @@ const locations = [
 
   const sunTimes = coords && date ? computeSunTimes(date, coords.latitude, coords.longitude) : null;
 
-  // 30-minute time slots, 7:00 AM to 9:00 PM. If we know sunset for the day,
-  // slots after sunset get a 🌙; otherwise no marker.
   const timeSlots = [];
   for (let h = 7; h <= 21; h++) {
     for (let m = 0; m < 60; m += 30) {
@@ -108,22 +102,18 @@ const locations = [
     }
   }
 
-  // Build a day/night gradient for the 7 AM–9 PM window (840 minutes span).
-  // Maps sunrise/sunset onto the strip so it reflects the real local day.
   const renderGradient = () => {
-    const startMin = 7 * 60;   // 7:00 AM
-    const endMin = 21 * 60;    // 9:00 PM
+    const startMin = 7 * 60;
+    const endMin = 21 * 60;
     const span = endMin - startMin;
     const pct = (min) => Math.max(0, Math.min(100, ((min - startMin) / span) * 100));
 
-    // Default (no sun data): a gentle neutral daytime gradient.
     if (!sunTimes) {
       return "linear-gradient(90deg, #1B3A5C 0%, #244C70 50%, #1B3A5C 100%)";
     }
 
     const sr = pct(sunTimes.sunriseMin);
     const ss = pct(sunTimes.sunsetMin);
-    // night (deep blue) -> dawn (amber) -> day (sky) -> dusk (amber) -> night
     return `linear-gradient(90deg,
       #0B1B33 0%,
       #0B1B33 ${Math.max(0, sr - 8)}%,
@@ -135,7 +125,6 @@ const locations = [
       #0B1B33 100%)`;
   };
 
-  // Position (%) of the currently selected time on the gradient strip.
   const selectedPct = (() => {
     if (!time) return null;
     const [hh, mm] = time.split(":").map(Number);
@@ -202,7 +191,6 @@ const locations = [
         });
       if (invErr) throw invErr;
 
-      // Notify every parent in the invited household (non-blocking).
       try {
         const { data: myMembers } = await supabase
           .from("household_members")
@@ -260,6 +248,8 @@ const locations = [
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
+  const isPresetSelected = locations.some((l) => l.name === locationName);
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
@@ -271,7 +261,6 @@ const locations = [
 
       <div style={{ padding: "1.5rem", maxWidth: "500px", margin: "0 auto" }}>
 
-        {/* Recipient card */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
             {recipient.photo_url ? (
@@ -286,7 +275,6 @@ const locations = [
           </div>
         </div>
 
-        {/* Date & Time */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>DATE & TIME</p>
           <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Date</label>
@@ -298,7 +286,6 @@ const locations = [
             style={inputStyle}
           />
 
-          {/* Day/night gradient strip — only meaningful once a date is picked */}
           {date && (
             <div style={{ marginBottom: "0.85rem" }}>
               <div style={{
@@ -338,13 +325,11 @@ const locations = [
           </select>
         </div>
 
-        {/* Location */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>LOCATION</p>
-<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
             {locations.map((loc) => {
-              const isPreset = locations.some((l) => l.name === locationName);
-              const selected = locationName === loc.name && isPreset;
+              const selected = locationName === loc.name;
               return (
                 <button
                   key={loc.name}
@@ -363,7 +348,6 @@ const locations = [
             })}
           </div>
 
-          {/* Or enter a specific place — always available */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0.25rem 0 0.85rem" }}>
             <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
             <span style={{ color: "#607080", fontSize: "0.75rem" }}>or enter a specific place</span>
@@ -374,15 +358,15 @@ const locations = [
           <input
             type="text"
             placeholder="e.g. Howarth Park, Santa Rosa"
-            value={locations.some((l) => l.name === locationName) ? "" : locationName}
+            value={isPresetSelected ? "" : locationName}
             onChange={(e) => { setLocationName(e.target.value); setLocationAddress(""); }}
             style={inputStyle}
           />
           <p style={{ color: "#607080", fontSize: "0.72rem", margin: "-0.5rem 0 0", lineHeight: "1.4" }}>
             Tip: include the city so the other family can find it easily.
           </p>
+        </div>
 
-        {/* Note */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
           <textarea
