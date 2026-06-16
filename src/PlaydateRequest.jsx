@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
@@ -9,6 +9,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [coords, setCoords] = useState(null); // organizer's school { latitude, longitude }
 
   const locations = [
     { name: "Local Park", address: "Nearby park" },
@@ -18,6 +19,131 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     { name: "Their House", address: "Their home" },
     { name: "Custom location", address: "" },
   ];
+
+  // Fetch the organizer's school coordinates (for the sunrise/sunset gradient).
+  // Gracefully no-ops if the school has no coordinates yet.
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: hm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", session.user.id)
+          .single();
+        if (!hm) return;
+
+        const { data: cm } = await supabase
+          .from("classroom_members")
+          .select("classrooms(schools(latitude, longitude))")
+          .eq("household_id", hm.household_id)
+          .limit(1);
+
+        const school = cm?.[0]?.classrooms?.schools;
+        if (school && school.latitude != null && school.longitude != null) {
+          setCoords({ latitude: school.latitude, longitude: school.longitude });
+        }
+      } catch (e) {
+        // No coords -> gradient simply won't show.
+      }
+    })();
+  }, [session]);
+
+  // Inline sunrise/sunset calculation (NOAA approximation) — no dependency.
+  // Returns { sunriseMin, sunsetMin } as minutes-from-midnight in local time, or null.
+  const computeSunTimes = (dateStr, lat, lng) => {
+    if (!dateStr || lat == null || lng == null) return null;
+    try {
+      const d = new Date(`${dateStr}T12:00:00`);
+      const rad = Math.PI / 180;
+      const dayOfYear = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+
+      const gamma = (2 * Math.PI / 365) * (dayOfYear - 1 + 0.5);
+      const decl = 0.006918 - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma)
+        - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma)
+        - 0.002697 * Math.cos(3 * gamma) + 0.00148 * Math.sin(3 * gamma);
+      const eqTime = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma)
+        - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+
+      const latRad = lat * rad;
+      const zenith = 90.833 * rad;
+      const cosH = (Math.cos(zenith) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl));
+      if (cosH > 1 || cosH < -1) return null;
+
+      const haDeg = Math.acos(cosH) / rad;
+      const sunriseUTC = 720 - 4 * (lng + haDeg) - eqTime;
+      const sunsetUTC = 720 - 4 * (lng - haDeg) - eqTime;
+
+      const tzOffsetMin = -d.getTimezoneOffset();
+      const norm = (m) => ((m + tzOffsetMin) % 1440 + 1440) % 1440;
+
+      return { sunriseMin: norm(sunriseUTC), sunsetMin: norm(sunsetUTC) };
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const minutesToLabel = (mins) => {
+    let h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    const ampm = h < 12 ? "AM" : "PM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+  };
+
+  const sunTimes = coords && date ? computeSunTimes(date, coords.latitude, coords.longitude) : null;
+
+  // 30-minute time slots, 7:00 AM to 9:00 PM. If we know sunset for the day,
+  // slots after sunset get a 🌙; otherwise no marker.
+  const timeSlots = [];
+  for (let h = 7; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const slotMin = h * 60 + m;
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      const ampm = h < 12 ? "AM" : "PM";
+      const afterSunset = sunTimes && slotMin >= sunTimes.sunsetMin;
+      const beforeSunrise = sunTimes && slotMin < sunTimes.sunriseMin;
+      const isDark = afterSunset || beforeSunrise;
+      const label = `${hour12}:${String(m).padStart(2, "0")} ${ampm}${isDark ? " 🌙" : ""}`;
+      timeSlots.push({ value, label });
+    }
+  }
+
+  // Build a day/night gradient for the 7 AM–9 PM window (840 minutes span).
+  // Maps sunrise/sunset onto the strip so it reflects the real local day.
+  const renderGradient = () => {
+    const startMin = 7 * 60;   // 7:00 AM
+    const endMin = 21 * 60;    // 9:00 PM
+    const span = endMin - startMin;
+    const pct = (min) => Math.max(0, Math.min(100, ((min - startMin) / span) * 100));
+
+    // Default (no sun data): a gentle neutral daytime gradient.
+    if (!sunTimes) {
+      return "linear-gradient(90deg, #1B3A5C 0%, #244C70 50%, #1B3A5C 100%)";
+    }
+
+    const sr = pct(sunTimes.sunriseMin);
+    const ss = pct(sunTimes.sunsetMin);
+    // night (deep blue) -> dawn (amber) -> day (sky) -> dusk (amber) -> night
+    return `linear-gradient(90deg,
+      #0B1B33 0%,
+      #0B1B33 ${Math.max(0, sr - 8)}%,
+      #C97B3C ${sr}%,
+      #4AA3D8 ${Math.min(sr + 10, 100)}%,
+      #4AA3D8 ${Math.max(ss - 10, 0)}%,
+      #C97B3C ${ss}%,
+      #0B1B33 ${Math.min(100, ss + 8)}%,
+      #0B1B33 100%)`;
+  };
+
+  // Position (%) of the currently selected time on the gradient strip.
+  const selectedPct = (() => {
+    if (!time) return null;
+    const [hh, mm] = time.split(":").map(Number);
+    const min = hh * 60 + mm;
+    const startMin = 7 * 60, endMin = 21 * 60;
+    return Math.max(0, Math.min(100, ((min - startMin) / (endMin - startMin)) * 100));
+  })();
 
   const sendRequest = async () => {
     if (!date || !time || !locationName) {
@@ -29,7 +155,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
     let createdPlaydateId = null;
     try {
-      // My household (the organizer).
       const { data: myHm, error: myErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -37,7 +162,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         .single();
       if (myErr) throw myErr;
 
-      // The recipient's household (the first invitee).
       const { data: theirHm, error: theirErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -53,7 +177,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       const proposedDate = new Date(`${date}T${time}`).toISOString();
 
-      // Create the playdate event.
       const { data: playdate, error: pdErr } = await supabase
         .from("playdates")
         .insert({
@@ -70,9 +193,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-      // Invite the recipient's household. If this fails, roll back the playdate.
-
-// Invite the recipient's household. If this fails, roll back the playdate.
       const { error: invErr } = await supabase
         .from("playdate_invites")
         .insert({
@@ -85,7 +205,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       // Notify every parent in the invited household (non-blocking).
       try {
-        // My household's display name (the inviter).
         const { data: myMembers } = await supabase
           .from("household_members")
           .select("parents(name)")
@@ -100,7 +219,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .filter(Boolean);
         const inviterLabel = inviterNames.length > 0 ? inviterNames.join(" & ") : "A family";
 
-        // Parents in the invited household.
         const { data: theirMembers } = await supabase
           .from("household_members")
           .select("parent_id")
@@ -122,7 +240,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       onSent();
 
     } catch (err) {
-      // Roll back an orphaned playdate so we never leave a guest-less event.
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
@@ -147,7 +264,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
-      {/* Header */}
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Request a Playdate</h1>
@@ -182,13 +298,45 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             min={new Date().toISOString().split("T")[0]}
             style={inputStyle}
           />
+
+          {/* Day/night gradient strip — only meaningful once a date is picked */}
+          {date && (
+            <div style={{ marginBottom: "0.85rem" }}>
+              <div style={{
+                position: "relative", height: "14px", borderRadius: "7px",
+                background: renderGradient(), border: "1px solid #2A4A6B", overflow: "hidden"
+              }}>
+                {selectedPct != null && (
+                  <div style={{
+                    position: "absolute", top: "-3px", left: `calc(${selectedPct}% - 3px)`,
+                    width: "6px", height: "20px", borderRadius: "3px",
+                    background: "#FFFFFF", boxShadow: "0 0 4px rgba(0,0,0,0.5)"
+                  }} />
+                )}
+              </div>
+              {sunTimes ? (
+                <p style={{ color: "#8AAEC8", fontSize: "0.72rem", margin: "0.4rem 0 0", textAlign: "center" }}>
+                  🌅 Sunrise {minutesToLabel(sunTimes.sunriseMin)} · 🌇 Sunset {minutesToLabel(sunTimes.sunsetMin)}
+                </p>
+              ) : (
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.4rem 0 0", textAlign: "center" }}>
+                  Morning to evening
+                </p>
+              )}
+            </div>
+          )}
+
           <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Time</label>
-          <input
-            type="time"
+          <select
             value={time}
             onChange={(e) => setTime(e.target.value)}
-            style={inputStyle}
-          />
+            style={{ ...inputStyle, appearance: "auto", cursor: "pointer" }}
+          >
+            <option value="" disabled>Select a time</option>
+            {timeSlots.map((slot) => (
+              <option key={slot.value} value={slot.value}>{slot.label}</option>
+            ))}
+          </select>
         </div>
 
         {/* Location */}
