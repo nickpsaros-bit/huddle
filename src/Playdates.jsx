@@ -136,7 +136,7 @@ export default function Playdates({ session, onChanged }) {
     setLoading(false);
   };
 
-const respond = async (inviteId, rsvp) => {
+  const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
       await supabase
@@ -155,6 +155,7 @@ const respond = async (inviteId, rsvp) => {
 
         const organizerHouseholdId = inv?.playdates?.organizer_household_id;
         const respondingHouseholdId = inv?.household_id;
+        const playdateId = inv?.playdate_id;
 
         if (organizerHouseholdId && respondingHouseholdId && organizerHouseholdId !== respondingHouseholdId) {
           // Responding household's display name.
@@ -189,6 +190,21 @@ const respond = async (inviteId, rsvp) => {
           }));
           if (rows.length > 0) {
             await supabase.from("notifications").insert(rows);
+          }
+
+          // On "yes" (both parties now accepted), email the calendar invite (.ics)
+          // to the joining family + host. Non-blocking; never breaks the RSVP.
+          if (rsvp === "yes" && playdateId) {
+            try {
+              await supabase.functions.invoke("send-playdate-invite", {
+                body: {
+                  playdate_id: playdateId,
+                  responding_household_id: respondingHouseholdId,
+                },
+              });
+            } catch (emailErr) {
+              // Best-effort — the in-app RSVP still succeeds.
+            }
           }
         }
       } catch (notifErr) {
