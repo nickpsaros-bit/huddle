@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { supabase } from "./supabase";
 
+const INVITE_KEY = "huddle_pending_invite_token";
+
 export default function Auth({ onAuth }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -8,12 +10,21 @@ export default function Auth({ onAuth }) {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Build the redirect URL, carrying any pending invite token as a query param
+  // so it survives the auth round-trip (localStorage can be lost across the
+  // magic-link email / OAuth redirect opening in a fresh browser context).
+  const redirectUrl = () => {
+    const base = window.location.origin;
+    const token = localStorage.getItem(INVITE_KEY);
+    return token ? `${base}/?invite=${encodeURIComponent(token)}` : base;
+  };
+
   const signInWithGoogle = async () => {
     setGoogleLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectUrl(),
       }
     });
     if (error) {
@@ -28,7 +39,7 @@ export default function Auth({ onAuth }) {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: redirectUrl(),
       }
     });
     if (error) {

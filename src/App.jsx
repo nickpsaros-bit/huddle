@@ -30,18 +30,24 @@ export default function App() {
   const [inviteToken, setInviteToken] = useState(null);     // token captured from URL or storage
 const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // true once they tap "Join"
 
-  // On first load: capture an invite token from the URL (/invite/{token}).
+  // On first load: capture an invite token from either the path (/invite/{token})
+  // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
   useEffect(() => {
     const path = window.location.pathname || "";
-    const match = path.match(/^\/invite\/([A-Za-z0-9]+)/);
-    if (match && match[1]) {
-      const token = match[1];
+    const params = new URLSearchParams(window.location.search);
+    const queryToken = params.get("invite");
+    const pathMatch = path.match(/^\/invite\/([A-Za-z0-9]+)/);
+
+    let token = null;
+    if (queryToken) token = queryToken;
+    else if (pathMatch && pathMatch[1]) token = pathMatch[1];
+
+    if (token) {
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
       // Clean the URL so the token isn't left sitting in the address bar.
       window.history.replaceState({}, "", "/");
     } else {
-      // Maybe one is already pending from a previous step (survived a redirect).
       const stored = localStorage.getItem(INVITE_KEY);
       if (stored) setInviteToken(stored);
     }
@@ -71,6 +77,14 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
         }
       }
     );
+    // Consume a pending invite once the user is logged in AND fully set up.
+  // Runs reliably after render (not mid-render), so the connection forms
+  // whether they just signed up or were already a user opening a link.
+  useEffect(() => {
+    if (session && hasProfile && inviteToken) {
+      consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
+    }
+  }, [session, hasProfile, inviteToken]);
 
     const refreshOnFocus = () => {
       if (document.visibilityState === "visible") {
@@ -307,13 +321,10 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
   }
 
   if (!hasProfile) {
-    return <Profile session={session} onComplete={() => { setHasProfile(true); consumeInvite(session.user.id).then(() => fetchCounts(session.user.id)); }} />;
+   return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
   }
 
-  // Logged-in + fully set up: if there's a pending invite, consume it now (auto-connect), then Home.
-  if (inviteToken) {
-    consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
-  }
+  
 
   if (showInbox) {
     return <Inbox session={session} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
