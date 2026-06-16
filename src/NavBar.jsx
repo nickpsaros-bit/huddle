@@ -6,9 +6,9 @@ export default function NavBar(props) {
 
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
-    { id: "search", label: "Search", icon: "🔍" },
     { id: "network", label: "Network", icon: "🤝" },
     { id: "playdates", label: "Playdates", icon: "📅" },
+    { id: "search", label: "Search", icon: "🔍" },
     { id: "profile", label: "Profile", icon: "👤" },
   ];
 
