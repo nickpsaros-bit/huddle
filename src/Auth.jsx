@@ -5,17 +5,13 @@ const INVITE_KEY = "huddle_pending_invite_token";
 const INVITE_EMAIL_KEY = "huddle_invite_email";
 
 export default function Auth({ onAuth }) {
-  // mode: "intro" (new vs returning chooser) | "signup" | "signin"
-  const [mode, setMode] = useState("intro");
+  const [mode, setMode] = useState("intro"); // "intro" | "signup" | "signin"
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // If arriving via an invite, an email was stashed on the landing page.
-  // Skip the new/returning chooser and go straight to a pre-filled signup —
-  // they've already declared intent by tapping the invite.
   useEffect(() => {
     const stashed = localStorage.getItem(INVITE_EMAIL_KEY);
     if (stashed) {
@@ -62,18 +58,15 @@ export default function Auth({ onAuth }) {
     border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
-
   const primaryBtn = {
     width: "100%", padding: "0.95rem", borderRadius: "10px", border: "none",
     background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer"
   };
-
   const ghostBtn = {
     width: "100%", padding: "0.85rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "transparent",
     color: "#8AAEC8", fontSize: "1rem", fontWeight: "500", cursor: "pointer"
   };
-
   const googleBtn = {
     width: "100%", padding: "0.85rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "#FFFFFF",
@@ -82,20 +75,17 @@ export default function Auth({ onAuth }) {
     justifyContent: "center", gap: "10px", marginBottom: "1rem"
   };
 
-  const GoogleIcon = () => (
-    <svg width="18" height="18" viewBox="0 0 18 18">
-      <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
-      <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
-      <path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
-      <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/>
-    </svg>
-  );
-
-  // Shared auth controls (Google + email), used by both signup and signin.
-  const AuthControls = ({ ctaLabel }) => (
+  // Shared auth controls rendered inline (NOT as a nested component, which
+  // would remount the input every keystroke and drop focus).
+  const renderAuthControls = (ctaLabel) => (
     <>
       <button onClick={signInWithGoogle} disabled={googleLoading} style={googleBtn}>
-        <GoogleIcon />
+        <svg width="18" height="18" viewBox="0 0 18 18">
+          <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
+          <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
+          <path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
+          <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/>
+        </svg>
         {googleLoading ? "Connecting..." : "Continue with Google"}
       </button>
 
@@ -131,13 +121,12 @@ export default function Auth({ onAuth }) {
       <h1 style={{ color: "#02C39A", fontSize: "3rem", fontWeight: "700", margin: "0 0 0.5rem" }}>
         Huddle
       </h1>
-   <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 2.5rem", textAlign: "center", maxWidth: "360px", lineHeight: "1.5" }}>
+      <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 2.5rem", textAlign: "center", maxWidth: "360px", lineHeight: "1.5" }}>
         Bringing school families together.
       </p>
 
       <div style={{ background: "#162D50", borderRadius: "16px", padding: "2rem", width: "100%", maxWidth: "400px" }}>
 
-        {/* INTRO: new vs returning chooser */}
         {mode === "intro" && !sent && (
           <>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", margin: "0 0 0.5rem", textAlign: "center" }}>
@@ -146,7 +135,6 @@ export default function Auth({ onAuth }) {
             <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.75rem", textAlign: "center", lineHeight: "1.5" }}>
               The easiest way for school parents to set up playdates. Join your classroom community in a couple of minutes.
             </p>
-
             <button onClick={() => { setError(""); setMode("signup"); }} style={{ ...primaryBtn, marginBottom: "0.85rem" }}>
               Get started →
             </button>
@@ -156,14 +144,13 @@ export default function Auth({ onAuth }) {
           </>
         )}
 
-        {/* SIGNUP: new user */}
         {mode === "signup" && !sent && (
           <>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Create your account</h2>
             <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
               Sign up with Google or your email — we'll send a quick magic link, no password needed.
             </p>
-            <AuthControls ctaLabel="Sign up with email →" />
+            {renderAuthControls("Sign up with email →")}
             <button onClick={() => { setError(""); setMode("intro"); }}
               style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
               ← Back
@@ -171,14 +158,13 @@ export default function Auth({ onAuth }) {
           </>
         )}
 
-        {/* SIGNIN: returning user */}
         {mode === "signin" && !sent && (
           <>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Welcome back</h2>
             <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
               Sign in with the Google account or email you used to join.
             </p>
-            <AuthControls ctaLabel="Send magic link →" />
+            {renderAuthControls("Send magic link →")}
             <button onClick={() => { setError(""); setMode("intro"); }}
               style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
               ← Back
@@ -186,7 +172,6 @@ export default function Auth({ onAuth }) {
           </>
         )}
 
-        {/* SENT: magic link confirmation (shared) */}
         {sent && (
           <>
             <div style={{ textAlign: "center", padding: "1rem 0" }}>
