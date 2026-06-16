@@ -368,12 +368,24 @@ export default function Home({ session, notificationCount, onBellClick }) {
           </div>
         ))}
 
-        {memberships.length === 0 && (
+{memberships.length === 0 && (
           <div onClick={() => setAddingClassroom(true)} style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
             <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
             <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first classroom</p>
           </div>
         )}
+
+        {memberships.length > 0 && (
+          <button onClick={() => setAddingClassroom(true)}
+            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "#162D50", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            🏫 Add a different school
+          </button>
+        )}
+
+        <button onClick={() => setInviting(true)}
+          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          ➕ Invite a parent to Huddle
+        </button>
 
         <button onClick={() => setInviting(true)}
           style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
