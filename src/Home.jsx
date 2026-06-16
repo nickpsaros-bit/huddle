@@ -387,12 +387,8 @@ export default function Home({ session, notificationCount, onBellClick }) {
           ➕ Invite a parent to Huddle
         </button>
 
-        <button onClick={() => setInviting(true)}
-          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-          ➕ Invite a parent to Huddle
-        </button>
-      </div>
-
+    
+    
       {inviting && (
         <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
       )}
