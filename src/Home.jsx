@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
+import InviteFamily from "./InviteFamily";
 
 export default function Home({ session, notificationCount, onBellClick }) {
   const [parent, setParent] = useState(null);
@@ -25,6 +26,9 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [savingMembership, setSavingMembership] = useState(false);
   const [membershipError, setMembershipError] = useState("");
   const [householdBusy, setHouseholdBusy] = useState(false);
+
+  // Invite a family flow
+  const [inviting, setInviting] = useState(false);
 
   // Find-a-household-member flow
   const [findingMember, setFindingMember] = useState(false);
@@ -91,7 +95,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .eq("classroom_id", m.classroom_id)
         .eq("school_year", m.school_year)
         .neq("household_id", hhId);
-      // Attach the classroom label for each classmate group (which of MY classes this is).
       classmatesMap[m.id] = {
         classroomLabel: `${m.classrooms?.teacher_name} · ${grades[m.classrooms?.grade] || "Unknown grade"}`,
         rows: otherMembers || [],
@@ -172,20 +175,17 @@ export default function Home({ session, notificationCount, onBellClick }) {
       const leavingParentId = memberRow.parent_id;
       const wasPrimary = memberRow.role === "primary";
 
-      // Snapshot the household's classroom memberships BEFORE we change anything.
       const { data: classMemberships } = await supabase
         .from("classroom_members")
         .select("classroom_id, school_year")
         .eq("household_id", householdId);
 
-      // Detach the member from this household.
       const { error: delErr } = await supabase
         .from("household_members")
         .delete()
         .eq("id", memberRow.id);
       if (delErr) throw delErr;
 
-      // Who's left in the original household?
       const { data: remaining } = await supabase
         .from("household_members")
         .select("id, parent_id, role, joined_at")
@@ -193,22 +193,15 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .order("joined_at", { ascending: true });
 
       if (!remaining || remaining.length === 0) {
-        // Last member left: tear down the now-empty original household.
         await supabase.from("classroom_members").delete().eq("household_id", householdId);
         await supabase.from("households").delete().eq("id", householdId);
       } else if (wasPrimary && !remaining.some((m) => m.role === "primary")) {
-        // Primary left: promote the oldest remaining member.
         await supabase
           .from("household_members")
           .update({ role: "primary" })
           .eq("id", remaining[0].id);
       }
 
-      // Give the removed member their OWN new household, as primary,
-      // and copy over the classroom memberships (interpretation B).
-      // (Only when the original household still exists / had members — if they
-      // were the last member, the original household IS effectively theirs already
-      // and was torn down above, so we still create a fresh one for them.)
       const { data: newHh, error: hhErr } = await supabase
         .from("households")
         .insert({})
@@ -356,7 +349,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     return acc;
   }, {});
 
-  // Flatten classmates into renderable cards, each carrying its classroom label.
   const classmateCards = [];
   Object.values(classmates).forEach((group) => {
     (group.rows || []).forEach((cm) => {
@@ -518,7 +510,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
                       </p>
                       {otherFamilies.length === 0 && (
                         <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, fontStyle: "italic" }}>
-                          Share Huddle with other parents to get started!
+                          No other families here yet — invite one below.
                         </p>
                       )}
                     </div>
@@ -545,8 +537,14 @@ export default function Home({ session, notificationCount, onBellClick }) {
         {classmateCards.length === 0 ? (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
-            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No other parents yet</p>
-            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Share Huddle to get other families to join!</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>You're the first one here!</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+              Invite another family to Huddle — once they join, you'll be connected and can start setting up playdates.
+            </p>
+            <button onClick={() => setInviting(true)}
+              style={{ padding: "0.85rem 1.5rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+              ➕ Invite a family to Huddle
+            </button>
           </div>
         ) : (
           classmateCards.map((card) => (
@@ -569,7 +567,24 @@ export default function Home({ session, notificationCount, onBellClick }) {
             </div>
           ))
         )}
+
+        {/* Always-available invite (quieter when the classroom already has people) */}
+        {classmateCards.length > 0 && (
+          <button onClick={() => setInviting(true)}
+            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            ➕ Invite a family to Huddle
+          </button>
+        )}
       </div>
+
+      {/* Invite a family modal */}
+      {inviting && (
+        <InviteFamily
+          session={session}
+          inviterName={parent?.name}
+          onClose={() => setInviting(false)}
+        />
+      )}
 
       {/* Find a household member modal */}
       {findingMember && (
