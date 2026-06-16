@@ -14,6 +14,7 @@ import InviteLanding from "./InviteLanding";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
 const INVITE_KEY = "huddle_pending_invite_token";
+const INVITE_EMAIL_KEY = "huddle_invite_email";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -98,11 +99,11 @@ export default function App() {
   // Consume a pending invite once the user is logged in AND fully set up.
   // Runs reliably after render (not mid-render), so the connection forms
   // whether they just signed up or were already a user opening a link.
-  useEffect(() => {
-    if (session && hasProfile && inviteToken) {
-      consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
+useEffect(() => {
+    if (session && hasProfile) {
+      consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
     }
-  }, [session, hasProfile, inviteToken]);
+  }, [session, hasProfile]);
 
   const checkConsent = async (userId) => {
     const { data } = await supabase
@@ -148,31 +149,57 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Consume a pending invite: mark accepted + create the connection to the inviter.
-  // Safe to call multiple times (no-ops if already consumed / already connected).
-  const consumeInvite = async (userId) => {
-    const token = localStorage.getItem(INVITE_KEY);
-    if (!token) return;
-
+  // Consume a pending invite after login by matching the logged-in user's EMAIL
+  // to the invite's invited_email. Email survives every redirect/device/browser,
+  // so this is reliable even when a texted link opens in a different app.
+  // Falls back to the token (localStorage) if present.
+  const consumeInvite = async (userId, userEmail) => {
     try {
-      const { data: invite } = await supabase
-        .from("invites")
-        .select("*")
-        .eq("token", token)
-        .maybeSingle();
+      let invite = null;
 
+      // Primary: match by the email the invitee entered on the landing page.
+      if (userEmail) {
+        const { data: byEmail } = await supabase
+          .from("invites")
+          .select("*")
+          .eq("invited_email", userEmail.toLowerCase())
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byEmail) invite = byEmail;
+      }
+
+      // Fallback: token in localStorage (same-device flows).
+      if (!invite) {
+        const token = localStorage.getItem(INVITE_KEY);
+        if (token) {
+          const { data: byToken } = await supabase
+            .from("invites")
+            .select("*")
+            .eq("token", token)
+            .maybeSingle();
+          if (byToken) invite = byToken;
+        }
+      }
+
+      // Nothing to do, expired, or already consumed.
       if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
         localStorage.removeItem(INVITE_KEY);
+        localStorage.removeItem(INVITE_EMAIL_KEY);
         setInviteToken(null);
         return;
       }
 
+      // Don't connect someone to themselves.
       if (invite.inviter_id === userId) {
         localStorage.removeItem(INVITE_KEY);
+        localStorage.removeItem(INVITE_EMAIL_KEY);
         setInviteToken(null);
         return;
       }
 
+      // Create the connection if one doesn't already exist (either direction).
       const { data: existing } = await supabase
         .from("connections")
         .select("id")
@@ -185,6 +212,7 @@ export default function App() {
           status: "accepted",
         });
 
+        // Notify the inviter that their invite was accepted.
         try {
           const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
           const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
@@ -198,14 +226,17 @@ export default function App() {
         } catch (e) { /* best-effort */ }
       }
 
+      // Mark the invite consumed.
       await supabase.from("invites")
         .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
         .eq("id", invite.id);
 
       localStorage.removeItem(INVITE_KEY);
+      localStorage.removeItem(INVITE_EMAIL_KEY);
       setInviteToken(null);
     } catch (err) {
       localStorage.removeItem(INVITE_KEY);
+      localStorage.removeItem(INVITE_EMAIL_KEY);
       setInviteToken(null);
     }
   };

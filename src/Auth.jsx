@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 const INVITE_KEY = "huddle_pending_invite_token";
+const INVITE_EMAIL_KEY = "huddle_invite_email";
 
 export default function Auth({ onAuth }) {
   const [email, setEmail] = useState("");
@@ -10,9 +11,13 @@ export default function Auth({ onAuth }) {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Build the redirect URL, carrying any pending invite token as a query param
-  // so it survives the auth round-trip (localStorage can be lost across the
-  // magic-link email / OAuth redirect opening in a fresh browser context).
+  // Pre-fill the email captured on the invite landing page (so they sign up
+  // with the same email we stamped onto the invite, enabling reliable matching).
+  useEffect(() => {
+    const stashed = localStorage.getItem(INVITE_EMAIL_KEY);
+    if (stashed) setEmail(stashed);
+  }, []);
+
   const redirectUrl = () => {
     const base = window.location.origin;
     const token = localStorage.getItem(INVITE_KEY);
