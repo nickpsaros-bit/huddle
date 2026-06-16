@@ -2,17 +2,23 @@ import { useState } from "react";
 import { supabase } from "./supabase";
 
 // Reusable "Invite a family" modal. Generates a sender-locked, single-use,
-// 48h invite token (max 3/day), then offers copy + share.
-// Pass an optional playdateId to attach a pending playdate (Layer 3).
+// 48h invite token (max 3/day). Clipboard-first sharing (works everywhere);
+// native share offered only on true mobile devices.
 export default function InviteFamily({ session, inviterName, playdateId = null, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [link, setLink] = useState("");
   const [shareMsg, setShareMsg] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copiedMsg, setCopiedMsg] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const firstName = (inviterName || "").trim().split(/\s+/)[0] || "A parent";
-  const canNativeShare = typeof navigator !== "undefined" && !!navigator.share;
+
+  // Only treat as "can share" on actual touch/mobile devices — desktop browsers
+  // report navigator.share but hand share targets an empty/unreliable payload.
+  const isMobile = typeof navigator !== "undefined" &&
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  const canNativeShare = isMobile && typeof navigator !== "undefined" && !!navigator.share;
 
   const makeToken = () => {
     if (window.crypto && window.crypto.randomUUID) {
@@ -62,13 +68,25 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
     setLoading(false);
   };
 
-  const copy = async () => {
+  const copyMessage = async () => {
     try {
       await navigator.clipboard.writeText(shareMsg);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 3000);
+      setCopiedMsg(true);
+      setCopiedLink(false);
+      setTimeout(() => setCopiedMsg(false), 3000);
     } catch (e) {
       setError("Couldn't copy automatically — select the message above and copy it manually.");
+    }
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedLink(true);
+      setCopiedMsg(false);
+      setTimeout(() => setCopiedLink(false), 3000);
+    } catch (e) {
+      setError("Couldn't copy automatically — select the link above and copy it manually.");
     }
   };
 
@@ -78,7 +96,7 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
         await navigator.share({ title: "Join me on Huddle", text: shareMsg, url: link });
         onClose();
       } catch (e) {
-        // User cancelled — keep modal open.
+        // cancelled — keep modal open
       }
     }
   };
@@ -123,30 +141,46 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
               <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0, fontWeight: "500" }}>✓ Invite ready — valid for 48 hours</p>
             </div>
 
-            {/* Message preview — selectable */}
-            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.4rem" }}>YOUR INVITE MESSAGE</p>
-            <div style={{ background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1rem", userSelect: "all", WebkitUserSelect: "all", cursor: "text" }}>
-              <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0, lineHeight: "1.5", wordBreak: "break-word" }}>{shareMsg}</p>
+            {error && (
+              <div style={{ background: "#3D1515", border: "1px solid #F87171", borderRadius: "8px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
+                <p style={{ color: "#F87171", fontSize: "0.8rem", margin: 0 }}>{error}</p>
+              </div>
+            )}
+
+            {/* The link itself — selectable fallback */}
+            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.4rem" }}>INVITE LINK</p>
+            <div style={{ background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.75rem 0.9rem", marginBottom: "0.75rem", userSelect: "all", WebkitUserSelect: "all", cursor: "text" }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.82rem", margin: 0, wordBreak: "break-all" }}>{link}</p>
             </div>
 
-            {/* Primary: Copy (reliable everywhere) */}
-            <button onClick={copy}
-              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: copied ? "#0F3D2E" : "#02C39A", color: copied ? "#02C39A" : "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer", border: copied ? "1px solid #02C39A" : "none" }}>
-              {copied ? "✓ Copied! Now paste it into a text or email" : "📋 Copy invite message"}
+            {/* The full message — selectable */}
+            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.4rem" }}>OR THE FULL MESSAGE</p>
+            <div style={{ background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.75rem 0.9rem", marginBottom: "1.25rem", userSelect: "all", WebkitUserSelect: "all", cursor: "text" }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.82rem", margin: 0, lineHeight: "1.5", wordBreak: "break-word" }}>{shareMsg}</p>
+            </div>
+
+            {/* Primary: copy the full message */}
+            <button onClick={copyMessage}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: copiedMsg ? "1px solid #02C39A" : "none", background: copiedMsg ? "#0F3D2E" : "#02C39A", color: copiedMsg ? "#02C39A" : "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+              {copiedMsg ? "✓ Message copied — paste it anywhere" : "📋 Copy invite message"}
             </button>
 
-            {/* Secondary: native share (mobile) */}
+            {/* Secondary: copy just the link */}
+            <button onClick={copyLink}
+              style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: copiedLink ? "#02C39A" : "#8AAEC8", fontSize: "0.92rem", fontWeight: "500", cursor: "pointer", marginTop: "0.6rem" }}>
+              {copiedLink ? "✓ Link copied" : "🔗 Copy link only"}
+            </button>
+
+            {/* Native share — mobile only */}
             {canNativeShare && (
               <button onClick={share}
-                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #02C39A", background: "transparent", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "0.75rem" }}>
-                📤 Or share directly
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #02C39A", background: "transparent", color: "#02C39A", fontSize: "0.92rem", fontWeight: "600", cursor: "pointer", marginTop: "0.6rem" }}>
+                📤 Share via text or email
               </button>
             )}
 
-            <p style={{ color: "#607080", fontSize: "0.75rem", margin: "0.85rem 0 0", textAlign: "center", lineHeight: "1.5" }}>
-              {canNativeShare
-                ? "Copy and paste into any app, or tap share to pick one."
-                : "Copy the message, then paste it into a text or email to the family you're inviting."}
+            <p style={{ color: "#607080", fontSize: "0.75rem", margin: "0.9rem 0 0", textAlign: "center", lineHeight: "1.5" }}>
+              Copy and paste into a text, email, or anywhere you'd share a link. Valid for 48 hours.
             </p>
 
             <button onClick={onClose}
