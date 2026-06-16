@@ -11,13 +11,12 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null); // organizer's school { latitude, longitude }
 
-  const locations = [
+const locations = [
     { name: "Local Park", address: "Nearby park" },
     { name: "School Playground", address: "School grounds" },
     { name: "Community Center", address: "Community center" },
     { name: "Our House", address: "My home" },
     { name: "Their House", address: "Their home" },
-    { name: "Custom location", address: "" },
   ];
 
   // Fetch the organizer's school coordinates (for the sunrise/sunset gradient).
@@ -342,32 +341,46 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         {/* Location */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>LOCATION</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
-            {locations.map((loc) => (
-              <button
-                key={loc.name}
-                onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
-                style={{
-                  padding: "0.6rem", borderRadius: "8px", border: "1px solid",
-                  borderColor: locationName === loc.name ? "#02C39A" : "#2A4A6B",
-                  background: locationName === loc.name ? "#0F3D2E" : "transparent",
-                  color: locationName === loc.name ? "#02C39A" : "#8AAEC8",
-                  fontSize: "0.8rem", cursor: "pointer", textAlign: "left"
-                }}
-              >
-                {loc.name}
-              </button>
-            ))}
+<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
+            {locations.map((loc) => {
+              const isPreset = locations.some((l) => l.name === locationName);
+              const selected = locationName === loc.name && isPreset;
+              return (
+                <button
+                  key={loc.name}
+                  onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
+                  style={{
+                    padding: "0.6rem", borderRadius: "8px", border: "1px solid",
+                    borderColor: selected ? "#02C39A" : "#2A4A6B",
+                    background: selected ? "#0F3D2E" : "transparent",
+                    color: selected ? "#02C39A" : "#8AAEC8",
+                    fontSize: "0.8rem", cursor: "pointer", textAlign: "left"
+                  }}
+                >
+                  {loc.name}
+                </button>
+              );
+            })}
           </div>
-          {locationName === "Custom location" && (
-            <>
-              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Location name</label>
-              <input type="text" placeholder="e.g. Howarth Park" onChange={(e) => setLocationName(e.target.value)} style={inputStyle} />
-              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Address</label>
-              <input type="text" placeholder="Full address" onChange={(e) => setLocationAddress(e.target.value)} style={inputStyle} />
-            </>
-          )}
-        </div>
+
+          {/* Or enter a specific place — always available */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0.25rem 0 0.85rem" }}>
+            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+            <span style={{ color: "#607080", fontSize: "0.75rem" }}>or enter a specific place</span>
+            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+          </div>
+
+          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Place or address</label>
+          <input
+            type="text"
+            placeholder="e.g. Howarth Park, Santa Rosa"
+            value={locations.some((l) => l.name === locationName) ? "" : locationName}
+            onChange={(e) => { setLocationName(e.target.value); setLocationAddress(""); }}
+            style={inputStyle}
+          />
+          <p style={{ color: "#607080", fontSize: "0.72rem", margin: "-0.5rem 0 0", lineHeight: "1.4" }}>
+            Tip: include the city so the other family can find it easily.
+          </p>
 
         {/* Note */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
