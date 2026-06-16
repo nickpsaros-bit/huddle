@@ -12,7 +12,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [loading, setLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
-  const [selectedClassroom, setSelectedClassroom] = useState(null); // membership row when drilled in
+  const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
   const [newGrade, setNewGrade] = useState("");
   const [newTeacher, setNewTeacher] = useState("");
@@ -174,7 +174,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setHouseholdBusy(false);
   };
 
-  // Build the family cards for a given classroom membership row.
   const familyCardsFor = (membershipRow) => {
     const group = classmates[membershipRow.id];
     const cards = [];
@@ -249,6 +248,91 @@ export default function Home({ session, notificationCount, onBellClick }) {
           <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)}
             style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
         )}
+      </div>
+    </div>
+  );
+
+  // Shared add-classroom modal (used in both views).
+  const addClassroomModal = addingClassroom && (
+    <div style={overlay}>
+      <div style={modalBox}>
+        <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a school or classroom</h2>
+
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
+        <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
+          <option value="">Select grade...</option>
+          {grades.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
+        <div style={{ position: "relative", marginBottom: "1rem" }}>
+          <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
+            onChange={(e) => searchNewSchools(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }} />
+          {showNewSchoolDropdown && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
+              {newSchoolResults.map(school => (
+                <div key={school.id} onClick={() => selectNewSchool(school)}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                  🏫 {school.name}
+                </div>
+              ))}
+              <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
+                style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
+                + Add "{newSchoolSearch}" as a new school
+              </div>
+            </div>
+          )}
+        </div>
+
+        {newSelectedSchool && (
+          <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
+            <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
+          </div>
+        )}
+
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
+        <div style={{ position: "relative", marginBottom: "1rem" }}>
+          <input type="text"
+            placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
+            value={newTeacher}
+            onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
+            onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
+            style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
+          {showNewTeacherDropdown && newTeacherResults.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
+              {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
+                <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                  📚 {teacher}
+                </div>
+              ))}
+              {newTeacherMismatch && (
+                <div onClick={() => setShowNewTeacherDropdown(false)}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
+                  + Add "{newTeacher}" as a new teacher
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {newTeacherMismatch && (
+          <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
+            <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
+              ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
+            </p>
+          </div>
+        )}
+
+        {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
+          <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
+            style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+            {savingMembership ? "Saving..." : "Add classroom →"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -340,7 +424,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
             </div>
             <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
               {school.classrooms.map((m, idx) => {
-                const group = classmates[m.id];
                 const familyCount = familyCardsFor(m).length;
                 return (
                   <div key={m.id} onClick={() => setSelectedClassroom(m)}
@@ -368,10 +451,17 @@ export default function Home({ session, notificationCount, onBellClick }) {
           </div>
         ))}
 
-{memberships.length === 0 && (
-          <div onClick={() => setAddingClassroom(true)} style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
-            <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
-            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first classroom</p>
+        {memberships.length === 0 && (
+          <div style={{ textAlign: "center", padding: "2rem 1rem", marginBottom: "1rem" }}>
+            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🏫</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Add your kid's classroom</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+              Add your school and classroom to find other families to huddle with.
+            </p>
+            <button onClick={() => setAddingClassroom(true)}
+              style={{ padding: "0.85rem 1.5rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+              ➕ Add a classroom
+            </button>
           </div>
         )}
 
@@ -386,97 +476,13 @@ export default function Home({ session, notificationCount, onBellClick }) {
           style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           ➕ Invite a parent to Huddle
         </button>
+      </div>
 
-    
-    
       {inviting && (
         <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
       )}
 
-      {/* Add classroom modal */}
-      {addingClassroom && (
-        <div style={overlay}>
-          <div style={modalBox}>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a classroom</h2>
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
-            <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
-              <option value="">Select grade...</option>
-              {grades.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
-            <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
-                onChange={(e) => searchNewSchools(e.target.value)}
-                style={{ ...inputStyle, marginBottom: 0 }} />
-              {showNewSchoolDropdown && (
-                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
-                  {newSchoolResults.map(school => (
-                    <div key={school.id} onClick={() => selectNewSchool(school)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      🏫 {school.name}
-                    </div>
-                  ))}
-                  <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
-                    style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
-                    + Add "{newSchoolSearch}" as a new school
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {newSelectedSchool && (
-              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
-              </div>
-            )}
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
-            <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text"
-                placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
-                value={newTeacher}
-                onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
-                onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
-                style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
-              {showNewTeacherDropdown && newTeacherResults.length > 0 && (
-                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
-                  {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
-                    <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      📚 {teacher}
-                    </div>
-                  ))}
-                  {newTeacherMismatch && (
-                    <div onClick={() => setShowNewTeacherDropdown(false)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
-                      + Add "{newTeacher}" as a new teacher
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {newTeacherMismatch && (
-              <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
-                <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
-                  ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
-                </p>
-              </div>
-            )}
-
-            {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-              <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
-                style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
-                {savingMembership ? "Saving..." : "Add classroom →"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {addClassroomModal}
     </div>
   );
 }
