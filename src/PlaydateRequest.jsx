@@ -19,7 +19,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     { name: "Their House", address: "Their home" },
   ];
 
-  useEffect(() => {
+ useEffect(() => {
     (async () => {
       try {
         const { data: hm } = await supabase
@@ -29,15 +29,30 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .single();
         if (!hm) return;
 
+        // Get a classroom this household is in, then that classroom's school_id.
         const { data: cm } = await supabase
           .from("classroom_members")
-          .select("classrooms(schools(latitude, longitude))")
+          .select("classroom_id")
           .eq("household_id", hm.household_id)
-          .limit(1);
+          .limit(1)
+          .maybeSingle();
+        if (!cm?.classroom_id) return;
 
-        const school = cm?.[0]?.classrooms?.schools;
+        const { data: cls } = await supabase
+          .from("classrooms")
+          .select("school_id")
+          .eq("id", cm.classroom_id)
+          .maybeSingle();
+        if (!cls?.school_id) return;
+
+        const { data: school } = await supabase
+          .from("schools")
+          .select("latitude, longitude")
+          .eq("id", cls.school_id)
+          .maybeSingle();
+
         if (school && school.latitude != null && school.longitude != null) {
-          setCoords({ latitude: school.latitude, longitude: school.longitude });
+          setCoords({ latitude: Number(school.latitude), longitude: Number(school.longitude) });
         }
       } catch (e) {
         // No coords -> gradient simply won't show.
