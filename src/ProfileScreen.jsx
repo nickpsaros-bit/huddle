@@ -12,11 +12,26 @@ export default function ProfileScreen({ session, onBack }) {
   const [message, setMessage] = useState("");
   const [consents, setConsents] = useState([]);
   const [view, setView] = useState("main");
+  const [memberships, setMemberships] = useState([]);
+  const [householdMembers, setHouseholdMembers] = useState([]);
+
+  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => {
     fetchProfile();
     fetchConsents();
+    fetchFamily();
   }, []);
+
+  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
+  const shortName = (fullName) => {
+    if (!fullName) return "A parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
+  const getGradeLabel = (g) => grades[g] || "Unknown grade";
 
   const fetchProfile = async () => {
     setLoading(true);
@@ -37,6 +52,30 @@ export default function ProfileScreen({ session, onBack }) {
       .eq("parent_id", session.user.id)
       .order("consented_at", { ascending: false });
     setConsents(data || []);
+  };
+
+  // Your classrooms + household members (the "about my family" data).
+  const fetchFamily = async () => {
+    const { data: hm } = await supabase
+      .from("household_members")
+      .select("household_id")
+      .eq("parent_id", session.user.id)
+      .maybeSingle();
+    if (!hm) return;
+    const hhId = hm.household_id;
+
+    const { data: members } = await supabase
+      .from("household_members")
+      .select("id, parent_id, role, joined_at, parents(id, name, photo_url)")
+      .eq("household_id", hhId)
+      .order("joined_at", { ascending: true });
+    setHouseholdMembers(members || []);
+
+    const { data: ms } = await supabase
+      .from("classroom_members")
+      .select("id, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
+      .eq("household_id", hhId);
+    setMemberships(ms || []);
   };
 
   const uploadPhoto = async (e) => {
@@ -78,6 +117,14 @@ export default function ProfileScreen({ session, onBack }) {
 
   const tosConsent = consents.find(c => c.document_type === "terms_of_service");
   const privacyConsent = consents.find(c => c.document_type === "privacy_policy");
+
+  // Group classrooms by school for display.
+  const bySchool = memberships.reduce((acc, m) => {
+    const name = m.classrooms?.schools?.name || "Unknown School";
+    if (!acc[name]) acc[name] = [];
+    acc[name].push(m);
+    return acc;
+  }, {});
 
   if (view === "terms" || view === "privacy") {
     const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
@@ -163,7 +210,64 @@ export default function ProfileScreen({ session, onBack }) {
           )}
         </div>
 
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem" }}>
+        {/* YOUR CLASSROOMS */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        {memberships.length === 0 ? (
+          <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", padding: "1rem 1.25rem", marginBottom: "1rem" }}>
+            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>No classrooms yet.</p>
+          </div>
+        ) : (
+          <div style={{ marginBottom: "1rem" }}>
+            {Object.entries(bySchool).map(([schoolName, classes]) => (
+              <div key={schoolName} style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.75rem", overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderBottom: "1px solid #2A4A6B" }}>
+                  <span style={{ fontSize: "1.1rem" }}>🏫</span>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{schoolName}</p>
+                </div>
+                {classes.map((m, idx) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", borderBottom: idx < classes.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <span style={{ fontSize: "0.95rem" }}>📚</span>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
+                      {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* YOUR HOUSEHOLD */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
+          {householdMembers.length === 0 ? (
+            <div style={{ padding: "1rem 1.25rem" }}>
+              <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Just you for now.</p>
+            </div>
+          ) : (
+            householdMembers.map((m, idx) => {
+              const isMe = m.parent_id === session.user.id;
+              return (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {m.parents?.photo_url ? (
+                      <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : m.parents?.name?.charAt(0) || "?"}
+                  </div>
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
+                      {isMe ? "You" : shortName(m.parents?.name)}
+                      {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", marginTop: "1.5rem" }}>
           <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 4px", letterSpacing: "0.05em" }}>EMAIL</p>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>{session.user.email}</p>

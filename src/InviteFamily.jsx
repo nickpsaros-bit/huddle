@@ -36,8 +36,8 @@ export default function InviteFamily({ session, inviterName, playdateId = null, 
         .gte("created_at", startOfDay.toISOString());
       if (countErr) throw countErr;
 
-      if ((todays || []).length >= 3) {
-        setError("You've sent 3 invites today — that's the daily limit. Try again tomorrow.");
+     if ((todays || []).length >= 10) {
+        setError("You've sent 10 invites today — that's the daily limit. Try again tomorrow.");
         setLoading(false);
         return;
       }
