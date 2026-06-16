@@ -27,8 +27,8 @@ export default function App() {
   const [playdateHalo, setPlaydateHalo] = useState(null);
 
   // Invite handling.
-  const [inviteToken, setInviteToken] = useState(null);     // token captured from URL or storage
-const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // true once they tap "Join"
+  const [inviteToken, setInviteToken] = useState(null);
+  const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
 
   // On first load: capture an invite token from either the path (/invite/{token})
   // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
@@ -45,7 +45,6 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
     if (token) {
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
-      // Clean the URL so the token isn't left sitting in the address bar.
       window.history.replaceState({}, "", "/");
     } else {
       const stored = localStorage.getItem(INVITE_KEY);
@@ -53,6 +52,7 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
     }
   }, []);
 
+  // Auth session lifecycle + focus refresh.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -77,14 +77,6 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
         }
       }
     );
-    // Consume a pending invite once the user is logged in AND fully set up.
-  // Runs reliably after render (not mid-render), so the connection forms
-  // whether they just signed up or were already a user opening a link.
-  useEffect(() => {
-    if (session && hasProfile && inviteToken) {
-      consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
-    }
-  }, [session, hasProfile, inviteToken]);
 
     const refreshOnFocus = () => {
       if (document.visibilityState === "visible") {
@@ -102,6 +94,15 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
   }, []);
+
+  // Consume a pending invite once the user is logged in AND fully set up.
+  // Runs reliably after render (not mid-render), so the connection forms
+  // whether they just signed up or were already a user opening a link.
+  useEffect(() => {
+    if (session && hasProfile && inviteToken) {
+      consumeInvite(session.user.id).then(() => fetchCounts(session.user.id));
+    }
+  }, [session, hasProfile, inviteToken]);
 
   const checkConsent = async (userId) => {
     const { data } = await supabase
@@ -160,21 +161,18 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
         .eq("token", token)
         .maybeSingle();
 
-      // No invite, already accepted, or expired -> clear and stop.
       if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
         localStorage.removeItem(INVITE_KEY);
         setInviteToken(null);
         return;
       }
 
-      // Don't connect someone to themselves.
       if (invite.inviter_id === userId) {
         localStorage.removeItem(INVITE_KEY);
         setInviteToken(null);
         return;
       }
 
-      // Create the connection if one doesn't already exist (either direction).
       const { data: existing } = await supabase
         .from("connections")
         .select("id")
@@ -187,7 +185,6 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
           status: "accepted",
         });
 
-        // Notify the inviter that their invite was accepted.
         try {
           const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
           const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
@@ -201,7 +198,6 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
         } catch (e) { /* best-effort */ }
       }
 
-      // Mark the invite consumed.
       await supabase.from("invites")
         .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
         .eq("id", invite.id);
@@ -209,13 +205,12 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
       localStorage.removeItem(INVITE_KEY);
       setInviteToken(null);
     } catch (err) {
-      // Best-effort — never block the user's entry into the app.
       localStorage.removeItem(INVITE_KEY);
       setInviteToken(null);
     }
   };
 
-  // Bell = pending requests + unread notifications. Playdate badge + halo as before.
+  // Bell = pending requests + unread notifications. Playdate badge + halo.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -309,8 +304,16 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
     );
   }
 
-  // Logged-OUT user with a pending invite: show the landing page first.
-
+  // Logged-OUT user with a pending invite: show the landing page first,
+  // until they tap "Join" (which falls through to Auth).
+  if (!session && inviteToken && !dismissedInviteLanding) {
+    return (
+      <InviteLanding
+        token={inviteToken}
+        onJoin={() => setDismissedInviteLanding(true)}
+      />
+    );
+  }
 
   if (!session) {
     return <Auth onAuth={() => {}} />;
@@ -321,10 +324,8 @@ const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false); // 
   }
 
   if (!hasProfile) {
-   return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
+    return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
   }
-
-  
 
   if (showInbox) {
     return <Inbox session={session} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
