@@ -11,6 +11,7 @@ export default function Network({ session }) {
   const [inviting, setInviting] = useState(false);
   const [myName, setMyName] = useState("");
   const [confirm, setConfirm] = useState(null);
+  const [petsByHousehold, setPetsByHousehold] = useState({});
 
   useEffect(() => { fetchConnections(); }, []);
 
@@ -20,6 +21,23 @@ export default function Network({ session }) {
     const parts = fullName.trim().split(/\s+/);
     if (parts.length === 1) return parts[0];
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
+  // Small inline pet badges for a household (🐕🐈🐴🐾). Returns null if none set.
+  const petBadges = (hhId) => {
+    const p = petsByHousehold[hhId];
+    if (!p) return null;
+    const icons = [];
+    if (p.has_dog) icons.push("🐕");
+    if (p.has_cat) icons.push("🐈");
+    if (p.has_horse) icons.push("🐴");
+    if (p.has_other) icons.push("🐾");
+    if (icons.length === 0) return null;
+    return (
+      <span style={{ fontSize: "0.85rem", marginLeft: "6px", whiteSpace: "nowrap" }} title={p.has_other && p.other_label ? p.other_label : undefined}>
+        {icons.join(" ")}
+      </span>
+    );
   };
 
   const fetchConnections = async () => {
@@ -52,6 +70,7 @@ export default function Network({ session }) {
       };
     });
 
+    const householdIds = new Set();
     for (const conn of network) {
       const { data: hm } = await supabase
         .from("household_members")
@@ -60,6 +79,9 @@ export default function Network({ session }) {
         .single();
 
       if (hm) {
+        conn.householdId = hm.household_id;
+        householdIds.add(hm.household_id);
+
         const { data: memberships } = await supabase
           .from("classroom_members")
           .select("*, classrooms(teacher_name, grade, schools(name))")
@@ -76,6 +98,17 @@ export default function Network({ session }) {
         conn.classrooms = [];
         conn.coParents = [];
       }
+    }
+
+    // Batch-fetch pet preferences for all connected households (one query).
+    if (householdIds.size > 0) {
+      const { data: prefs } = await supabase
+        .from("household_preferences")
+        .select("household_id, has_dog, has_cat, has_horse, has_other, other_label")
+        .in("household_id", [...householdIds]);
+      const map = {};
+      for (const row of (prefs || [])) map[row.household_id] = row;
+      setPetsByHousehold(map);
     }
 
     setConnections(network);
@@ -158,7 +191,9 @@ export default function Network({ session }) {
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(conn.person?.name)}</p>
+                    <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px", display: "flex", alignItems: "center" }}>
+                      {shortName(conn.person?.name)}{petBadges(conn.householdId)}
+                    </p>
                     <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>In your network</p>
                   </div>
                   <button onClick={() => setRequestingPlaydate(conn.person)}
