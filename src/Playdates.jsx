@@ -43,7 +43,6 @@ export default function Playdates({ session, onChanged }) {
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
-  // Build and download an .ics file for a playdate (2-hour default duration).
   const addToCalendar = (pd) => {
     const start = new Date(pd.proposed_date);
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
@@ -144,7 +143,6 @@ export default function Playdates({ session, onChanged }) {
         .update({ rsvp, responded_at: new Date().toISOString() })
         .eq("id", inviteId);
 
-      // Notify the host's household that a guest responded (non-blocking).
       try {
         const { data: inv } = await supabase
           .from("playdate_invites")
@@ -216,24 +214,33 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Host cancels a playdate at ANY status. Notifies invited guests, then deletes
-  // the invites + the playdate. No playdate ever gets stuck in limbo.
+  // Host cancels a playdate at ANY status. Order matters:
+  // 1) email the calendar CANCELLATION (.ics METHOD:CANCEL) to "yes" families +
+  //    host — MUST run BEFORE deleting, since the function reads the playdate;
+  // 2) drop in-app notifications to invited guests;
+  // 3) delete invites + the playdate.
   const cancelPlaydate = async (pd) => {
-    if (!window.confirm("Cancel this playdate? Invited families will be notified and it'll be removed.")) return;
+    if (!window.confirm("Cancel this playdate? Invited families will be notified and it'll be removed from their calendars.")) return;
     setBusy(true);
     try {
-      // 1. Who's invited? (gather BEFORE deleting invites so we can notify them.)
+      // 1. Email calendar cancellation FIRST (while the playdate still exists).
+      try {
+        await supabase.functions.invoke("cancel-playdate-invite", {
+          body: { playdate_id: pd.id },
+        });
+      } catch (calErr) {
+        // Best-effort — don't block the cancellation if the email fails.
+      }
+
+      // 2. Gather invited households + notify them in-app (before deleting invites).
       const { data: invites } = await supabase
         .from("playdate_invites")
         .select("household_id")
         .eq("playdate_id", pd.id);
 
-      // 2. Host's display label, for the notification body.
-      const hostLabel = await householdLabel(pd.organizer_household_id);
-      const whenStr = fmtDate(pd.proposed_date);
-
-      // 3. Notify every parent in each invited household (non-blocking).
       try {
+        const hostLabel = await householdLabel(pd.organizer_household_id);
+        const whenStr = fmtDate(pd.proposed_date);
         const invitedHouseholdIds = [...new Set((invites || []).map((i) => i.household_id))]
           .filter((id) => id && id !== pd.organizer_household_id);
 
@@ -254,10 +261,10 @@ export default function Playdates({ session, onChanged }) {
           }
         }
       } catch (notifErr) {
-        // Best-effort — don't block the cancellation.
+        // Best-effort.
       }
 
-      // 4. Delete invites, then the playdate.
+      // 3. Delete invites, then the playdate.
       await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
       await supabase.from("playdates").delete().eq("id", pd.id);
 
@@ -417,10 +424,12 @@ export default function Playdates({ session, onChanged }) {
         )}
 
         {!dim && (
-          <button onClick={() => cancelPlaydate(pd)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.6rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
-            Cancel playdate
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.85rem" }}>
+            <button onClick={() => cancelPlaydate(pd)} disabled={busy}
+              style={{ background: "transparent", border: "none", color: "#607080", fontSize: "0.8rem", cursor: "pointer", padding: "2px 4px", textDecoration: "underline" }}>
+              Cancel playdate
+            </button>
+          </div>
         )}
       </div>
     );
