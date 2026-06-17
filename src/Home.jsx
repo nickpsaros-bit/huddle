@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
+import ConfirmModal from "./ConfirmModal";
 
 export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated }) {
   const [parent, setParent] = useState(null);
@@ -26,6 +27,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [membershipError, setMembershipError] = useState("");
   const [householdBusy, setHouseholdBusy] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [drillMessage, setDrillMessage] = useState("");
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -156,10 +159,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setSavingMembership(false);
   };
 
-  const leaveClassroom = async (membershipRow) => {
-    const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
-    if (!window.confirm(`Remove your household from ${label}?`)) return;
+  // The actual classroom removal (runs after the user confirms in the modal).
+  const doLeaveClassroom = async (membershipRow) => {
     setHouseholdBusy(true);
+    setDrillMessage("");
     try {
       const { error } = await supabase
         .from("classroom_members")
@@ -169,9 +172,22 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       setSelectedClassroom(null);
       fetchData();
     } catch (err) {
-      alert("Error: " + err.message);
+      setDrillMessage("Couldn't remove the classroom: " + err.message);
     }
     setHouseholdBusy(false);
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const leaveClassroom = (membershipRow) => {
+    const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
+    setConfirm({
+      title: "Remove this classroom?",
+      body: `This removes your household from ${label}. You can add it back anytime.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      tone: "danger",
+      onConfirm: () => doLeaveClassroom(membershipRow),
+    });
   };
 
   const familyCardsFor = (membershipRow) => {
@@ -349,7 +365,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         {headerBar}
         <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
-          <button onClick={() => setSelectedClassroom(null)}
+          <button onClick={() => { setSelectedClassroom(null); setDrillMessage(""); }}
             style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "0.95rem", cursor: "pointer", padding: "0 0 1rem", display: "flex", alignItems: "center", gap: "6px" }}>
             ← Back to classrooms
           </button>
@@ -363,6 +379,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
               <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>{m.classrooms?.schools?.name}</p>
             </div>
           </div>
+
+          {drillMessage && (
+            <div style={{ background: "#3D1515", border: "1px solid #F87171", borderRadius: "10px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
+              <p style={{ color: "#F87171", fontSize: "0.85rem", margin: 0 }}>{drillMessage}</p>
+            </div>
+          )}
 
           <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>
             FAMILIES IN THIS CLASS
@@ -401,7 +423,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           </button>
 
           <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
-            style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem" }}>
+            style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
             Remove this classroom
           </button>
         </div>
@@ -409,6 +431,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         {inviting && (
           <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
         )}
+
+        <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
       </div>
     );
   }
@@ -487,6 +511,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       )}
 
       {addClassroomModal}
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
