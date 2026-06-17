@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import ConfirmModal from "./ConfirmModal";
 
 export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
   const [date, setDate] = useState("");
@@ -11,6 +12,13 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null);
   const [sent, setSent] = useState(false);
+
+  // Pets: organizer's own pets, the "bringing" toggles, and recipient's comfort prefs.
+  const [myPets, setMyPets] = useState({ has_dog: false, has_cat: false });
+  const [bringingDog, setBringingDog] = useState(false);
+  const [bringingCat, setBringingCat] = useState(false);
+  const [recipientPrefs, setRecipientPrefs] = useState({ prefer_no_dogs: false, prefer_no_cats: false });
+  const [confirm, setConfirm] = useState(null);
 
   const locations = [
     { name: "Local Park", address: "Nearby park" },
@@ -29,6 +37,32 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .eq("parent_id", session.user.id)
           .single();
         if (!hm) return;
+
+        // Organizer's own pets (so we only offer toggles for pets they have).
+        const { data: myPrefs } = await supabase
+          .from("household_preferences")
+          .select("has_dog, has_cat")
+          .eq("household_id", hm.household_id)
+          .maybeSingle();
+        if (myPrefs) setMyPets({ has_dog: !!myPrefs.has_dog, has_cat: !!myPrefs.has_cat });
+
+        // Recipient's comfort preferences (for the cross-check at send).
+        const { data: theirHm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", recipient.id)
+          .single();
+        if (theirHm) {
+          const { data: theirPrefs } = await supabase
+            .from("household_preferences")
+            .select("prefer_no_dogs, prefer_no_cats")
+            .eq("household_id", theirHm.household_id)
+            .maybeSingle();
+          if (theirPrefs) setRecipientPrefs({
+            prefer_no_dogs: !!theirPrefs.prefer_no_dogs,
+            prefer_no_cats: !!theirPrefs.prefer_no_cats,
+          });
+        }
 
         // Get a classroom this household is in, then that classroom's school_id.
         const { data: cm } = await supabase
@@ -59,7 +93,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         // No coords -> gradient simply won't show.
       }
     })();
-  }, [session]);
+  }, [session, recipient]);
 
   const computeSunTimes = (dateStr, lat, lng) => {
     if (!dateStr || lat == null || lng == null) return null;
@@ -149,11 +183,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     return Math.max(0, Math.min(100, ((min - startMin) / (endMin - startMin)) * 100));
   })();
 
+  // The actual send (runs directly, or after the user OKs the pet heads-up).
   const sendRequest = async () => {
-    if (!date || !time || !locationName) {
-      setError("Please fill in date, time and location");
-      return;
-    }
     setLoading(true);
     setError("");
 
@@ -191,6 +222,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           location_address: locationAddress,
           note: note || null,
           status: "pending",
+          bringing_dog: bringingDog,
+          bringing_cat: bringingCat,
         })
         .select()
         .single();
@@ -254,6 +287,37 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     }
   };
 
+  // Button handler: validate, run the pet cross-check, then send (directly or after confirm).
+  const attemptSend = () => {
+    if (!date || !time || !locationName) {
+      setError("Please fill in date, time and location");
+      return;
+    }
+    setError("");
+
+    // Cross-check: bringing a pet the recipient would rather not be around?
+    const dogConflict = bringingDog && recipientPrefs.prefer_no_dogs;
+    const catConflict = bringingCat && recipientPrefs.prefer_no_cats;
+
+    if (dogConflict || catConflict) {
+      const animals = [];
+      if (dogConflict) animals.push("dogs");
+      if (catConflict) animals.push("cats");
+      const animalLabel = animals.join(" and ");
+      setConfirm({
+        title: "A quick heads-up",
+        body: `${shortName(recipient.name)}'s family would rather not be around ${animalLabel}. You can still send the invite — just wanted you to know.`,
+        confirmLabel: "Send anyway",
+        cancelLabel: "Go back",
+        tone: "primary",
+        onConfirm: () => { setConfirm(null); sendRequest(); },
+      });
+      return;
+    }
+
+    sendRequest();
+  };
+
   const inputStyle = {
     width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
@@ -268,6 +332,43 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   };
 
   const isPresetSelected = locations.some((l) => l.name === locationName);
+
+  // Reusable pet toggle pill (matches Profile's style; 44px tap target).
+  const petToggle = (active, label, onClick) => (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "0.6rem 1rem", borderRadius: "8px", border: "1px solid",
+        borderColor: active ? "#02C39A" : "#2A4A6B",
+        background: active ? "#0F3D2E" : "transparent",
+        color: active ? "#02C39A" : "#8AAEC8",
+        fontSize: "0.9rem", cursor: "pointer", minHeight: "44px"
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  // Success confirmation — shown briefly after the invite is sent.
+  if (sent) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
+        <div style={{ textAlign: "center", maxWidth: "340px" }}>
+          <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>🎉</div>
+          <h2 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
+          <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
+            {shortName(recipient.name)}'s family will get your playdate invite. You'll be notified when they reply.
+          </p>
+          <button onClick={() => onSent()}
+            style={{ padding: "0.75rem 1.5rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const showBringPets = myPets.has_dog || myPets.has_cat;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
@@ -386,6 +487,19 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           </p>
         </div>
 
+        {showBringPets && (
+          <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.4rem", letterSpacing: "0.05em" }}>BRINGING A PET?</p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
+              Let the other family know if a furry friend is coming along.
+            </p>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              {myPets.has_dog && petToggle(bringingDog, "🐕 Bringing our dog", () => setBringingDog((v) => !v))}
+              {myPets.has_cat && petToggle(bringingCat, "🐈 Bringing our cat", () => setBringingCat((v) => !v))}
+            </div>
+          </div>
+        )}
+
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
           <textarea
@@ -400,7 +514,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
 
         <button
-          onClick={sendRequest}
+          onClick={attemptSend}
           disabled={loading}
           style={{
             width: "100%", padding: "0.85rem", borderRadius: "10px",
@@ -412,6 +526,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         </button>
 
       </div>
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
