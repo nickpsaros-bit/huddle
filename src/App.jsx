@@ -29,10 +29,14 @@ export default function App() {
 
   // Invite handling.
   const [inviteToken, setInviteToken] = useState(null);
+  const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
   const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
 
   // On first load: capture an invite token from either the path (/invite/{token})
   // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
+  // IMPORTANT: only treat this as an "invite arrival" (show the landing page) when
+  // the token came from the URL THIS visit. A leftover token in localStorage is
+  // kept only as a same-device consume fallback — it must NOT hijack the homepage.
   useEffect(() => {
     const path = window.location.pathname || "";
     const params = new URLSearchParams(window.location.search);
@@ -44,10 +48,14 @@ export default function App() {
     else if (pathMatch && pathMatch[1]) token = pathMatch[1];
 
     if (token) {
+      // Real invite arrival via URL — stash it and show the landing page.
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
+      setArrivedViaInvite(true);
       window.history.replaceState({}, "", "/");
     } else {
+      // No URL token. Keep any stored token ONLY for post-login consume —
+      // do NOT set arrivedViaInvite, so the landing page never shows here.
       const stored = localStorage.getItem(INVITE_KEY);
       if (stored) setInviteToken(stored);
     }
@@ -99,7 +107,7 @@ export default function App() {
   // Consume a pending invite once the user is logged in AND fully set up.
   // Runs reliably after render (not mid-render), so the connection forms
   // whether they just signed up or were already a user opening a link.
-useEffect(() => {
+  useEffect(() => {
     if (session && hasProfile) {
       consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
     }
@@ -335,9 +343,10 @@ useEffect(() => {
     );
   }
 
-  // Logged-OUT user with a pending invite: show the landing page first,
-  // until they tap "Join" (which falls through to Auth).
-  if (!session && inviteToken && !dismissedInviteLanding) {
+  // Logged-OUT user who ARRIVED via an invite link this visit: show the landing
+  // page first, until they tap "Join" (which falls through to Auth). A stale
+  // localStorage token alone does NOT trigger this — only a real URL arrival.
+  if (!session && arrivedViaInvite && inviteToken && !dismissedInviteLanding) {
     return (
       <InviteLanding
         token={inviteToken}
