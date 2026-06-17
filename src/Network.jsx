@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
+import ConfirmModal from "./ConfirmModal";
 
 export default function Network({ session }) {
   const [connections, setConnections] = useState([]);
@@ -9,6 +10,7 @@ export default function Network({ session }) {
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [inviting, setInviting] = useState(false);
   const [myName, setMyName] = useState("");
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => { fetchConnections(); }, []);
 
@@ -80,10 +82,22 @@ export default function Network({ session }) {
     setLoading(false);
   };
 
-  const removeConnection = async (connectionId) => {
-    if (!window.confirm("Remove this connection? You'll no longer be able to set up playdates with them unless you reconnect.")) return;
+  // The actual removal work (runs after the user confirms in the modal).
+  const doRemoveConnection = async (connectionId) => {
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const removeConnection = (connectionId, personName) => {
+    setConfirm({
+      title: "Remove this connection?",
+      body: `You'll no longer be able to set up playdates with ${shortName(personName)} unless you reconnect.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      tone: "danger",
+      onConfirm: () => doRemoveConnection(connectionId),
+    });
   };
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
@@ -185,7 +199,7 @@ export default function Network({ session }) {
                 )}
 
                 {/* Remove */}
-                <button onClick={() => removeConnection(conn.connectionId)}
+                <button onClick={() => removeConnection(conn.connectionId, conn.person?.name)}
                   style={{ marginTop: "0.75rem", background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0" }}>
                   Remove connection
                 </button>
@@ -202,6 +216,8 @@ export default function Network({ session }) {
           onClose={() => setInviting(false)}
         />
       )}
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
