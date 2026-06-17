@@ -10,6 +10,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
   const [classmates, setClassmates] = useState({});
+  const [petsByHousehold, setPetsByHousehold] = useState({});
   const [loading, setLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -43,6 +44,23 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
+  // Small inline pet badges for a household (🐕🐈🐴🐾). Returns null if none set.
+  const petBadges = (hhId) => {
+    const p = petsByHousehold[hhId];
+    if (!p) return null;
+    const icons = [];
+    if (p.has_dog) icons.push("🐕");
+    if (p.has_cat) icons.push("🐈");
+    if (p.has_horse) icons.push("🐴");
+    if (p.has_other) icons.push("🐾");
+    if (icons.length === 0) return null;
+    return (
+      <span style={{ fontSize: "0.85rem", marginLeft: "6px", whiteSpace: "nowrap" }} title={p.has_other && p.other_label ? p.other_label : undefined}>
+        {icons.join(" ")}
+      </span>
+    );
+  };
+
   const fetchData = async () => {
     setLoading(true);
 
@@ -74,6 +92,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setMemberships(membershipData || []);
 
     const classmatesMap = {};
+    const otherHouseholdIds = new Set();
     for (const m of (membershipData || [])) {
       const { data: otherMembers } = await supabase
         .from("classroom_members")
@@ -85,8 +104,22 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         classroomLabel: `${m.classrooms?.teacher_name} · ${grades[m.classrooms?.grade] || "Unknown grade"}`,
         rows: otherMembers || [],
       };
+      for (const cm of (otherMembers || [])) {
+        if (cm.household_id) otherHouseholdIds.add(cm.household_id);
+      }
     }
     setClassmates(classmatesMap);
+
+    // Batch-fetch pet preferences for ALL the households shown (one query).
+    if (otherHouseholdIds.size > 0) {
+      const { data: prefs } = await supabase
+        .from("household_preferences")
+        .select("household_id, has_dog, has_cat, has_horse, has_other, other_label")
+        .in("household_id", [...otherHouseholdIds]);
+      const map = {};
+      for (const row of (prefs || [])) map[row.household_id] = row;
+      setPetsByHousehold(map);
+    }
 
     setLoading(false);
   };
@@ -197,7 +230,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const members = cm.households?.household_members || [];
       members.forEach((hm) => {
         if (!hm.parents) return;
-        cards.push({ key: `${cm.id}-${hm.parent_id}`, parents: hm.parents });
+        cards.push({ key: `${cm.id}-${hm.parent_id}`, parents: hm.parents, householdId: cm.household_id });
       });
     });
     return cards;
@@ -407,7 +440,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                       <img src={card.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     ) : card.parents?.name?.charAt(0) || "?"}
                   </div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{shortName(card.parents?.name)}</p>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0, display: "flex", alignItems: "center" }}>
+                    {shortName(card.parents?.name)}{petBadges(card.householdId)}
+                  </p>
                 </div>
                 <button onClick={() => setRequestingPlaydate(card.parents)}
                   style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
