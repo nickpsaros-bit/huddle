@@ -14,6 +14,12 @@ export default function ProfileScreen({ session, onBack }) {
   const [view, setView] = useState("main");
   const [memberships, setMemberships] = useState([]);
   const [householdMembers, setHouseholdMembers] = useState([]);
+  const [householdId, setHouseholdId] = useState(null);
+  const [prefs, setPrefs] = useState({
+    has_dog: false, has_cat: false, has_other: false, other_label: "",
+    prefer_no_dogs: false, prefer_no_cats: false,
+  });
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -54,7 +60,7 @@ export default function ProfileScreen({ session, onBack }) {
     setConsents(data || []);
   };
 
-  // Your classrooms + household members (the "about my family" data).
+  // Your classrooms + household members (the "about my family" data) + pet prefs.
   const fetchFamily = async () => {
     const { data: hm } = await supabase
       .from("household_members")
@@ -63,6 +69,7 @@ export default function ProfileScreen({ session, onBack }) {
       .maybeSingle();
     if (!hm) return;
     const hhId = hm.household_id;
+    setHouseholdId(hhId);
 
     const { data: members } = await supabase
       .from("household_members")
@@ -76,6 +83,49 @@ export default function ProfileScreen({ session, onBack }) {
       .select("id, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
       .eq("household_id", hhId);
     setMemberships(ms || []);
+
+    // Load household pet preferences (may not exist yet).
+    const { data: pref } = await supabase
+      .from("household_preferences")
+      .select("*")
+      .eq("household_id", hhId)
+      .maybeSingle();
+    if (pref) {
+      setPrefs({
+        has_dog: !!pref.has_dog,
+        has_cat: !!pref.has_cat,
+        has_other: !!pref.has_other,
+        other_label: pref.other_label || "",
+        prefer_no_dogs: !!pref.prefer_no_dogs,
+        prefer_no_cats: !!pref.prefer_no_cats,
+      });
+    }
+  };
+
+  const savePrefs = async () => {
+    if (!householdId) return;
+    setSavingPrefs(true);
+    setMessage("");
+    try {
+      const { error } = await supabase
+        .from("household_preferences")
+        .upsert({
+          household_id: householdId,
+          has_dog: prefs.has_dog,
+          has_cat: prefs.has_cat,
+          has_other: prefs.has_other,
+          other_label: prefs.has_other ? (prefs.other_label || null) : null,
+          prefer_no_dogs: prefs.prefer_no_dogs,
+          prefer_no_cats: prefs.prefer_no_cats,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "household_id" });
+      if (error) throw error;
+      setMessage("Pets & preferences saved!");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setSavingPrefs(false);
   };
 
   const uploadPhoto = async (e) => {
@@ -125,6 +175,21 @@ export default function ProfileScreen({ session, onBack }) {
     acc[name].push(m);
     return acc;
   }, {});
+
+  // A reusable toggle pill for the pets/preferences section.
+  const togglePill = (active, label, onClick) => (
+    <button onClick={onClick}
+      style={{
+        padding: "0.6rem 0.9rem", borderRadius: "10px", cursor: "pointer",
+        border: `1px solid ${active ? "#02C39A" : "#2A4A6B"}`,
+        background: active ? "#0F3D2E" : "transparent",
+        color: active ? "#02C39A" : "#8AAEC8",
+        fontSize: "0.9rem", fontWeight: active ? "600" : "500",
+        minHeight: "44px", display: "flex", alignItems: "center", gap: "6px",
+      }}>
+      {label}
+    </button>
+  );
 
   if (view === "terms" || view === "privacy") {
     const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
@@ -265,6 +330,42 @@ export default function ProfileScreen({ session, onBack }) {
               );
             })
           )}
+        </div>
+
+        {/* PETS & PLAYDATE PREFERENCES (household-level) */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>PETS & PLAYDATE PREFERENCES</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
+
+          <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Pets in your household</p>
+          <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+            Shown on your family's card so others know what to expect.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: prefs.has_other ? "0.75rem" : "1.5rem" }}>
+            {togglePill(prefs.has_dog, "🐕 Dog", () => setPrefs((p) => ({ ...p, has_dog: !p.has_dog })))}
+            {togglePill(prefs.has_cat, "🐈 Cat", () => setPrefs((p) => ({ ...p, has_cat: !p.has_cat })))}
+            {togglePill(prefs.has_other, "🐾 Other", () => setPrefs((p) => ({ ...p, has_other: !p.has_other })))}
+          </div>
+          {prefs.has_other && (
+            <input type="text" placeholder="What kind? (e.g. rabbit, bird)" value={prefs.other_label}
+              onChange={(e) => setPrefs((p) => ({ ...p, other_label: e.target.value }))}
+              style={{ width: "100%", padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "1.5rem" }} />
+          )}
+
+          <div style={{ borderTop: "1px solid #2A4A6B", paddingTop: "1.25rem" }}>
+            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Playdate preferences</p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+              If a host plans to bring a pet, we'll give you a gentle heads-up first.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {togglePill(prefs.prefer_no_dogs, "Rather not be around dogs", () => setPrefs((p) => ({ ...p, prefer_no_dogs: !p.prefer_no_dogs })))}
+              {togglePill(prefs.prefer_no_cats, "Rather not be around cats", () => setPrefs((p) => ({ ...p, prefer_no_cats: !p.prefer_no_cats })))}
+            </div>
+          </div>
+
+          <button onClick={savePrefs} disabled={savingPrefs || !householdId}
+            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
+            {savingPrefs ? "Saving..." : "Save pets & preferences"}
+          </button>
         </div>
 
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", marginTop: "1.5rem" }}>
