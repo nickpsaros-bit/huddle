@@ -372,8 +372,8 @@ export default function App() {
   }
 
   let screen;
-  if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+if (activeTab === "home") {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
   } else if (activeTab === "search") {
     screen = <Search session={session} />;
   } else if (activeTab === "network") {
@@ -382,8 +382,8 @@ export default function App() {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
-  } else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+} else {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
   }
 
   return (

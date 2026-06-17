@@ -4,7 +4,7 @@ import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 
-export default function Home({ session, notificationCount, onBellClick }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -221,10 +221,14 @@ export default function Home({ session, notificationCount, onBellClick }) {
   }
 
   if (showProfile) return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
-  if (requestingPlaydate) {
+ if (requestingPlaydate) {
     return (
       <PlaydateRequest session={session} recipient={requestingPlaydate}
-        onBack={() => setRequestingPlaydate(null)} onSent={() => setRequestingPlaydate(null)} />
+        onBack={() => setRequestingPlaydate(null)}
+        onSent={() => {
+          setRequestingPlaydate(null);
+          if (typeof onPlaydateCreated === "function") onPlaydateCreated();
+        }} />
     );
   }
 
