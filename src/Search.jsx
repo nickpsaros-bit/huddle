@@ -245,5 +245,5 @@ export default function Search({ session }) {
       </div>
     </div>
   );
-}```
+}
 
