@@ -45,6 +45,24 @@ export default function Playdates({ session, onChanged }) {
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
+  // Pet line for a playdate (🐕/🐈). guest=true => "The host plans to bring...";
+  // guest=false (hosting view) => "You're bringing...". Returns null if no pet flagged.
+  const petLine = (pd, guest) => {
+    const animals = [];
+    if (pd.bringing_dog) animals.push("dog");
+    if (pd.bringing_cat) animals.push("cat");
+    if (animals.length === 0) return null;
+    const icons = `${pd.bringing_dog ? "🐕" : ""}${pd.bringing_cat ? "🐈" : ""}`;
+    const list = animals.length === 2 ? "dog and cat" : animals[0];
+    const text = guest ? `The host plans to bring their ${list}` : `You're bringing your ${list}`;
+    return (
+      <div style={{ background: "#1A3A5C", borderRadius: "8px", padding: "0.5rem 0.75rem", margin: "0.6rem 0 0", display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ fontSize: "0.95rem" }}>{icons}</span>
+        <span style={{ color: "#FFFFFF", fontSize: "0.82rem" }}>{text}</span>
+      </div>
+    );
+  };
+
   const addToCalendar = (pd) => {
     const start = new Date(pd.proposed_date);
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
@@ -365,6 +383,7 @@ export default function Playdates({ session, onChanged }) {
           </div>
           <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}</p>
           <p style={metaRow}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
+          {petLine(pd, true)}
           {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{pd.note}"</p>}
 
           {!dim && (
@@ -407,6 +426,8 @@ export default function Playdates({ session, onChanged }) {
             {badge.text}
           </span>
         </div>
+
+        {petLine(pd, false)}
 
         {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "6px 0 12px", fontStyle: "italic" }}>"{pd.note}"</p>}
 
