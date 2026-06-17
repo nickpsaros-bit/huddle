@@ -10,6 +10,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null);
+  const [sent, setSent] = useState(false);
 
   const locations = [
     { name: "Local Park", address: "Nearby park" },
@@ -235,13 +236,16 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         if (rows.length > 0) {
           await supabase.from("notifications").insert(rows);
         }
-      } catch (notifErr) {
+ } catch (notifErr) {
         // Best-effort — don't block the invite.
       }
 
-      onSent();
+      // Show a success state, then return to where they came from.
+      setSent(true);
+      setTimeout(() => { onSent(); }, 1800);
 
     } catch (err) {
+
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
