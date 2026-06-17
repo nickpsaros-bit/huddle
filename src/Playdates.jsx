@@ -423,13 +423,11 @@ export default function Playdates({ session, onChanged }) {
           </button>
         )}
 
-        {!dim && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.85rem" }}>
-            <button onClick={() => cancelPlaydate(pd)} disabled={busy}
-              style={{ background: "transparent", border: "none", color: "#607080", fontSize: "0.8rem", cursor: "pointer", padding: "2px 4px", textDecoration: "underline" }}>
-              Cancel playdate
-            </button>
-          </div>
+    {!dim && (
+          <button onClick={() => cancelPlaydate(pd)} disabled={busy}
+            style={{ width: "100%", marginTop: "0.85rem", padding: "0.7rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", fontWeight: "500", cursor: "pointer", minHeight: "44px" }}>
+            Cancel playdate
+          </button>
         )}
       </div>
     );
