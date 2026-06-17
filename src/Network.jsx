@@ -159,19 +159,13 @@ export default function Network({ session }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Invite a family */}
-        <button onClick={() => setInviting(true)}
-          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-          ➕ Invite a family to Huddle
-        </button>
-
         {loading ? (
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
         ) : connections.length === 0 ? (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🤝</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No connections yet</p>
-            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school, or invite a family above. They'll show up here so you can set up playdates across classrooms.</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school, or invite a parent below. They'll show up here so you can set up playdates across classrooms.</p>
           </div>
         ) : (
           <>
@@ -241,6 +235,14 @@ export default function Network({ session }) {
               </div>
             ))}
           </>
+        )}
+
+        {/* Invite — placed below the list (actions follow content) */}
+        {!loading && (
+          <button onClick={() => setInviting(true)}
+            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            ➕ Invite a parent to Huddle
+          </button>
         )}
       </div>
 
