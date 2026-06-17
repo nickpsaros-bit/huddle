@@ -89,6 +89,7 @@ export default function Search({ session }) {
       if (sharedClassrooms.length > 0) {
         enriched.push({
           ...parent,
+          householdId: hm.household_id,
           classrooms: sharedClassrooms,
         });
       }
@@ -120,6 +121,9 @@ export default function Search({ session }) {
       setMessage("Connection request sent!");
       fetchMyData();
       setTimeout(() => setMessage(""), 3000);
+    } else {
+      setMessage("Couldn't send request: " + error.message);
+      setTimeout(() => setMessage(""), 4000);
     }
   };
 
@@ -188,6 +192,7 @@ export default function Search({ session }) {
 
         {results.map((parent) => {
           const conn = getConnectionStatus(parent.id);
+          const sameHousehold = myHouseholdId && parent.householdId === myHouseholdId;
           const classroomLabel = (parent.classrooms || []).map(c =>
             `${c.classrooms?.teacher_name} (${grades[c.classrooms?.grade] || "?"})`
           ).join(", ");
@@ -208,25 +213,31 @@ export default function Search({ session }) {
                 </div>
               </div>
 
-              {!conn && (
-                <button
-                  onClick={() => sendRequest(parent.id)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                  Connect
-                </button>
-              )}
-              {conn && conn.status === "pending" && conn.isRequester && (
-                <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>
-              )}
-              {conn && conn.status === "pending" && !conn.isRequester && (
-                <button
-                  onClick={() => acceptRequest(parent.id)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                  Accept
-                </button>
-              )}
-              {conn && conn.status === "accepted" && (
-                <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>
+              {sameHousehold ? (
+                <span style={{ color: "#8AAEC8", fontSize: "0.8rem", flexShrink: 0 }}>In your household</span>
+              ) : (
+                <>
+                  {!conn && (
+                    <button
+                      onClick={() => sendRequest(parent.id)}
+                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                      Connect
+                    </button>
+                  )}
+                  {conn && conn.status === "pending" && conn.isRequester && (
+                    <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>
+                  )}
+                  {conn && conn.status === "pending" && !conn.isRequester && (
+                    <button
+                      onClick={() => acceptRequest(parent.id)}
+                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                      Accept
+                    </button>
+                  )}
+                  {conn && conn.status === "accepted" && (
+                    <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>
+                  )}
+                </>
               )}
             </div>
           );
@@ -234,4 +245,6 @@ export default function Search({ session }) {
       </div>
     </div>
   );
-}
+}```
+
+Push:
