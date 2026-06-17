@@ -15,8 +15,8 @@ export default function ProfileScreen({ session, onBack }) {
   const [memberships, setMemberships] = useState([]);
   const [householdMembers, setHouseholdMembers] = useState([]);
   const [householdId, setHouseholdId] = useState(null);
-  const [prefs, setPrefs] = useState({
-    has_dog: false, has_cat: false, has_other: false, other_label: "",
+ const [prefs, setPrefs] = useState({
+    has_dog: false, has_cat: false, has_horse: false, has_other: false, other_label: "",
     prefer_no_dogs: false, prefer_no_cats: false,
   });
   const [savingPrefs, setSavingPrefs] = useState(false);
@@ -91,9 +91,10 @@ export default function ProfileScreen({ session, onBack }) {
       .eq("household_id", hhId)
       .maybeSingle();
     if (pref) {
-      setPrefs({
+    setPrefs({
         has_dog: !!pref.has_dog,
         has_cat: !!pref.has_cat,
+        has_horse: !!pref.has_horse,
         has_other: !!pref.has_other,
         other_label: pref.other_label || "",
         prefer_no_dogs: !!pref.prefer_no_dogs,
@@ -113,6 +114,7 @@ export default function ProfileScreen({ session, onBack }) {
           household_id: householdId,
           has_dog: prefs.has_dog,
           has_cat: prefs.has_cat,
+          has_horse: prefs.has_horse,
           has_other: prefs.has_other,
           other_label: prefs.has_other ? (prefs.other_label || null) : null,
           prefer_no_dogs: prefs.prefer_no_dogs,
@@ -342,7 +344,8 @@ export default function ProfileScreen({ session, onBack }) {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: prefs.has_other ? "0.75rem" : "1.5rem" }}>
             {togglePill(prefs.has_dog, "🐕 Dog", () => setPrefs((p) => ({ ...p, has_dog: !p.has_dog })))}
-            {togglePill(prefs.has_cat, "🐈 Cat", () => setPrefs((p) => ({ ...p, has_cat: !p.has_cat })))}
+           {togglePill(prefs.has_cat, "🐈 Cat", () => setPrefs((p) => ({ ...p, has_cat: !p.has_cat })))}
+            {togglePill(prefs.has_horse, "🐴 Horse", () => setPrefs((p) => ({ ...p, has_horse: !p.has_horse })))}
             {togglePill(prefs.has_other, "🐾 Other", () => setPrefs((p) => ({ ...p, has_other: !p.has_other })))}
           </div>
           {prefs.has_other && (

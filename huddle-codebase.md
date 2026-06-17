@@ -399,8 +399,8 @@ export default function App() {
   }
 
   let screen;
-  if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+if (activeTab === "home") {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
   } else if (activeTab === "search") {
     screen = <Search session={session} />;
   } else if (activeTab === "network") {
@@ -409,8 +409,8 @@ export default function App() {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
-  } else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} />;
+} else {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
   }
 
   return (
@@ -1107,8 +1107,9 @@ import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
+import ConfirmModal from "./ConfirmModal";
 
-export default function Home({ session, notificationCount, onBellClick }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -1130,6 +1131,8 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [membershipError, setMembershipError] = useState("");
   const [householdBusy, setHouseholdBusy] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [drillMessage, setDrillMessage] = useState("");
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -1260,10 +1263,10 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setSavingMembership(false);
   };
 
-  const leaveClassroom = async (membershipRow) => {
-    const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
-    if (!window.confirm(`Remove your household from ${label}?`)) return;
+  // The actual classroom removal (runs after the user confirms in the modal).
+  const doLeaveClassroom = async (membershipRow) => {
     setHouseholdBusy(true);
+    setDrillMessage("");
     try {
       const { error } = await supabase
         .from("classroom_members")
@@ -1273,9 +1276,22 @@ export default function Home({ session, notificationCount, onBellClick }) {
       setSelectedClassroom(null);
       fetchData();
     } catch (err) {
-      alert("Error: " + err.message);
+      setDrillMessage("Couldn't remove the classroom: " + err.message);
     }
     setHouseholdBusy(false);
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const leaveClassroom = (membershipRow) => {
+    const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
+    setConfirm({
+      title: "Remove this classroom?",
+      body: `This removes your household from ${label}. You can add it back anytime.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      tone: "danger",
+      onConfirm: () => doLeaveClassroom(membershipRow),
+    });
   };
 
   const familyCardsFor = (membershipRow) => {
@@ -1325,10 +1341,14 @@ export default function Home({ session, notificationCount, onBellClick }) {
   }
 
   if (showProfile) return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
-  if (requestingPlaydate) {
+ if (requestingPlaydate) {
     return (
       <PlaydateRequest session={session} recipient={requestingPlaydate}
-        onBack={() => setRequestingPlaydate(null)} onSent={() => setRequestingPlaydate(null)} />
+        onBack={() => setRequestingPlaydate(null)}
+        onSent={() => {
+          setRequestingPlaydate(null);
+          if (typeof onPlaydateCreated === "function") onPlaydateCreated();
+        }} />
     );
   }
 
@@ -1449,7 +1469,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         {headerBar}
         <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
-          <button onClick={() => setSelectedClassroom(null)}
+          <button onClick={() => { setSelectedClassroom(null); setDrillMessage(""); }}
             style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "0.95rem", cursor: "pointer", padding: "0 0 1rem", display: "flex", alignItems: "center", gap: "6px" }}>
             ← Back to classrooms
           </button>
@@ -1463,6 +1483,12 @@ export default function Home({ session, notificationCount, onBellClick }) {
               <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>{m.classrooms?.schools?.name}</p>
             </div>
           </div>
+
+          {drillMessage && (
+            <div style={{ background: "#3D1515", border: "1px solid #F87171", borderRadius: "10px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
+              <p style={{ color: "#F87171", fontSize: "0.85rem", margin: 0 }}>{drillMessage}</p>
+            </div>
+          )}
 
           <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>
             FAMILIES IN THIS CLASS
@@ -1501,7 +1527,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
           </button>
 
           <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
-            style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem" }}>
+            style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
             Remove this classroom
           </button>
         </div>
@@ -1509,6 +1535,8 @@ export default function Home({ session, notificationCount, onBellClick }) {
         {inviting && (
           <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
         )}
+
+        <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
       </div>
     );
   }
@@ -1587,6 +1615,8 @@ export default function Home({ session, notificationCount, onBellClick }) {
       )}
 
       {addClassroomModal}
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }```
@@ -1612,6 +1642,12 @@ export default function ProfileScreen({ session, onBack }) {
   const [view, setView] = useState("main");
   const [memberships, setMemberships] = useState([]);
   const [householdMembers, setHouseholdMembers] = useState([]);
+  const [householdId, setHouseholdId] = useState(null);
+  const [prefs, setPrefs] = useState({
+    has_dog: false, has_cat: false, has_other: false, other_label: "",
+    prefer_no_dogs: false, prefer_no_cats: false,
+  });
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -1652,7 +1688,7 @@ export default function ProfileScreen({ session, onBack }) {
     setConsents(data || []);
   };
 
-  // Your classrooms + household members (the "about my family" data).
+  // Your classrooms + household members (the "about my family" data) + pet prefs.
   const fetchFamily = async () => {
     const { data: hm } = await supabase
       .from("household_members")
@@ -1661,6 +1697,7 @@ export default function ProfileScreen({ session, onBack }) {
       .maybeSingle();
     if (!hm) return;
     const hhId = hm.household_id;
+    setHouseholdId(hhId);
 
     const { data: members } = await supabase
       .from("household_members")
@@ -1674,6 +1711,49 @@ export default function ProfileScreen({ session, onBack }) {
       .select("id, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
       .eq("household_id", hhId);
     setMemberships(ms || []);
+
+    // Load household pet preferences (may not exist yet).
+    const { data: pref } = await supabase
+      .from("household_preferences")
+      .select("*")
+      .eq("household_id", hhId)
+      .maybeSingle();
+    if (pref) {
+      setPrefs({
+        has_dog: !!pref.has_dog,
+        has_cat: !!pref.has_cat,
+        has_other: !!pref.has_other,
+        other_label: pref.other_label || "",
+        prefer_no_dogs: !!pref.prefer_no_dogs,
+        prefer_no_cats: !!pref.prefer_no_cats,
+      });
+    }
+  };
+
+  const savePrefs = async () => {
+    if (!householdId) return;
+    setSavingPrefs(true);
+    setMessage("");
+    try {
+      const { error } = await supabase
+        .from("household_preferences")
+        .upsert({
+          household_id: householdId,
+          has_dog: prefs.has_dog,
+          has_cat: prefs.has_cat,
+          has_other: prefs.has_other,
+          other_label: prefs.has_other ? (prefs.other_label || null) : null,
+          prefer_no_dogs: prefs.prefer_no_dogs,
+          prefer_no_cats: prefs.prefer_no_cats,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "household_id" });
+      if (error) throw error;
+      setMessage("Pets & preferences saved!");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setSavingPrefs(false);
   };
 
   const uploadPhoto = async (e) => {
@@ -1723,6 +1803,21 @@ export default function ProfileScreen({ session, onBack }) {
     acc[name].push(m);
     return acc;
   }, {});
+
+  // A reusable toggle pill for the pets/preferences section.
+  const togglePill = (active, label, onClick) => (
+    <button onClick={onClick}
+      style={{
+        padding: "0.6rem 0.9rem", borderRadius: "10px", cursor: "pointer",
+        border: `1px solid ${active ? "#02C39A" : "#2A4A6B"}`,
+        background: active ? "#0F3D2E" : "transparent",
+        color: active ? "#02C39A" : "#8AAEC8",
+        fontSize: "0.9rem", fontWeight: active ? "600" : "500",
+        minHeight: "44px", display: "flex", alignItems: "center", gap: "6px",
+      }}>
+      {label}
+    </button>
+  );
 
   if (view === "terms" || view === "privacy") {
     const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
@@ -1863,6 +1958,42 @@ export default function ProfileScreen({ session, onBack }) {
               );
             })
           )}
+        </div>
+
+        {/* PETS & PLAYDATE PREFERENCES (household-level) */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>PETS & PLAYDATE PREFERENCES</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
+
+          <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Pets in your household</p>
+          <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+            Shown on your family's card so others know what to expect.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: prefs.has_other ? "0.75rem" : "1.5rem" }}>
+            {togglePill(prefs.has_dog, "🐕 Dog", () => setPrefs((p) => ({ ...p, has_dog: !p.has_dog })))}
+            {togglePill(prefs.has_cat, "🐈 Cat", () => setPrefs((p) => ({ ...p, has_cat: !p.has_cat })))}
+            {togglePill(prefs.has_other, "🐾 Other", () => setPrefs((p) => ({ ...p, has_other: !p.has_other })))}
+          </div>
+          {prefs.has_other && (
+            <input type="text" placeholder="What kind? (e.g. rabbit, bird)" value={prefs.other_label}
+              onChange={(e) => setPrefs((p) => ({ ...p, other_label: e.target.value }))}
+              style={{ width: "100%", padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "1.5rem" }} />
+          )}
+
+          <div style={{ borderTop: "1px solid #2A4A6B", paddingTop: "1.25rem" }}>
+            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Playdate preferences</p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+              If a host plans to bring a pet, we'll give you a gentle heads-up first.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {togglePill(prefs.prefer_no_dogs, "Rather not be around dogs", () => setPrefs((p) => ({ ...p, prefer_no_dogs: !p.prefer_no_dogs })))}
+              {togglePill(prefs.prefer_no_cats, "Rather not be around cats", () => setPrefs((p) => ({ ...p, prefer_no_cats: !p.prefer_no_cats })))}
+            </div>
+          </div>
+
+          <button onClick={savePrefs} disabled={savingPrefs || !householdId}
+            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
+            {savingPrefs ? "Saving..." : "Save pets & preferences"}
+          </button>
         </div>
 
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", marginTop: "1.5rem" }}>
@@ -2129,6 +2260,7 @@ export default function Search({ session }) {
       if (sharedClassrooms.length > 0) {
         enriched.push({
           ...parent,
+          householdId: hm.household_id,
           classrooms: sharedClassrooms,
         });
       }
@@ -2160,6 +2292,9 @@ export default function Search({ session }) {
       setMessage("Connection request sent!");
       fetchMyData();
       setTimeout(() => setMessage(""), 3000);
+    } else {
+      setMessage("Couldn't send request: " + error.message);
+      setTimeout(() => setMessage(""), 4000);
     }
   };
 
@@ -2228,6 +2363,7 @@ export default function Search({ session }) {
 
         {results.map((parent) => {
           const conn = getConnectionStatus(parent.id);
+          const sameHousehold = myHouseholdId && parent.householdId === myHouseholdId;
           const classroomLabel = (parent.classrooms || []).map(c =>
             `${c.classrooms?.teacher_name} (${grades[c.classrooms?.grade] || "?"})`
           ).join(", ");
@@ -2248,25 +2384,31 @@ export default function Search({ session }) {
                 </div>
               </div>
 
-              {!conn && (
-                <button
-                  onClick={() => sendRequest(parent.id)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                  Connect
-                </button>
-              )}
-              {conn && conn.status === "pending" && conn.isRequester && (
-                <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>
-              )}
-              {conn && conn.status === "pending" && !conn.isRequester && (
-                <button
-                  onClick={() => acceptRequest(parent.id)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                  Accept
-                </button>
-              )}
-              {conn && conn.status === "accepted" && (
-                <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>
+              {sameHousehold ? (
+                <span style={{ color: "#8AAEC8", fontSize: "0.8rem", flexShrink: 0 }}>In your household</span>
+              ) : (
+                <>
+                  {!conn && (
+                    <button
+                      onClick={() => sendRequest(parent.id)}
+                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                      Connect
+                    </button>
+                  )}
+                  {conn && conn.status === "pending" && conn.isRequester && (
+                    <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>
+                  )}
+                  {conn && conn.status === "pending" && !conn.isRequester && (
+                    <button
+                      onClick={() => acceptRequest(parent.id)}
+                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                      Accept
+                    </button>
+                  )}
+                  {conn && conn.status === "accepted" && (
+                    <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>
+                  )}
+                </>
               )}
             </div>
           );
@@ -2274,7 +2416,9 @@ export default function Search({ session }) {
       </div>
     </div>
   );
-}```
+}
+
+```
 
 ---
 
@@ -2285,6 +2429,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
+import ConfirmModal from "./ConfirmModal";
 
 export default function Network({ session }) {
   const [connections, setConnections] = useState([]);
@@ -2292,6 +2437,7 @@ export default function Network({ session }) {
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [inviting, setInviting] = useState(false);
   const [myName, setMyName] = useState("");
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => { fetchConnections(); }, []);
 
@@ -2363,10 +2509,22 @@ export default function Network({ session }) {
     setLoading(false);
   };
 
-  const removeConnection = async (connectionId) => {
-    if (!window.confirm("Remove this connection? You'll no longer be able to set up playdates with them unless you reconnect.")) return;
+  // The actual removal work (runs after the user confirms in the modal).
+  const doRemoveConnection = async (connectionId) => {
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const removeConnection = (connectionId, personName) => {
+    setConfirm({
+      title: "Remove this connection?",
+      body: `You'll no longer be able to set up playdates with ${shortName(personName)} unless you reconnect.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      tone: "danger",
+      onConfirm: () => doRemoveConnection(connectionId),
+    });
   };
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
@@ -2468,7 +2626,7 @@ export default function Network({ session }) {
                 )}
 
                 {/* Remove */}
-                <button onClick={() => removeConnection(conn.connectionId)}
+                <button onClick={() => removeConnection(conn.connectionId, conn.person?.name)}
                   style={{ marginTop: "0.75rem", background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0" }}>
                   Remove connection
                 </button>
@@ -2485,6 +2643,8 @@ export default function Network({ session }) {
           onClose={() => setInviting(false)}
         />
       )}
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }```
@@ -2871,6 +3031,7 @@ const accept = async (connectionId) => {
 ```jsx
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import ConfirmModal from "./ConfirmModal";
 
 export default function Playdates({ session, onChanged }) {
   const [householdId, setHouseholdId] = useState(null);
@@ -2878,6 +3039,7 @@ export default function Playdates({ session, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -2914,7 +3076,6 @@ export default function Playdates({ session, onChanged }) {
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
-  // Build and download an .ics file for a playdate (2-hour default duration).
   const addToCalendar = (pd) => {
     const start = new Date(pd.proposed_date);
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
@@ -3015,9 +3176,7 @@ export default function Playdates({ session, onChanged }) {
         .update({ rsvp, responded_at: new Date().toISOString() })
         .eq("id", inviteId);
 
-      // Notify the host's household that a guest responded (non-blocking).
       try {
-        // The invite row -> its playdate -> the organizer household.
         const { data: inv } = await supabase
           .from("playdate_invites")
           .select("playdate_id, household_id, playdates(organizer_household_id)")
@@ -3029,7 +3188,6 @@ export default function Playdates({ session, onChanged }) {
         const playdateId = inv?.playdate_id;
 
         if (organizerHouseholdId && respondingHouseholdId && organizerHouseholdId !== respondingHouseholdId) {
-          // Responding household's display name.
           const { data: respMembers } = await supabase
             .from("household_members")
             .select("parents(name)")
@@ -3047,7 +3205,6 @@ export default function Playdates({ session, onChanged }) {
           const verb = rsvp === "yes" ? "is going to" : rsvp === "maybe" ? "might come to" : "can't make";
           const emoji = rsvp === "yes" ? "✅" : rsvp === "maybe" ? "🤔" : "😔";
 
-          // Parents in the host household.
           const { data: hostMembers } = await supabase
             .from("household_members")
             .select("parent_id")
@@ -3063,8 +3220,6 @@ export default function Playdates({ session, onChanged }) {
             await supabase.from("notifications").insert(rows);
           }
 
-          // On "yes" (both parties now accepted), email the calendar invite (.ics)
-          // to the joining family + host. Non-blocking; never breaks the RSVP.
           if (rsvp === "yes" && playdateId) {
             try {
               await supabase.functions.invoke("send-playdate-invite", {
@@ -3092,13 +3247,58 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  const removeDeadPlaydate = async (playdateId) => {
-    if (!window.confirm("Remove this playdate? Everyone declined, so it'll be deleted.")) return;
+  // The actual cancellation work (called after the user confirms in the modal).
+  // Order matters:
+  // 1) email the calendar CANCELLATION (.ics METHOD:CANCEL) to "yes" families +
+  //    host — MUST run BEFORE deleting, since the function reads the playdate;
+  // 2) drop in-app notifications to invited guests;
+  // 3) delete invites + the playdate.
+  const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
-      await supabase.from("playdate_invites").delete().eq("playdate_id", playdateId);
-      await supabase.from("playdates").delete().eq("id", playdateId);
-      setMessage("Playdate removed");
+      try {
+        await supabase.functions.invoke("cancel-playdate-invite", {
+          body: { playdate_id: pd.id },
+        });
+      } catch (calErr) {
+        // Best-effort — don't block the cancellation if the email fails.
+      }
+
+      const { data: invites } = await supabase
+        .from("playdate_invites")
+        .select("household_id")
+        .eq("playdate_id", pd.id);
+
+      try {
+        const hostLabel = await householdLabel(pd.organizer_household_id);
+        const whenStr = fmtDate(pd.proposed_date);
+        const invitedHouseholdIds = [...new Set((invites || []).map((i) => i.household_id))]
+          .filter((id) => id && id !== pd.organizer_household_id);
+
+        if (invitedHouseholdIds.length > 0) {
+          const { data: guestParents } = await supabase
+            .from("household_members")
+            .select("parent_id")
+            .in("household_id", invitedHouseholdIds);
+
+          const rows = (guestParents || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "playdate_cancelled",
+            title: "Playdate cancelled",
+            body: `${hostLabel} cancelled the playdate for ${whenStr}.`,
+          }));
+          if (rows.length > 0) {
+            await supabase.from("notifications").insert(rows);
+          }
+        }
+      } catch (notifErr) {
+        // Best-effort.
+      }
+
+      await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
+      await supabase.from("playdates").delete().eq("id", pd.id);
+
+      setMessage("Playdate cancelled");
       await fetchData();
       if (typeof onChanged === "function") onChanged();
       setTimeout(() => setMessage(""), 3000);
@@ -3106,6 +3306,18 @@ export default function Playdates({ session, onChanged }) {
       setMessage("Error: " + err.message);
     }
     setBusy(false);
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const cancelPlaydate = (pd) => {
+    setConfirm({
+      title: "Cancel this playdate?",
+      body: "Invited families will be notified and it'll be removed from their calendars.",
+      confirmLabel: "Cancel playdate",
+      cancelLabel: "Keep it",
+      tone: "danger",
+      onConfirm: () => doCancelPlaydate(pd),
+    });
   };
 
   const rsvpColor = (rsvp) =>
@@ -3122,9 +3334,6 @@ export default function Playdates({ session, onChanged }) {
     if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
     return { text: "Declined", bg: "#3D1515", color: "#F87171" };
   };
-
-  const isDead = (roster) =>
-    roster && roster.length > 0 && roster.every((r) => r.rsvp === "no");
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
@@ -3174,7 +3383,6 @@ export default function Playdates({ session, onChanged }) {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
-      // Guest sees "Add to calendar" if they're going (host + them = confirmed).
       const showCal = !dim && it.invite.rsvp === "yes";
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
@@ -3218,8 +3426,6 @@ export default function Playdates({ session, onChanged }) {
 
     // hosting card
     const badge = hostBadge(it.roster, dim);
-    const dead = !dim && isDead(it.roster);
-    // Host sees "Add to calendar" once at least one guest is going (confirmed).
     const showCal = !dim && it.goingCount > 0;
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
@@ -3259,10 +3465,10 @@ export default function Playdates({ session, onChanged }) {
           </button>
         )}
 
-        {dead && (
-          <button onClick={() => removeDeadPlaydate(pd.id)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.6rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
-            Remove playdate
+        {!dim && (
+          <button onClick={() => cancelPlaydate(pd)} disabled={busy}
+            style={{ width: "100%", marginTop: "0.85rem", padding: "0.7rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", fontWeight: "500", cursor: "pointer", minHeight: "44px" }}>
+            Cancel playdate
           </button>
         )}
       </div>
@@ -3316,6 +3522,8 @@ export default function Playdates({ session, onChanged }) {
           </>
         )}
       </div>
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }```
@@ -3337,6 +3545,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null);
+  const [sent, setSent] = useState(false);
 
   const locations = [
     { name: "Local Park", address: "Nearby park" },
@@ -3562,13 +3771,16 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         if (rows.length > 0) {
           await supabase.from("notifications").insert(rows);
         }
-      } catch (notifErr) {
+ } catch (notifErr) {
         // Best-effort — don't block the invite.
       }
 
-      onSent();
+      // Show a success state, then return to where they came from.
+      setSent(true);
+      setTimeout(() => { onSent(); }, 1800);
 
     } catch (err) {
+
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
@@ -4051,6 +4263,142 @@ export default function InviteLanding({ token, onJoin }) {
             </p>
           </>
         )}
+      </div>
+    </div>
+  );
+}```
+
+---
+
+## File: src/ConfirmModal.jsx
+
+```jsx
+import { useEffect } from "react";
+
+/**
+ * Reusable in-app confirmation modal. Replaces window.confirm(), which is
+ * unreliable on mobile (iOS Safari silently suppresses native popups).
+ *
+ * Usage (per screen):
+ *   const [confirm, setConfirm] = useState(null);
+ *   ...
+ *   <button onClick={() => setConfirm({
+ *     title: "Cancel this playdate?",
+ *     body: "Invited families will be notified and it'll be removed from their calendars.",
+ *     confirmLabel: "Cancel playdate",
+ *     tone: "danger",
+ *     onConfirm: () => doTheThing(),
+ *   })}>...</button>
+ *   ...
+ *   <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
+ *
+ * `confirm` is null when hidden, or an object:
+ *   { title, body?, confirmLabel?, cancelLabel?, tone?, onConfirm }
+ *   tone: "danger" (default) | "primary"
+ */
+export default function ConfirmModal({ confirm, onClose }) {
+  // Close on Escape (desktop niceness; harmless on mobile).
+  useEffect(() => {
+    if (!confirm) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirm, onClose]);
+
+  if (!confirm) return null;
+
+  const {
+    title,
+    body,
+    confirmLabel = "Confirm",
+    cancelLabel = "Keep it",
+    tone = "danger",
+    onConfirm,
+  } = confirm;
+
+  const confirmBg = tone === "danger" ? "#3D1515" : "#0F3D2E";
+  const confirmBorder = tone === "danger" ? "#F87171" : "#02C39A";
+  const confirmColor = tone === "danger" ? "#F87171" : "#02C39A";
+
+  const handleConfirm = () => {
+    // Run the action, then close. The action itself handles its own async.
+    if (typeof onConfirm === "function") onConfirm();
+    onClose();
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(8, 16, 33, 0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.5rem",
+        zIndex: 1000,
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#162D50",
+          borderRadius: "16px",
+          border: "1px solid #2A4A6B",
+          padding: "1.5rem",
+          maxWidth: "380px",
+          width: "100%",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+        }}
+      >
+        <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "600", margin: "0 0 0.5rem" }}>
+          {title}
+        </h2>
+        {body && (
+          <p style={{ color: "#8AAEC8", fontSize: "0.9rem", lineHeight: "1.5", margin: "0 0 1.5rem" }}>
+            {body}
+          </p>
+        )}
+        {!body && <div style={{ height: "1rem" }} />}
+
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: "0.8rem",
+              borderRadius: "10px",
+              border: "1px solid #2A4A6B",
+              background: "transparent",
+              color: "#8AAEC8",
+              fontSize: "0.9rem",
+              fontWeight: "500",
+              cursor: "pointer",
+              minHeight: "48px",
+            }}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={handleConfirm}
+            style={{
+              flex: 1,
+              padding: "0.8rem",
+              borderRadius: "10px",
+              border: `1px solid ${confirmBorder}`,
+              background: confirmBg,
+              color: confirmColor,
+              fontSize: "0.9rem",
+              fontWeight: "600",
+              cursor: "pointer",
+              minHeight: "48px",
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
