@@ -1,6 +1,6 @@
 # Huddle Codebase Snapshot
 
-Updated: June 14, 2026
+Updated: June 16, 2026
 
 
 ---
@@ -37,7 +37,11 @@ import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
 import Playdates from "./Playdates";
+import InviteLanding from "./InviteLanding";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
+
+const INVITE_KEY = "huddle_pending_invite_token";
+const INVITE_EMAIL_KEY = "huddle_invite_email";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -48,8 +52,43 @@ export default function App() {
   const [showInbox, setShowInbox] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
-  const [playdateHalo, setPlaydateHalo] = useState(null); // "amber" | "teal" | null
+  const [playdateHalo, setPlaydateHalo] = useState(null);
 
+  // Invite handling.
+  const [inviteToken, setInviteToken] = useState(null);
+  const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
+  const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
+
+  // On first load: capture an invite token from either the path (/invite/{token})
+  // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
+  // IMPORTANT: only treat this as an "invite arrival" (show the landing page) when
+  // the token came from the URL THIS visit. A leftover token in localStorage is
+  // kept only as a same-device consume fallback — it must NOT hijack the homepage.
+  useEffect(() => {
+    const path = window.location.pathname || "";
+    const params = new URLSearchParams(window.location.search);
+    const queryToken = params.get("invite");
+    const pathMatch = path.match(/^\/invite\/([A-Za-z0-9]+)/);
+
+    let token = null;
+    if (queryToken) token = queryToken;
+    else if (pathMatch && pathMatch[1]) token = pathMatch[1];
+
+    if (token) {
+      // Real invite arrival via URL — stash it and show the landing page.
+      localStorage.setItem(INVITE_KEY, token);
+      setInviteToken(token);
+      setArrivedViaInvite(true);
+      window.history.replaceState({}, "", "/");
+    } else {
+      // No URL token. Keep any stored token ONLY for post-login consume —
+      // do NOT set arrivedViaInvite, so the landing page never shows here.
+      const stored = localStorage.getItem(INVITE_KEY);
+      if (stored) setInviteToken(stored);
+    }
+  }, []);
+
+  // Auth session lifecycle + focus refresh.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -75,8 +114,31 @@ export default function App() {
       }
     );
 
-    return () => subscription.unsubscribe();
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "visible") {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session) fetchCounts(session.user.id);
+        });
+      }
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
   }, []);
+
+  // Consume a pending invite once the user is logged in AND fully set up.
+  // Runs reliably after render (not mid-render), so the connection forms
+  // whether they just signed up or were already a user opening a link.
+  useEffect(() => {
+    if (session && hasProfile) {
+      consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
+    }
+  }, [session, hasProfile]);
 
   const checkConsent = async (userId) => {
     const { data } = await supabase
@@ -122,10 +184,99 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Bell = people/communications. Playdate badge = un-RSVP'd invites.
-  // Halo: amber if ANY live (upcoming, non-declined) invite — mine or, when I
-  //   host, any guest's — is "maybe" or unanswered. Teal if there's a confirmed
-  //   "going" and no maybes/unanswered. Null if nothing live.
+  // Consume a pending invite after login by matching the logged-in user's EMAIL
+  // to the invite's invited_email. Email survives every redirect/device/browser,
+  // so this is reliable even when a texted link opens in a different app.
+  // Falls back to the token (localStorage) if present.
+  const consumeInvite = async (userId, userEmail) => {
+    try {
+      let invite = null;
+
+      // Primary: match by the email the invitee entered on the landing page.
+      if (userEmail) {
+        const { data: byEmail } = await supabase
+          .from("invites")
+          .select("*")
+          .eq("invited_email", userEmail.toLowerCase())
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byEmail) invite = byEmail;
+      }
+
+      // Fallback: token in localStorage (same-device flows).
+      if (!invite) {
+        const token = localStorage.getItem(INVITE_KEY);
+        if (token) {
+          const { data: byToken } = await supabase
+            .from("invites")
+            .select("*")
+            .eq("token", token)
+            .maybeSingle();
+          if (byToken) invite = byToken;
+        }
+      }
+
+      // Nothing to do, expired, or already consumed.
+      if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
+        localStorage.removeItem(INVITE_KEY);
+        localStorage.removeItem(INVITE_EMAIL_KEY);
+        setInviteToken(null);
+        return;
+      }
+
+      // Don't connect someone to themselves.
+      if (invite.inviter_id === userId) {
+        localStorage.removeItem(INVITE_KEY);
+        localStorage.removeItem(INVITE_EMAIL_KEY);
+        setInviteToken(null);
+        return;
+      }
+
+      // Create the connection if one doesn't already exist (either direction).
+      const { data: existing } = await supabase
+        .from("connections")
+        .select("id")
+        .or(`and(requester_id.eq.${invite.inviter_id},recipient_id.eq.${userId}),and(requester_id.eq.${userId},recipient_id.eq.${invite.inviter_id})`);
+
+      if (!existing || existing.length === 0) {
+        await supabase.from("connections").insert({
+          requester_id: invite.inviter_id,
+          recipient_id: userId,
+          status: "accepted",
+        });
+
+        // Notify the inviter that their invite was accepted.
+        try {
+          const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
+          const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
+          const label = nm.length === 1 ? nm[0] : `${nm[0]} ${nm[nm.length - 1].charAt(0)}.`;
+          await supabase.from("notifications").insert({
+            recipient_id: invite.inviter_id,
+            type: "invite_accepted",
+            title: "Your invite was accepted 🎉",
+            body: `${label} joined Huddle from your invite. You're now connected!`,
+          });
+        } catch (e) { /* best-effort */ }
+      }
+
+      // Mark the invite consumed.
+      await supabase.from("invites")
+        .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
+        .eq("id", invite.id);
+
+      localStorage.removeItem(INVITE_KEY);
+      localStorage.removeItem(INVITE_EMAIL_KEY);
+      setInviteToken(null);
+    } catch (err) {
+      localStorage.removeItem(INVITE_KEY);
+      localStorage.removeItem(INVITE_EMAIL_KEY);
+      setInviteToken(null);
+    }
+  };
+
+  // Bell = pending requests + unread notifications. Playdate badge + halo.
   const fetchCounts = async (userId) => {
     const { data: myHh } = await supabase
       .from("household_members")
@@ -133,7 +284,6 @@ export default function App() {
       .eq("parent_id", userId)
       .maybeSingle();
 
-    // --- Bell count ---
     const { data: conns } = await supabase
       .from("connections")
       .select("id")
@@ -149,6 +299,14 @@ export default function App() {
         .eq("status", "pending");
       bell += joins ? joins.length : 0;
     }
+
+    const { data: unreadNotifs } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("recipient_id", userId)
+      .eq("read", false);
+    bell += unreadNotifs ? unreadNotifs.length : 0;
+
     setNotificationCount(bell);
 
     if (!myHh) {
@@ -162,7 +320,6 @@ export default function App() {
     let hasGoing = false;
     let unrepliedCount = 0;
 
-    // Invites TO my household.
     const { data: myInv } = await supabase
       .from("playdate_invites")
       .select("rsvp, playdates(proposed_date, organizer_household_id)")
@@ -171,14 +328,13 @@ export default function App() {
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
-      if (new Date(pd.proposed_date).getTime() < nowMs) continue; // past
+      if (pd.organizer_household_id === myHh.household_id) continue;
+      if (new Date(pd.proposed_date).getTime() < nowMs) continue;
       if (inv.rsvp === "invited") { hasMaybeOrUnanswered = true; unrepliedCount++; }
       else if (inv.rsvp === "maybe") { hasMaybeOrUnanswered = true; }
       else if (inv.rsvp === "yes") { hasGoing = true; }
     }
 
-    // Playdates I HOST (future) — inspect each guest's RSVP.
     const { data: hosting } = await supabase
       .from("playdates")
       .select("id, proposed_date")
@@ -191,10 +347,8 @@ export default function App() {
         .select("rsvp")
         .eq("playdate_id", pd.id);
       const list = invs || [];
-      const anyMaybeOrUnanswered = list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited");
-      const anyGoing = list.some((i) => i.rsvp === "yes");
-      if (anyMaybeOrUnanswered) hasMaybeOrUnanswered = true;
-      if (anyGoing) hasGoing = true;
+      if (list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited")) hasMaybeOrUnanswered = true;
+      if (list.some((i) => i.rsvp === "yes")) hasGoing = true;
     }
 
     setPlaydateBadge(unrepliedCount);
@@ -216,6 +370,18 @@ export default function App() {
     );
   }
 
+  // Logged-OUT user who ARRIVED via an invite link this visit: show the landing
+  // page first, until they tap "Join" (which falls through to Auth). A stale
+  // localStorage token alone does NOT trigger this — only a real URL arrival.
+  if (!session && arrivedViaInvite && inviteToken && !dismissedInviteLanding) {
+    return (
+      <InviteLanding
+        token={inviteToken}
+        onJoin={() => setDismissedInviteLanding(true)}
+      />
+    );
+  }
+
   if (!session) {
     return <Auth onAuth={() => {}} />;
   }
@@ -225,7 +391,7 @@ export default function App() {
   }
 
   if (!hasProfile) {
-    return <Profile session={session} onComplete={() => setHasProfile(true)} />;
+    return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
   }
 
   if (showInbox) {
@@ -280,23 +446,39 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 ## File: src/Auth.jsx
 
 ```jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
+const INVITE_KEY = "huddle_pending_invite_token";
+const INVITE_EMAIL_KEY = "huddle_invite_email";
+
 export default function Auth({ onAuth }) {
+  const [mode, setMode] = useState("intro"); // "intro" | "signup" | "signin"
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    const stashed = localStorage.getItem(INVITE_EMAIL_KEY);
+    if (stashed) {
+      setEmail(stashed);
+      setMode("signup");
+    }
+  }, []);
+
+  const redirectUrl = () => {
+    const base = window.location.origin;
+    const token = localStorage.getItem(INVITE_KEY);
+    return token ? `${base}/?invite=${encodeURIComponent(token)}` : base;
+  };
+
   const signInWithGoogle = async () => {
     setGoogleLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      }
+      options: { redirectTo: redirectUrl() }
     });
     if (error) {
       setError(error.message);
@@ -309,9 +491,7 @@ export default function Auth({ onAuth }) {
     setError("");
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      }
+      options: { emailRedirectTo: redirectUrl() }
     });
     if (error) {
       setError(error.message);
@@ -326,6 +506,59 @@ export default function Auth({ onAuth }) {
     border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
+  const primaryBtn = {
+    width: "100%", padding: "0.95rem", borderRadius: "10px", border: "none",
+    background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer"
+  };
+  const ghostBtn = {
+    width: "100%", padding: "0.85rem", borderRadius: "10px",
+    border: "1px solid #2A4A6B", background: "transparent",
+    color: "#8AAEC8", fontSize: "1rem", fontWeight: "500", cursor: "pointer"
+  };
+  const googleBtn = {
+    width: "100%", padding: "0.85rem", borderRadius: "10px",
+    border: "1px solid #2A4A6B", background: "#FFFFFF",
+    color: "#1F1F1F", fontSize: "1rem", fontWeight: "500",
+    cursor: "pointer", display: "flex", alignItems: "center",
+    justifyContent: "center", gap: "10px", marginBottom: "1rem"
+  };
+
+  // Shared auth controls rendered inline (NOT as a nested component, which
+  // would remount the input every keystroke and drop focus).
+  const renderAuthControls = (ctaLabel) => (
+    <>
+      <button onClick={signInWithGoogle} disabled={googleLoading} style={googleBtn}>
+        <svg width="18" height="18" viewBox="0 0 18 18">
+          <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
+          <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
+          <path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
+          <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/>
+        </svg>
+        {googleLoading ? "Connecting..." : "Continue with Google"}
+      </button>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
+        <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+        <span style={{ color: "#607080", fontSize: "0.8rem" }}>or</span>
+        <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+      </div>
+
+      <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1rem" }}>Continue with email</p>
+      <input
+        type="email"
+        placeholder="you@example.com"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && sendLink()}
+        style={inputStyle}
+      />
+      {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
+      <button onClick={sendLink} disabled={loading || !email}
+        style={{ ...primaryBtn, background: loading ? "#028090" : "#02C39A", cursor: loading ? "not-allowed" : "pointer" }}>
+        {loading ? "Sending..." : ctaLabel}
+      </button>
+    </>
+  );
 
   return (
     <div style={{
@@ -336,87 +569,72 @@ export default function Auth({ onAuth }) {
       <h1 style={{ color: "#02C39A", fontSize: "3rem", fontWeight: "700", margin: "0 0 0.5rem" }}>
         Huddle
       </h1>
-      <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 3rem" }}>
-        The social app for school families
+      <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 2.5rem", textAlign: "center", maxWidth: "360px", lineHeight: "1.5" }}>
+        Bringing school families together.
       </p>
 
       <div style={{ background: "#162D50", borderRadius: "16px", padding: "2rem", width: "100%", maxWidth: "400px" }}>
-        {!sent ? (
+
+        {mode === "intro" && !sent && (
           <>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 1.5rem" }}>Welcome</h2>
-
-            {/* Google Sign In */}
-            <button
-              onClick={signInWithGoogle}
-              disabled={googleLoading}
-              style={{
-                width: "100%", padding: "0.85rem", borderRadius: "10px",
-                border: "1px solid #2A4A6B", background: "#FFFFFF",
-                color: "#1F1F1F", fontSize: "1rem", fontWeight: "500",
-                cursor: "pointer", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: "10px", marginBottom: "1rem"
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18">
-                <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
-                <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
-                <path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
-                <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/>
-              </svg>
-              {googleLoading ? "Signing in..." : "Continue with Google"}
-            </button>
-
-            {/* Divider */}
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
-              <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
-              <span style={{ color: "#607080", fontSize: "0.8rem" }}>or</span>
-              <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
-            </div>
-
-            {/* Email */}
-            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1rem" }}>
-              Continue with email
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", margin: "0 0 0.5rem", textAlign: "center" }}>
+              Welcome to Huddle
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.75rem", textAlign: "center", lineHeight: "1.5" }}>
+              The easiest way for school parents to set up playdates. Join your classroom community in a couple of minutes.
             </p>
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendLink()}
-              style={inputStyle}
-            />
-            {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
-            <button onClick={sendLink} disabled={loading || !email}
-              style={{
-                width: "100%", padding: "0.85rem", borderRadius: "10px",
-                border: "none", background: loading ? "#028090" : "#02C39A",
-                color: "#0F2044", fontSize: "1rem", fontWeight: "600",
-                cursor: loading ? "not-allowed" : "pointer"
-              }}>
-              {loading ? "Sending..." : "Send magic link →"}
+            <button onClick={() => { setError(""); setMode("signup"); }} style={{ ...primaryBtn, marginBottom: "0.85rem" }}>
+              Get started →
+            </button>
+            <button onClick={() => { setError(""); setMode("signin"); }} style={ghostBtn}>
+              I already have an account
             </button>
           </>
-        ) : (
+        )}
+
+        {mode === "signup" && !sent && (
+          <>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Create your account</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
+              Sign up with Google or your email — we'll send a quick magic link, no password needed.
+            </p>
+            {renderAuthControls("Sign up with email →")}
+            <button onClick={() => { setError(""); setMode("intro"); }}
+              style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
+              ← Back
+            </button>
+          </>
+        )}
+
+        {mode === "signin" && !sent && (
+          <>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Welcome back</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
+              Sign in with the Google account or email you used to join.
+            </p>
+            {renderAuthControls("Send magic link →")}
+            <button onClick={() => { setError(""); setMode("intro"); }}
+              style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
+              ← Back
+            </button>
+          </>
+        )}
+
+        {sent && (
           <>
             <div style={{ textAlign: "center", padding: "1rem 0" }}>
               <p style={{ fontSize: "3rem", margin: "0 0 1rem" }}>📬</p>
               <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.75rem" }}>Check your email</h2>
               <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem", lineHeight: "1.6" }}>
                 We sent a magic link to <strong style={{ color: "#FFFFFF" }}>{email}</strong>.
-                Tap the link in your email to sign in.
+                Tap the link in your email to continue.
               </p>
               <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>
                 Didn't get it? Check your spam folder.
               </p>
             </div>
-            <button onClick={() => { setSent(false); setEmail(""); }}
-              style={{
-                width: "100%", padding: "0.85rem", borderRadius: "10px",
-                border: "1px solid #2A4A6B", background: "transparent",
-                color: "#8AAEC8", fontSize: "1rem", fontWeight: "600",
-                cursor: "pointer", marginTop: "1.5rem"
-              }}>
-              ← Use a different email
+            <button onClick={() => { setSent(false); setEmail(""); setMode("intro"); }} style={{ ...ghostBtn, marginTop: "1.5rem" }}>
+              ← Start over
             </button>
           </>
         )}
@@ -717,14 +935,27 @@ export default function Profile({ session, onComplete }) {
         });
       if (memberErr) throw memberErr;
 
-      const { error: cmErr } = await supabase.from("classroom_members").insert({
+  const { error: cmErr } = await supabase.from("classroom_members").insert({
         household_id: household.id,
         classroom_id: classroom.id,
         school_year: schoolYear,
       });
       if (cmErr && !cmErr.message.includes("duplicate")) throw cmErr;
 
+      // Welcome notification (non-blocking — a failed insert shouldn't stop signup).
+      try {
+        await supabase.from("notifications").insert({
+          recipient_id: session.user.id,
+          type: "welcome",
+          title: "Welcome to Huddle! 👋",
+          body: "Huddle helps you connect with other parents in your kid's classroom. A few tips to get started: add all your classrooms so you see every family, tap \"Huddle →\" next to a parent to set up a playdate, and check this bell for playdate invites and updates. Your privacy is protected — other parents only ever see your first name and last initial, never your full name, email, or phone.",
+        });
+      } catch (notifErr) {
+        // Ignore — welcome note is best-effort.
+      }
+
       onComplete();
+
     } catch (err) {
       setError(err.message);
     }
@@ -875,17 +1106,17 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
+import InviteFamily from "./InviteFamily";
 
 export default function Home({ session, notificationCount, onBellClick }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
-  const [myRole, setMyRole] = useState(null);
-  const [householdMembers, setHouseholdMembers] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [classmates, setClassmates] = useState({});
   const [loading, setLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
   const [newGrade, setNewGrade] = useState("");
   const [newTeacher, setNewTeacher] = useState("");
@@ -898,25 +1129,20 @@ export default function Home({ session, notificationCount, onBellClick }) {
   const [savingMembership, setSavingMembership] = useState(false);
   const [membershipError, setMembershipError] = useState("");
   const [householdBusy, setHouseholdBusy] = useState(false);
-
-  // Find-a-household-member flow
-  const [findingMember, setFindingMember] = useState(false);
-  const [memberSearch, setMemberSearch] = useState("");
-  const [memberCandidates, setMemberCandidates] = useState([]);
-  const [linkMessage, setLinkMessage] = useState("");
-  const [linkBusy, setLinkBusy] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => { fetchData(); }, []);
 
-  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
   const shortName = (fullName) => {
     if (!fullName) return "A parent";
     const parts = fullName.trim().split(/\s+/);
     if (parts.length === 1) return parts[0];
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
+
+  const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
 
   const fetchData = async () => {
     setLoading(true);
@@ -941,14 +1167,6 @@ export default function Home({ session, notificationCount, onBellClick }) {
 
     const hhId = householdMember.household_id;
     setHouseholdId(hhId);
-    setMyRole(householdMember.role);
-
-    const { data: members } = await supabase
-      .from("household_members")
-      .select("id, parent_id, role, joined_at, parents(id, name, photo_url)")
-      .eq("household_id", hhId)
-      .order("joined_at", { ascending: true });
-    setHouseholdMembers(members || []);
 
     const { data: membershipData } = await supabase
       .from("classroom_members")
@@ -964,132 +1182,14 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .eq("classroom_id", m.classroom_id)
         .eq("school_year", m.school_year)
         .neq("household_id", hhId);
-      classmatesMap[m.id] = otherMembers || [];
+      classmatesMap[m.id] = {
+        classroomLabel: `${m.classrooms?.teacher_name} · ${grades[m.classrooms?.grade] || "Unknown grade"}`,
+        rows: otherMembers || [],
+      };
     }
     setClassmates(classmatesMap);
 
     setLoading(false);
-  };
-
-  // Search parents who share a classroom with me (excludes my own household).
-  // Returns candidates as { parentId, name, photo_url, householdId }.
-  const runMemberSearch = async (query) => {
-    setMemberSearch(query);
-    if (query.trim().length < 2) { setMemberCandidates([]); return; }
-
-    // My classroom IDs.
-    const classroomIds = memberships.map((m) => m.classroom_id);
-    if (classroomIds.length === 0) { setMemberCandidates([]); return; }
-
-    // Other households in those classrooms.
-    const { data: cms } = await supabase
-      .from("classroom_members")
-      .select("household_id")
-      .in("classroom_id", classroomIds)
-      .neq("household_id", householdId);
-
-    const otherHouseholdIds = [...new Set((cms || []).map((c) => c.household_id))];
-    if (otherHouseholdIds.length === 0) { setMemberCandidates([]); return; }
-
-    // Parents in those households.
-    const { data: hms } = await supabase
-      .from("household_members")
-      .select("parent_id, household_id, parents(id, name, photo_url)")
-      .in("household_id", otherHouseholdIds);
-
-    const q = query.trim().toLowerCase();
-    const seen = new Set();
-    const candidates = [];
-    (hms || []).forEach((h) => {
-      const p = h.parents;
-      if (!p) return;
-      if (seen.has(p.id)) return;
-      if (!p.name || !p.name.toLowerCase().includes(q)) return;
-      seen.add(p.id);
-      candidates.push({ parentId: p.id, name: p.name, photo_url: p.photo_url, householdId: h.household_id });
-    });
-    setMemberCandidates(candidates);
-  };
-
-  const askToLink = async (candidate) => {
-    setLinkBusy(true);
-    setLinkMessage("");
-    try {
-      // Use the household_join_requests table: I'm requesting to join THEIR household.
-      const { error } = await supabase.from("household_join_requests").insert({
-        requesting_parent_id: session.user.id,
-        target_household_id: candidate.householdId,
-      });
-      if (error) {
-        if (error.message.includes("duplicate") || error.message.includes("one_pending")) {
-          setLinkMessage("You already have a pending request.");
-        } else {
-          throw error;
-        }
-      } else {
-        setLinkMessage(`Request sent to ${shortName(candidate.name)}'s household. They'll approve from their notifications.`);
-        setMemberCandidates([]);
-        setMemberSearch("");
-      }
-    } catch (err) {
-      setLinkMessage("Error: " + err.message);
-    }
-    setLinkBusy(false);
-  };
-
-  const removeMember = async (memberRow) => {
-    setHouseholdBusy(true);
-    try {
-      const leavingParentId = memberRow.parent_id;
-      const wasPrimary = memberRow.role === "primary";
-
-      const { error: delErr } = await supabase
-        .from("household_members")
-        .delete()
-        .eq("id", memberRow.id);
-      if (delErr) throw delErr;
-
-      const { data: remaining } = await supabase
-        .from("household_members")
-        .select("id, parent_id, role, joined_at")
-        .eq("household_id", householdId)
-        .order("joined_at", { ascending: true });
-
-      if (!remaining || remaining.length === 0) {
-        await supabase.from("classroom_members").delete().eq("household_id", householdId);
-        await supabase.from("households").delete().eq("id", householdId);
-      } else if (wasPrimary && !remaining.some((m) => m.role === "primary")) {
-        await supabase
-          .from("household_members")
-          .update({ role: "primary" })
-          .eq("id", remaining[0].id);
-      }
-
-      if (leavingParentId === session.user.id) {
-        window.location.reload();
-        return;
-      }
-
-      fetchData();
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
-    setHouseholdBusy(false);
-  };
-
-  const confirmRemoveOther = (memberRow) => {
-    const nm = shortName(memberRow.parents?.name);
-    if (window.confirm(`Remove ${nm} from your household? They'll need to set up their own household.`)) {
-      removeMember(memberRow);
-    }
-  };
-
-  const confirmLeave = () => {
-    const me = householdMembers.find((m) => m.parent_id === session.user.id);
-    if (!me) return;
-    if (window.confirm("Leave this household? You'll need to set up your own household afterward.")) {
-      removeMember(me);
-    }
   };
 
   const searchNewSchools = async (query) => {
@@ -1170,6 +1270,7 @@ export default function Home({ session, notificationCount, onBellClick }) {
         .delete()
         .eq("id", membershipRow.id);
       if (error) throw error;
+      setSelectedClassroom(null);
       fetchData();
     } catch (err) {
       alert("Error: " + err.message);
@@ -1177,7 +1278,18 @@ export default function Home({ session, notificationCount, onBellClick }) {
     setHouseholdBusy(false);
   };
 
-  const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
+  const familyCardsFor = (membershipRow) => {
+    const group = classmates[membershipRow.id];
+    const cards = [];
+    (group?.rows || []).forEach((cm) => {
+      const members = cm.households?.household_members || [];
+      members.forEach((hm) => {
+        if (!hm.parents) return;
+        cards.push({ key: `${cm.id}-${hm.parent_id}`, parents: hm.parents });
+      });
+    });
+    return cards;
+  };
 
   const membershipsBySchool = memberships.reduce((acc, m) => {
     const schoolName = m.classrooms?.schools?.name || "Unknown School";
@@ -1220,122 +1332,218 @@ export default function Home({ session, notificationCount, onBellClick }) {
     );
   }
 
-  const isPrimary = myRole === "primary";
+  const headerBar = (
+    <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+      <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <button onClick={onBellClick}
+          style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
+          🔔
+          {notificationCount > 0 && (
+            <span style={{ position: "absolute", top: 0, right: 0, background: "#E05A5A", color: "#FFFFFF", fontSize: "0.6rem", fontWeight: "700", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {notificationCount}
+            </span>
+          )}
+        </button>
+        <span onClick={() => setShowProfile(true)} style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
+          Hi, {parent?.name?.split(" ")[0]}!
+        </span>
+        {parent?.photo_url && (
+          <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)}
+            style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
+        )}
+      </div>
+    </div>
+  );
 
-  return (
-    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
+  // Shared add-classroom modal (used in both views).
+  const addClassroomModal = addingClassroom && (
+    <div style={overlay}>
+      <div style={modalBox}>
+        <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a school or classroom</h2>
 
-      {/* Header */}
-      <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button
-            onClick={onBellClick}
-            style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
-            🔔
-            {notificationCount > 0 && (
-              <span style={{
-                position: "absolute", top: 0, right: 0,
-                background: "#E05A5A", color: "#FFFFFF",
-                fontSize: "0.6rem", fontWeight: "700",
-                borderRadius: "50%", width: "16px", height: "16px",
-                display: "flex", alignItems: "center", justifyContent: "center"
-              }}>
-                {notificationCount}
-              </span>
-            )}
-          </button>
-          <span onClick={() => setShowProfile(true)} style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
-            Hi, {parent?.name?.split(" ")[0]}!
-          </span>
-          {parent?.photo_url && (
-            <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)}
-              style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
+        <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
+          <option value="">Select grade...</option>
+          {grades.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
+        <div style={{ position: "relative", marginBottom: "1rem" }}>
+          <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
+            onChange={(e) => searchNewSchools(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }} />
+          {showNewSchoolDropdown && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
+              {newSchoolResults.map(school => (
+                <div key={school.id} onClick={() => selectNewSchool(school)}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                  🏫 {school.name}
+                </div>
+              ))}
+              <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
+                style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
+                + Add "{newSchoolSearch}" as a new school
+              </div>
+            </div>
           )}
         </div>
+
+        {newSelectedSchool && (
+          <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
+            <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
+          </div>
+        )}
+
+        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
+        <div style={{ position: "relative", marginBottom: "1rem" }}>
+          <input type="text"
+            placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
+            value={newTeacher}
+            onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
+            onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
+            style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
+          {showNewTeacherDropdown && newTeacherResults.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
+              {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
+                <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                  📚 {teacher}
+                </div>
+              ))}
+              {newTeacherMismatch && (
+                <div onClick={() => setShowNewTeacherDropdown(false)}
+                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
+                  + Add "{newTeacher}" as a new teacher
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {newTeacherMismatch && (
+          <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
+            <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
+              ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
+            </p>
+          </div>
+        )}
+
+        {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
+          <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
+            style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+            {savingMembership ? "Saving..." : "Add classroom →"}
+          </button>
+        </div>
       </div>
+    </div>
+  );
+
+  // ---- DRILL-IN VIEW: a single classroom's families + actions ----
+  if (selectedClassroom) {
+    const m = selectedClassroom;
+    const cards = familyCardsFor(m);
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          <button onClick={() => setSelectedClassroom(null)}
+            style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "0.95rem", cursor: "pointer", padding: "0 0 1rem", display: "flex", alignItems: "center", gap: "6px" }}>
+            ← Back to classrooms
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderRadius: "10px", marginBottom: "1.25rem" }}>
+            <span style={{ fontSize: "1.2rem" }}>📚</span>
+            <div>
+              <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 2px" }}>
+                {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
+              </p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>{m.classrooms?.schools?.name}</p>
+            </div>
+          </div>
+
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>
+            FAMILIES IN THIS CLASS
+          </p>
+
+          {cards.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2rem 1rem", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1.05rem", margin: "0 0 0.5rem" }}>No other families here yet</p>
+              <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+                Invite a parent from this class to Huddle — once they join, you can set up playdates.
+              </p>
+            </div>
+          ) : (
+            cards.map((card) => (
+              <div key={card.key} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                    {card.parents?.photo_url ? (
+                      <img src={card.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : card.parents?.name?.charAt(0) || "?"}
+                  </div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{shortName(card.parents?.name)}</p>
+                </div>
+                <button onClick={() => setRequestingPlaydate(card.parents)}
+                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                  Huddle →
+                </button>
+              </div>
+            ))
+          )}
+
+          <button onClick={() => setInviting(true)}
+            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "1rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            ➕ Invite a parent to Huddle
+          </button>
+
+          <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
+            style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem" }}>
+            Remove this classroom
+          </button>
+        </div>
+
+        {inviting && (
+          <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // ---- MAIN VIEW: school card(s) with tappable classroom rows ----
+  return (
+    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+      {headerBar}
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* YOUR HOUSEHOLD */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
-          {householdMembers.map((m, idx) => {
-            const isMe = m.parent_id === session.user.id;
-            return (
-              <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                    {m.parents?.photo_url ? (
-                      <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : m.parents?.name?.charAt(0) || "?"}
-                  </div>
-                  <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
-                      {isMe ? "You" : shortName(m.parents?.name)}
-                      {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
-                    </p>
-                    <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
-                  </div>
-                </div>
-                {isMe ? (
-                  householdMembers.length > 1 ? (
-                    <button onClick={confirmLeave} disabled={householdBusy}
-                      style={{ background: "transparent", border: "1px solid #F87171", color: "#F87171", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                      Leave
-                    </button>
-                  ) : <div style={{ width: "60px" }} />
-                ) : isPrimary ? (
-                  <button onClick={() => confirmRemoveOther(m)} disabled={householdBusy}
-                    style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                    Remove
-                  </button>
-                ) : <div style={{ width: "60px" }} />}
-              </div>
-            );
-          })}
-          <div onClick={() => { setFindingMember(true); setLinkMessage(""); setMemberSearch(""); setMemberCandidates([]); }}
-            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", color: "#607080", fontSize: "1rem" }}>+</div>
-            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Find a household member</p>
-          </div>
-        </div>
-
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 1rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
-
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
               <span style={{ fontSize: "1.2rem" }}>🏫</span>
-              <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
             </div>
             <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
               {school.classrooms.map((m, idx) => {
-                const otherFamilies = classmates[m.id] || [];
+                const familyCount = familyCardsFor(m).length;
                 return (
-                  <div key={m.id} style={{ borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "0.75rem 1rem", background: "#0F2A45" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "1rem" }}>📚</span>
-                        <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0, fontWeight: "500" }}>
+                  <div key={m.id} onClick={() => setSelectedClassroom(m)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "1rem", cursor: "pointer", borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "1.1rem" }}>📚</span>
+                      <div>
+                        <p style={{ color: "#FFFFFF", fontSize: "0.95rem", margin: "0 0 2px", fontWeight: "500" }}>
                           {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
                         </p>
-                      </div>
-                      <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
-                        style={{ background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 6px" }}>
-                        Remove
-                      </button>
-                    </div>
-                    <div style={{ padding: "0.75rem 1rem" }}>
-                      <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.5rem" }}>
-                        {otherFamilies.length} other {otherFamilies.length === 1 ? "family" : "families"} in this class
-                      </p>
-                      {otherFamilies.length === 0 && (
-                        <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, fontStyle: "italic" }}>
-                          Share Huddle with other parents to get started!
+                        <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>
+                          {familyCount} {familyCount === 1 ? "family" : "families"} to huddle with
                         </p>
-                      )}
+                      </div>
                     </div>
+                    <span style={{ color: "#02C39A", fontSize: "1.2rem" }}>›</span>
                   </div>
                 );
               })}
@@ -1348,176 +1556,37 @@ export default function Home({ session, notificationCount, onBellClick }) {
         ))}
 
         {memberships.length === 0 && (
-          <div onClick={() => setAddingClassroom(true)} style={{ background: "#162D50", borderRadius: "12px", padding: "1.5rem", border: "1px dashed #2A4A6B", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "8px", marginBottom: "1.5rem" }}>
-            <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "2px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", color: "#2A4A6B" }}>+</div>
-            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add your first classroom</p>
-          </div>
-        )}
-
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1rem 0 0.75rem", letterSpacing: "0.05em" }}>PARENTS IN YOUR CLASSROOMS</p>
-
-        {Object.values(classmates).flat().length === 0 ? (
-          <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
-            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
-            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No other parents yet</p>
-            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Share Huddle to get other families to join!</p>
-          </div>
-        ) : (
-          Object.values(classmates).flat().map((cm) => {
-            const household = cm.households;
-            const members = household?.household_members || [];
-            return members.map((hm) => (
-              <div key={`${cm.id}-${hm.parent_id}`} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
-                    {hm.parents?.photo_url ? (
-                      <img src={hm.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : hm.parents?.name?.charAt(0) || "?"}
-                  </div>
-                  <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(hm.parents?.name)}</p>
-                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Parent in this classroom</p>
-                  </div>
-                </div>
-                <button onClick={() => setRequestingPlaydate(hm.parents)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                  Huddle →
-                </button>
-              </div>
-            ));
-          })
-        )}
-      </div>
-
-      {/* Find a household member modal */}
-      {findingMember && (
-        <div style={overlay}>
-          <div style={modalBox}>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Find a household member</h2>
-            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
-              Search for a parent already in Huddle who shares a classroom with you. They'll approve from their notifications, then you'll share a household.
+          <div style={{ textAlign: "center", padding: "2rem 1rem", marginBottom: "1rem" }}>
+            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🏫</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Add your kid's classroom</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+              Add your school and classroom to find other families to huddle with.
             </p>
-
-            <input type="text" placeholder="Search by name..." value={memberSearch}
-              onChange={(e) => runMemberSearch(e.target.value)} style={inputStyle} />
-
-            {linkMessage && (
-              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
-                <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0 }}>{linkMessage}</p>
-              </div>
-            )}
-
-            {memberCandidates.map((c) => (
-              <div key={c.parentId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0F2A45", borderRadius: "10px", padding: "0.6rem 0.85rem", marginBottom: "8px", border: "1px solid #2A4A6B" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                    {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : c.name?.charAt(0) || "?"}
-                  </div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>{shortName(c.name)}</p>
-                </div>
-                <button onClick={() => askToLink(c)} disabled={linkBusy}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.8rem", fontWeight: "600", cursor: "pointer" }}>
-                  Ask to link
-                </button>
-              </div>
-            ))}
-
-            {memberSearch.trim().length >= 2 && memberCandidates.length === 0 && !linkMessage && (
-              <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0 0 1rem" }}>No matching parents in your classrooms.</p>
-            )}
-
-            <button onClick={() => setFindingMember(false)}
-              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer", marginTop: "0.5rem" }}>
-              Close
+            <button onClick={() => setAddingClassroom(true)}
+              style={{ padding: "0.85rem 1.5rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+              ➕ Add a classroom
             </button>
           </div>
-        </div>
+        )}
+
+        {memberships.length > 0 && (
+          <button onClick={() => setAddingClassroom(true)}
+            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "#162D50", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            🏫 Add a different school
+          </button>
+        )}
+
+        <button onClick={() => setInviting(true)}
+          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          ➕ Invite a parent to Huddle
+        </button>
+      </div>
+
+      {inviting && (
+        <InviteFamily session={session} inviterName={parent?.name} onClose={() => setInviting(false)} />
       )}
 
-      {/* Add classroom modal */}
-      {addingClassroom && (
-        <div style={overlay}>
-          <div style={modalBox}>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a classroom</h2>
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
-            <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
-              <option value="">Select grade...</option>
-              {grades.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
-            <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
-                onChange={(e) => searchNewSchools(e.target.value)}
-                style={{ ...inputStyle, marginBottom: 0 }} />
-              {showNewSchoolDropdown && (
-                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
-                  {newSchoolResults.map(school => (
-                    <div key={school.id} onClick={() => selectNewSchool(school)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      🏫 {school.name}
-                    </div>
-                  ))}
-                  <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
-                    style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
-                    + Add "{newSchoolSearch}" as a new school
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {newSelectedSchool && (
-              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
-              </div>
-            )}
-
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
-            <div style={{ position: "relative", marginBottom: "1rem" }}>
-              <input type="text"
-                placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
-                value={newTeacher}
-                onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
-                onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
-                style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
-              {showNewTeacherDropdown && newTeacherResults.length > 0 && (
-                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
-                  {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
-                    <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      📚 {teacher}
-                    </div>
-                  ))}
-                  {newTeacherMismatch && (
-                    <div onClick={() => setShowNewTeacherDropdown(false)}
-                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
-                      + Add "{newTeacher}" as a new teacher
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {newTeacherMismatch && (
-              <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
-                <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
-                  ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
-                </p>
-              </div>
-            )}
-
-            {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-              <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
-                style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
-                {savingMembership ? "Saving..." : "Add classroom →"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {addClassroomModal}
     </div>
   );
 }```
@@ -1541,11 +1610,26 @@ export default function ProfileScreen({ session, onBack }) {
   const [message, setMessage] = useState("");
   const [consents, setConsents] = useState([]);
   const [view, setView] = useState("main");
+  const [memberships, setMemberships] = useState([]);
+  const [householdMembers, setHouseholdMembers] = useState([]);
+
+  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => {
     fetchProfile();
     fetchConsents();
+    fetchFamily();
   }, []);
+
+  // Privacy-safe short name: "Nick Psaros" -> "Nick P."
+  const shortName = (fullName) => {
+    if (!fullName) return "A parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
+  const getGradeLabel = (g) => grades[g] || "Unknown grade";
 
   const fetchProfile = async () => {
     setLoading(true);
@@ -1566,6 +1650,30 @@ export default function ProfileScreen({ session, onBack }) {
       .eq("parent_id", session.user.id)
       .order("consented_at", { ascending: false });
     setConsents(data || []);
+  };
+
+  // Your classrooms + household members (the "about my family" data).
+  const fetchFamily = async () => {
+    const { data: hm } = await supabase
+      .from("household_members")
+      .select("household_id")
+      .eq("parent_id", session.user.id)
+      .maybeSingle();
+    if (!hm) return;
+    const hhId = hm.household_id;
+
+    const { data: members } = await supabase
+      .from("household_members")
+      .select("id, parent_id, role, joined_at, parents(id, name, photo_url)")
+      .eq("household_id", hhId)
+      .order("joined_at", { ascending: true });
+    setHouseholdMembers(members || []);
+
+    const { data: ms } = await supabase
+      .from("classroom_members")
+      .select("id, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
+      .eq("household_id", hhId);
+    setMemberships(ms || []);
   };
 
   const uploadPhoto = async (e) => {
@@ -1607,6 +1715,14 @@ export default function ProfileScreen({ session, onBack }) {
 
   const tosConsent = consents.find(c => c.document_type === "terms_of_service");
   const privacyConsent = consents.find(c => c.document_type === "privacy_policy");
+
+  // Group classrooms by school for display.
+  const bySchool = memberships.reduce((acc, m) => {
+    const name = m.classrooms?.schools?.name || "Unknown School";
+    if (!acc[name]) acc[name] = [];
+    acc[name].push(m);
+    return acc;
+  }, {});
 
   if (view === "terms" || view === "privacy") {
     const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
@@ -1692,7 +1808,64 @@ export default function ProfileScreen({ session, onBack }) {
           )}
         </div>
 
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem" }}>
+        {/* YOUR CLASSROOMS */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        {memberships.length === 0 ? (
+          <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", padding: "1rem 1.25rem", marginBottom: "1rem" }}>
+            <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>No classrooms yet.</p>
+          </div>
+        ) : (
+          <div style={{ marginBottom: "1rem" }}>
+            {Object.entries(bySchool).map(([schoolName, classes]) => (
+              <div key={schoolName} style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.75rem", overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderBottom: "1px solid #2A4A6B" }}>
+                  <span style={{ fontSize: "1.1rem" }}>🏫</span>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{schoolName}</p>
+                </div>
+                {classes.map((m, idx) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", borderBottom: idx < classes.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <span style={{ fontSize: "0.95rem" }}>📚</span>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
+                      {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* YOUR HOUSEHOLD */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
+          {householdMembers.length === 0 ? (
+            <div style={{ padding: "1rem 1.25rem" }}>
+              <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Just you for now.</p>
+            </div>
+          ) : (
+            householdMembers.map((m, idx) => {
+              const isMe = m.parent_id === session.user.id;
+              return (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {m.parents?.photo_url ? (
+                      <img src={m.parents.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : m.parents?.name?.charAt(0) || "?"}
+                  </div>
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 2px" }}>
+                      {isMe ? "You" : shortName(m.parents?.name)}
+                      {m.role === "primary" && <span style={{ color: "#02C39A", fontSize: "0.7rem", marginLeft: "8px" }}>PRIMARY</span>}
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", marginTop: "1.5rem" }}>
           <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 4px", letterSpacing: "0.05em" }}>EMAIL</p>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>{session.user.email}</p>
@@ -1762,9 +1935,9 @@ export default function NavBar(props) {
 
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
-    { id: "search", label: "Search", icon: "🔍" },
     { id: "network", label: "Network", icon: "🤝" },
     { id: "playdates", label: "Playdates", icon: "📅" },
+    { id: "search", label: "Search", icon: "🔍" },
     { id: "profile", label: "Profile", icon: "👤" },
   ];
 
@@ -2110,18 +2283,37 @@ export default function Search({ session }) {
 ```jsx
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import PlaydateRequest from "./PlaydateRequest";
+import InviteFamily from "./InviteFamily";
 
 export default function Network({ session }) {
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  const [inviting, setInviting] = useState(false);
+  const [myName, setMyName] = useState("");
 
   useEffect(() => { fetchConnections(); }, []);
+
+  // Privacy-safe short name: "Lee Parker" -> "Lee P."
+  const shortName = (fullName) => {
+    if (!fullName) return "A parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
 
   const fetchConnections = async () => {
     setLoading(true);
     const userId = session.user.id;
 
-    // Get all accepted connections where user is either requester or recipient
+    const { data: me } = await supabase
+      .from("parents")
+      .select("name")
+      .eq("id", userId)
+      .single();
+    setMyName(me?.name || "");
+
     const { data } = await supabase
       .from("connections")
       .select(`
@@ -2132,7 +2324,6 @@ export default function Network({ session }) {
       .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
       .eq("status", "accepted");
 
-    // Map each connection to "the other person"
     const network = (data || []).map(conn => {
       const isRequester = conn.requester_id === userId;
       return {
@@ -2142,7 +2333,6 @@ export default function Network({ session }) {
       };
     });
 
-    // For each connection, find their household and classrooms
     for (const conn of network) {
       const { data: hm } = await supabase
         .from("household_members")
@@ -2157,7 +2347,6 @@ export default function Network({ session }) {
           .eq("household_id", hm.household_id);
         conn.classrooms = memberships || [];
 
-        // Also get other household members (co-parents)
         const { data: coParents } = await supabase
           .from("household_members")
           .select("parents(id, name, photo_url)")
@@ -2175,12 +2364,24 @@ export default function Network({ session }) {
   };
 
   const removeConnection = async (connectionId) => {
-    if (!window.confirm("Remove this connection?")) return;
+    if (!window.confirm("Remove this connection? You'll no longer be able to set up playdates with them unless you reconnect.")) return;
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
   };
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
+
+  // If huddling, render the playdate request screen (self-contained, like Home does).
+  if (requestingPlaydate) {
+    return (
+      <PlaydateRequest
+        session={session}
+        recipient={requestingPlaydate}
+        onBack={() => setRequestingPlaydate(null)}
+        onSent={() => setRequestingPlaydate(null)}
+      />
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -2188,77 +2389,102 @@ export default function Network({ session }) {
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Your Network</h1>
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "4px 0 0" }}>
-          {connections.length} {connections.length === 1 ? "connection" : "connections"}
+          Parents you've connected with outside your classrooms
         </p>
       </div>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
+        {/* Invite a family */}
+        <button onClick={() => setInviting(true)}
+          style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          ➕ Invite a family to Huddle
+        </button>
+
         {loading ? (
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
         ) : connections.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+          <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🤝</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No connections yet</p>
-            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school, or invite a family above. They'll show up here so you can set up playdates across classrooms.</p>
           </div>
         ) : (
-          connections.map((conn) => (
-            <div key={conn.connectionId} style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" }}>
+          <>
+            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>
+              {connections.length} {connections.length === 1 ? "CONNECTION" : "CONNECTIONS"}
+            </p>
+            {connections.map((conn) => (
+              <div key={conn.connectionId} style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" }}>
 
-              {/* Primary person */}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                  {conn.person?.photo_url ? (
-                    <img src={conn.person.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    conn.person?.name?.charAt(0) || "?"
-                  )}
+                {/* Primary person + Huddle button */}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: conn.classrooms.length > 0 || conn.coParents.length > 0 ? "1rem" : 0 }}>
+                  <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {conn.person?.photo_url ? (
+                      <img src={conn.person.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      conn.person?.name?.charAt(0) || "?"
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(conn.person?.name)}</p>
+                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>In your network</p>
+                  </div>
+                  <button onClick={() => setRequestingPlaydate(conn.person)}
+                    style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                    Huddle →
+                  </button>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{conn.person?.name}</p>
-                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Connected</p>
-                </div>
-                <button onClick={() => removeConnection(conn.connectionId)}
-                  style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.4rem 0.75rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                  Remove
-                </button>
-              </div>
 
-              {/* Co-parents in their household */}
-              {conn.coParents.length > 0 && (
-                <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: conn.classrooms.length > 0 ? "0.5rem" : 0 }}>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CO-PARENTS</p>
-                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                    {conn.coParents.map((cp) => (
-                      <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", overflow: "hidden", border: "2px solid #02C39A" }}>
-                          {cp.photo_url ? (
-                            <img src={cp.photo_url} alt={cp.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          ) : <span style={{ color: "#FFFFFF" }}>{cp.name?.charAt(0) || "?"}</span>}
-                        </div>
-                        <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0 }}>{cp.name}</p>
-                      </div>
+                {/* Their classrooms (context) */}
+                {conn.classrooms.length > 0 && (
+                  <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: conn.coParents.length > 0 ? "0.5rem" : 0 }}>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CLASSROOMS</p>
+                    {conn.classrooms.map((c, idx) => (
+                      <p key={idx} style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: idx > 0 ? "4px 0 0" : 0 }}>
+                        🏫 {c.classrooms?.schools?.name} · {c.classrooms?.teacher_name} · {grades[c.classrooms?.grade] || "?"}
+                      </p>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Classrooms */}
-              {conn.classrooms.length > 0 && (
-                <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B" }}>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CLASSROOMS</p>
-                  {conn.classrooms.map((c, idx) => (
-                    <p key={idx} style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: idx > 0 ? "4px 0 0" : 0 }}>
-                      🏫 {c.classrooms?.schools?.name} · {c.classrooms?.teacher_name} · {grades[c.classrooms?.grade] || "?"}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))
+                {/* Co-parents (privacy-safe) */}
+                {conn.coParents.length > 0 && (
+                  <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B" }}>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>CO-PARENTS</p>
+                    <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                      {conn.coParents.map((cp) => (
+                        <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", overflow: "hidden", border: "2px solid #02C39A" }}>
+                            {cp.photo_url ? (
+                              <img src={cp.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ) : <span style={{ color: "#FFFFFF" }}>{cp.name?.charAt(0) || "?"}</span>}
+                          </div>
+                          <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: 0 }}>{shortName(cp.name)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Remove */}
+                <button onClick={() => removeConnection(conn.connectionId)}
+                  style={{ marginTop: "0.75rem", background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0" }}>
+                  Remove connection
+                </button>
+              </div>
+            ))}
+          </>
         )}
       </div>
+
+      {inviting && (
+        <InviteFamily
+          session={session}
+          inviterName={myName}
+          onClose={() => setInviting(false)}
+        />
+      )}
     </div>
   );
 }```
@@ -2274,10 +2500,11 @@ import { supabase } from "./supabase";
 export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  useEffect(() => { fetchRequests(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   const shortName = (fullName) => {
     if (!fullName) return "A parent";
@@ -2286,7 +2513,13 @@ export default function Inbox({ session, onBack }) {
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
-  const fetchRequests = async () => {
+  const fmtWhen = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+
+  const fetchAll = async () => {
     setLoading(true);
 
     const { data: conns } = await supabase
@@ -2313,24 +2546,72 @@ export default function Inbox({ session, onBack }) {
       setJoinRequests([]);
     }
 
+    const { data: notifs } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("recipient_id", session.user.id)
+      .order("created_at", { ascending: false });
+    setNotifications(notifs || []);
+
     setLoading(false);
+
+    // Auto-mark unread notifications as read shortly after they're seen.
+    const unreadIds = (notifs || []).filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length > 0) {
+      setTimeout(async () => {
+        await supabase.from("notifications").update({ read: true }).in("id", unreadIds);
+        setNotifications((prev) => prev.map((n) => unreadIds.includes(n.id) ? { ...n, read: true } : n));
+      }, 1200);
+    }
   };
 
-  const accept = async (connectionId) => {
-    await supabase.from("connections")
-      .update({ status: "accepted" })
-      .eq("id", connectionId);
+  const markUnread = async (notifId) => {
+    await supabase.from("notifications").update({ read: false }).eq("id", notifId);
+    setNotifications((prev) => prev.map((n) => n.id === notifId ? { ...n, read: false } : n));
+    setMessage("Marked as unread — we'll remind you.");
+    setTimeout(() => setMessage(""), 2500);
+  };
+
+const accept = async (connectionId) => {
+    await supabase.from("connections").update({ status: "accepted" }).eq("id", connectionId);
+
+    // Notify the requester that I accepted (non-blocking).
+    try {
+      const { data: conn } = await supabase
+        .from("connections")
+        .select("requester_id")
+        .eq("id", connectionId)
+        .single();
+
+      // My display name (the accepter).
+      const { data: me } = await supabase
+        .from("parents")
+        .select("name")
+        .eq("id", session.user.id)
+        .single();
+      const myLabel = shortName(me?.name);
+
+      if (conn?.requester_id) {
+        await supabase.from("notifications").insert({
+          recipient_id: conn.requester_id,
+          type: "connection_accepted",
+          title: "Connection accepted 🤝",
+          body: `${myLabel} accepted your connection. You can now set up playdates together.`,
+        });
+      }
+    } catch (notifErr) {
+      // Best-effort.
+    }
+
     setMessage("Connection accepted!");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
   const decline = async (connectionId) => {
-    await supabase.from("connections")
-      .delete()
-      .eq("id", connectionId);
+    await supabase.from("connections").delete().eq("id", connectionId);
     setMessage("Request declined");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
@@ -2339,7 +2620,6 @@ export default function Inbox({ session, onBack }) {
     try {
       const requesterId = req.requesting_parent_id;
 
-      // 1. My (approver's) household — the destination.
       const { data: myHh, error: hhErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -2348,7 +2628,6 @@ export default function Inbox({ session, onBack }) {
       if (hhErr) throw hhErr;
       const destHouseholdId = myHh.household_id;
 
-      // 2. Requester's current household + their role there.
       const { data: theirMembership } = await supabase
         .from("household_members")
         .select("id, household_id, role")
@@ -2357,18 +2636,35 @@ export default function Inbox({ session, onBack }) {
 
       const oldHouseholdId = theirMembership?.household_id || null;
 
-      // Guard: if they're somehow already in my household, just mark approved.
       if (oldHouseholdId === destHouseholdId) {
-        await supabase.from("household_join_requests")
-          .update({ status: "approved", resolved_at: new Date().toISOString() })
-          .eq("id", req.id);
-        setMessage(`${shortName(req.requester?.name)} is already in your household.`);
-        fetchRequests();
+       await supabase.from("household_join_requests")
+        .update({ status: "approved", resolved_at: new Date().toISOString() })
+        .eq("id", req.id);
+
+      // Notify the requester that they were added (non-blocking).
+      try {
+        const { data: me } = await supabase
+          .from("parents")
+          .select("name")
+          .eq("id", session.user.id)
+          .single();
+        const myLabel = shortName(me?.name);
+
+        await supabase.from("notifications").insert({
+          recipient_id: requesterId,
+          type: "household_joined",
+          title: "You joined a household 🏡",
+          body: `${myLabel} added you to their household. Your classrooms are now shared.`,
+        });
+      } catch (notifErr) {
+        // Best-effort.
+      }
+
+      setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
+        fetchAll();
         return;
       }
 
-      // 3. Move the requester's old household's classroom memberships into mine
-      //    (union — skip any my household already has).
       if (oldHouseholdId) {
         const { data: oldCms } = await supabase
           .from("classroom_members")
@@ -2393,11 +2689,9 @@ export default function Inbox({ session, onBack }) {
         }
       }
 
-      // 4. Remove the requester from their old household.
       if (theirMembership) {
         await supabase.from("household_members").delete().eq("id", theirMembership.id);
 
-        // 5. Clean up their old household: delete if empty, else promote if needed.
         const { data: remaining } = await supabase
           .from("household_members")
           .select("id, role, joined_at")
@@ -2414,7 +2708,6 @@ export default function Inbox({ session, onBack }) {
         }
       }
 
-      // 6. Add the requester to my household as co-parent.
       const { error: memberErr } = await supabase
         .from("household_members")
         .insert({
@@ -2424,13 +2717,12 @@ export default function Inbox({ session, onBack }) {
         });
       if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
 
-      // 7. Mark the request approved.
       await supabase.from("household_join_requests")
         .update({ status: "approved", resolved_at: new Date().toISOString() })
         .eq("id", req.id);
 
       setMessage(`${shortName(req.requester?.name)} is now part of your household!`);
-      fetchRequests();
+      fetchAll();
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
       setMessage("Error: " + err.message);
@@ -2443,11 +2735,11 @@ export default function Inbox({ session, onBack }) {
       .update({ status: "declined", resolved_at: new Date().toISOString() })
       .eq("id", req.id);
     setMessage("Link request declined");
-    fetchRequests();
+    fetchAll();
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const nothingPending = connectionRequests.length === 0 && joinRequests.length === 0;
+  const nothing = connectionRequests.length === 0 && joinRequests.length === 0 && notifications.length === 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -2468,7 +2760,7 @@ export default function Inbox({ session, onBack }) {
 
         {loading ? (
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
-        ) : nothingPending ? (
+        ) : nothing ? (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🔔</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No new notifications</p>
@@ -2476,6 +2768,7 @@ export default function Inbox({ session, onBack }) {
           </div>
         ) : (
           <>
+            {/* Actionable requests first */}
             {joinRequests.length > 0 && (
               <>
                 <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>HOUSEHOLD LINK REQUESTS</p>
@@ -2537,6 +2830,33 @@ export default function Inbox({ session, onBack }) {
                 ))}
               </>
             )}
+
+            {/* Informational notifications */}
+            {notifications.length > 0 && (
+              <>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: (joinRequests.length + connectionRequests.length) > 0 ? "1.5rem 0 0.75rem" : "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
+                {notifications.map((n) => (
+                  <div key={n.id} style={{ background: n.read ? "#13233F" : "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: n.read ? "1px solid #2A4A6B" : "1px solid #02C39A" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                          {!n.read && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
+                          <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{n.title}</p>
+                        </div>
+                        {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
+                        <p style={{ color: "#607080", fontSize: "0.7rem", margin: 0 }}>{fmtWhen(n.created_at)}</p>
+                      </div>
+                    </div>
+                    {n.read && (
+                      <button onClick={() => markUnread(n.id)}
+                        style={{ marginTop: "0.75rem", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.35rem 0.7rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
+                        Mark unread
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
           </>
         )}
       </div>
@@ -2592,6 +2912,41 @@ export default function Playdates({ session, onChanged }) {
     if (!iso) return "";
     const d = new Date(iso);
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+
+  // Build and download an .ics file for a playdate (2-hour default duration).
+  const addToCalendar = (pd) => {
+    const start = new Date(pd.proposed_date);
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const toIcs = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const esc = (s) => (s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+    const loc = [pd.location_name, pd.location_address].filter(Boolean).join(", ");
+
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Huddle//Playdate//EN",
+      "BEGIN:VEVENT",
+      `UID:huddle-${pd.id}@huddlefamilies.com`,
+      `DTSTAMP:${toIcs(new Date())}`,
+      `DTSTART:${toIcs(start)}`,
+      `DTEND:${toIcs(end)}`,
+      "SUMMARY:Playdate",
+      loc ? `LOCATION:${esc(loc)}` : "",
+      pd.note ? `DESCRIPTION:${esc(pd.note)}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].filter(Boolean);
+
+    const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "playdate.ics";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const fetchData = async () => {
@@ -2659,6 +3014,74 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString() })
         .eq("id", inviteId);
+
+      // Notify the host's household that a guest responded (non-blocking).
+      try {
+        // The invite row -> its playdate -> the organizer household.
+        const { data: inv } = await supabase
+          .from("playdate_invites")
+          .select("playdate_id, household_id, playdates(organizer_household_id)")
+          .eq("id", inviteId)
+          .single();
+
+        const organizerHouseholdId = inv?.playdates?.organizer_household_id;
+        const respondingHouseholdId = inv?.household_id;
+        const playdateId = inv?.playdate_id;
+
+        if (organizerHouseholdId && respondingHouseholdId && organizerHouseholdId !== respondingHouseholdId) {
+          // Responding household's display name.
+          const { data: respMembers } = await supabase
+            .from("household_members")
+            .select("parents(name)")
+            .eq("household_id", respondingHouseholdId);
+          const respNames = (respMembers || [])
+            .map((m) => {
+              const n = m.parents?.name;
+              if (!n) return null;
+              const parts = n.trim().split(/\s+/);
+              return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+            })
+            .filter(Boolean);
+          const respLabel = respNames.length > 0 ? respNames.join(" & ") : "A family";
+
+          const verb = rsvp === "yes" ? "is going to" : rsvp === "maybe" ? "might come to" : "can't make";
+          const emoji = rsvp === "yes" ? "✅" : rsvp === "maybe" ? "🤔" : "😔";
+
+          // Parents in the host household.
+          const { data: hostMembers } = await supabase
+            .from("household_members")
+            .select("parent_id")
+            .eq("household_id", organizerHouseholdId);
+
+          const rows = (hostMembers || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "playdate_rsvp",
+            title: `Playdate RSVP ${emoji}`,
+            body: `${respLabel} ${verb} your playdate.`,
+          }));
+          if (rows.length > 0) {
+            await supabase.from("notifications").insert(rows);
+          }
+
+          // On "yes" (both parties now accepted), email the calendar invite (.ics)
+          // to the joining family + host. Non-blocking; never breaks the RSVP.
+          if (rsvp === "yes" && playdateId) {
+            try {
+              await supabase.functions.invoke("send-playdate-invite", {
+                body: {
+                  playdate_id: playdateId,
+                  responding_household_id: respondingHouseholdId,
+                },
+              });
+            } catch (emailErr) {
+              // Best-effort — the in-app RSVP still succeeds.
+            }
+          }
+        }
+      } catch (notifErr) {
+        // Best-effort — don't block the RSVP.
+      }
+
       setMessage(rsvp === "yes" ? "You're going!" : rsvp === "maybe" ? "Marked as maybe" : "Can't make it");
       await fetchData();
       if (typeof onChanged === "function") onChanged();
@@ -2669,7 +3092,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Remove a dead hosted playdate (all guests declined). Deletes invites + playdate.
   const removeDeadPlaydate = async (playdateId) => {
     if (!window.confirm("Remove this playdate? Everyone declined, so it'll be deleted.")) return;
     setBusy(true);
@@ -2701,7 +3123,6 @@ export default function Playdates({ session, onChanged }) {
     return { text: "Declined", bg: "#3D1515", color: "#F87171" };
   };
 
-  // A hosted playdate is "dead" if it has guests and ALL of them declined.
   const isDead = (roster) =>
     roster && roster.length > 0 && roster.every((r) => r.rsvp === "no");
 
@@ -2733,6 +3154,12 @@ export default function Playdates({ session, onChanged }) {
   const sectionLabel = { color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" };
   const metaRow = { color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 4px" };
 
+  const calButtonStyle = {
+    width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px",
+    border: "1px solid #02C39A", background: "transparent", color: "#02C39A",
+    fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
@@ -2747,6 +3174,8 @@ export default function Playdates({ session, onChanged }) {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
+      // Guest sees "Add to calendar" if they're going (host + them = confirmed).
+      const showCal = !dim && it.invite.rsvp === "yes";
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
@@ -2777,6 +3206,12 @@ export default function Playdates({ session, onChanged }) {
               </button>
             </div>
           )}
+
+          {showCal && (
+            <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
+              📆 Add to calendar
+            </button>
+          )}
         </div>
       );
     }
@@ -2784,6 +3219,8 @@ export default function Playdates({ session, onChanged }) {
     // hosting card
     const badge = hostBadge(it.roster, dim);
     const dead = !dim && isDead(it.roster);
+    // Host sees "Add to calendar" once at least one guest is going (confirmed).
+    const showCal = !dim && it.goingCount > 0;
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -2816,9 +3253,15 @@ export default function Playdates({ session, onChanged }) {
           ))}
         </div>
 
+        {showCal && (
+          <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
+            📆 Add to calendar
+          </button>
+        )}
+
         {dead && (
           <button onClick={() => removeDeadPlaydate(pd.id)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
+            style={{ width: "100%", marginTop: "0.6rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
             Remove playdate
           </button>
         )}
@@ -2882,7 +3325,7 @@ export default function Playdates({ session, onChanged }) {
 ## File: src/PlaydateRequest.jsx
 
 ```jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
@@ -2893,6 +3336,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [coords, setCoords] = useState(null);
 
   const locations = [
     { name: "Local Park", address: "Nearby park" },
@@ -2900,8 +3344,136 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     { name: "Community Center", address: "Community center" },
     { name: "Our House", address: "My home" },
     { name: "Their House", address: "Their home" },
-    { name: "Custom location", address: "" },
   ];
+
+ useEffect(() => {
+    (async () => {
+      try {
+        const { data: hm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", session.user.id)
+          .single();
+        if (!hm) return;
+
+        // Get a classroom this household is in, then that classroom's school_id.
+        const { data: cm } = await supabase
+          .from("classroom_members")
+          .select("classroom_id")
+          .eq("household_id", hm.household_id)
+          .limit(1)
+          .maybeSingle();
+        if (!cm?.classroom_id) return;
+
+        const { data: cls } = await supabase
+          .from("classrooms")
+          .select("school_id")
+          .eq("id", cm.classroom_id)
+          .maybeSingle();
+        if (!cls?.school_id) return;
+
+        const { data: school } = await supabase
+          .from("schools")
+          .select("latitude, longitude")
+          .eq("id", cls.school_id)
+          .maybeSingle();
+
+        if (school && school.latitude != null && school.longitude != null) {
+          setCoords({ latitude: Number(school.latitude), longitude: Number(school.longitude) });
+        }
+      } catch (e) {
+        // No coords -> gradient simply won't show.
+      }
+    })();
+  }, [session]);
+
+  const computeSunTimes = (dateStr, lat, lng) => {
+    if (!dateStr || lat == null || lng == null) return null;
+    try {
+      const d = new Date(`${dateStr}T12:00:00`);
+      const rad = Math.PI / 180;
+      const dayOfYear = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+
+      const gamma = (2 * Math.PI / 365) * (dayOfYear - 1 + 0.5);
+      const decl = 0.006918 - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma)
+        - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma)
+        - 0.002697 * Math.cos(3 * gamma) + 0.00148 * Math.sin(3 * gamma);
+      const eqTime = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma)
+        - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+
+      const latRad = lat * rad;
+      const zenith = 90.833 * rad;
+      const cosH = (Math.cos(zenith) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl));
+      if (cosH > 1 || cosH < -1) return null;
+
+      const haDeg = Math.acos(cosH) / rad;
+      const sunriseUTC = 720 - 4 * (lng + haDeg) - eqTime;
+      const sunsetUTC = 720 - 4 * (lng - haDeg) - eqTime;
+
+      const tzOffsetMin = -d.getTimezoneOffset();
+      const norm = (m) => ((m + tzOffsetMin) % 1440 + 1440) % 1440;
+
+      return { sunriseMin: norm(sunriseUTC), sunsetMin: norm(sunsetUTC) };
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const minutesToLabel = (mins) => {
+    let h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    const ampm = h < 12 ? "AM" : "PM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+  };
+
+  const sunTimes = coords && date ? computeSunTimes(date, coords.latitude, coords.longitude) : null;
+
+  const timeSlots = [];
+  for (let h = 7; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const slotMin = h * 60 + m;
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      const ampm = h < 12 ? "AM" : "PM";
+      const afterSunset = sunTimes && slotMin >= sunTimes.sunsetMin;
+      const beforeSunrise = sunTimes && slotMin < sunTimes.sunriseMin;
+      const isDark = afterSunset || beforeSunrise;
+      const label = `${hour12}:${String(m).padStart(2, "0")} ${ampm}${isDark ? " 🌙" : ""}`;
+      timeSlots.push({ value, label });
+    }
+  }
+
+  const renderGradient = () => {
+    const startMin = 7 * 60;
+    const endMin = 21 * 60;
+    const span = endMin - startMin;
+    const pct = (min) => Math.max(0, Math.min(100, ((min - startMin) / span) * 100));
+
+    if (!sunTimes) {
+      return "linear-gradient(90deg, #1B3A5C 0%, #244C70 50%, #1B3A5C 100%)";
+    }
+
+    const sr = pct(sunTimes.sunriseMin);
+    const ss = pct(sunTimes.sunsetMin);
+    return `linear-gradient(90deg,
+      #0B1B33 0%,
+      #0B1B33 ${Math.max(0, sr - 8)}%,
+      #C97B3C ${sr}%,
+      #4AA3D8 ${Math.min(sr + 10, 100)}%,
+      #4AA3D8 ${Math.max(ss - 10, 0)}%,
+      #C97B3C ${ss}%,
+      #0B1B33 ${Math.min(100, ss + 8)}%,
+      #0B1B33 100%)`;
+  };
+
+  const selectedPct = (() => {
+    if (!time) return null;
+    const [hh, mm] = time.split(":").map(Number);
+    const min = hh * 60 + mm;
+    const startMin = 7 * 60, endMin = 21 * 60;
+    return Math.max(0, Math.min(100, ((min - startMin) / (endMin - startMin)) * 100));
+  })();
 
   const sendRequest = async () => {
     if (!date || !time || !locationName) {
@@ -2913,7 +3485,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
     let createdPlaydateId = null;
     try {
-      // My household (the organizer).
       const { data: myHm, error: myErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -2921,7 +3492,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         .single();
       if (myErr) throw myErr;
 
-      // The recipient's household (the first invitee).
       const { data: theirHm, error: theirErr } = await supabase
         .from("household_members")
         .select("household_id")
@@ -2937,7 +3507,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       const proposedDate = new Date(`${date}T${time}`).toISOString();
 
-      // Create the playdate event.
       const { data: playdate, error: pdErr } = await supabase
         .from("playdates")
         .insert({
@@ -2954,7 +3523,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-      // Invite the recipient's household. If this fails, roll back the playdate.
       const { error: invErr } = await supabase
         .from("playdate_invites")
         .insert({
@@ -2965,9 +3533,42 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         });
       if (invErr) throw invErr;
 
+      try {
+        const { data: myMembers } = await supabase
+          .from("household_members")
+          .select("parents(name)")
+          .eq("household_id", myHm.household_id);
+        const inviterNames = (myMembers || [])
+          .map((m) => {
+            const n = m.parents?.name;
+            if (!n) return null;
+            const parts = n.trim().split(/\s+/);
+            return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+          })
+          .filter(Boolean);
+        const inviterLabel = inviterNames.length > 0 ? inviterNames.join(" & ") : "A family";
+
+        const { data: theirMembers } = await supabase
+          .from("household_members")
+          .select("parent_id")
+          .eq("household_id", theirHm.household_id);
+
+        const rows = (theirMembers || []).map((m) => ({
+          recipient_id: m.parent_id,
+          type: "playdate_invite",
+          title: "New playdate invite 🎉",
+          body: `${inviterLabel} invited you to a playdate. Open the Playdates tab to RSVP.`,
+        }));
+        if (rows.length > 0) {
+          await supabase.from("notifications").insert(rows);
+        }
+      } catch (notifErr) {
+        // Best-effort — don't block the invite.
+      }
+
       onSent();
+
     } catch (err) {
-      // Roll back an orphaned playdate so we never leave a guest-less event.
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
@@ -2989,10 +3590,11 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
+  const isPresetSelected = locations.some((l) => l.name === locationName);
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
-      {/* Header */}
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Request a Playdate</h1>
@@ -3001,7 +3603,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
       <div style={{ padding: "1.5rem", maxWidth: "500px", margin: "0 auto" }}>
 
-        {/* Recipient card */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
             {recipient.photo_url ? (
@@ -3016,7 +3617,6 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           </div>
         </div>
 
-        {/* Date & Time */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>DATE & TIME</p>
           <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Date</label>
@@ -3027,46 +3627,88 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             min={new Date().toISOString().split("T")[0]}
             style={inputStyle}
           />
+
+          {date && (
+            <div style={{ marginBottom: "0.85rem" }}>
+              <div style={{
+                position: "relative", height: "14px", borderRadius: "7px",
+                background: renderGradient(), border: "1px solid #2A4A6B", overflow: "hidden"
+              }}>
+                {selectedPct != null && (
+                  <div style={{
+                    position: "absolute", top: "-3px", left: `calc(${selectedPct}% - 3px)`,
+                    width: "6px", height: "20px", borderRadius: "3px",
+                    background: "#FFFFFF", boxShadow: "0 0 4px rgba(0,0,0,0.5)"
+                  }} />
+                )}
+              </div>
+              {sunTimes ? (
+                <p style={{ color: "#8AAEC8", fontSize: "0.72rem", margin: "0.4rem 0 0", textAlign: "center" }}>
+                  🌅 Sunrise {minutesToLabel(sunTimes.sunriseMin)} · 🌇 Sunset {minutesToLabel(sunTimes.sunsetMin)}
+                </p>
+              ) : (
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.4rem 0 0", textAlign: "center" }}>
+                  Morning to evening
+                </p>
+              )}
+            </div>
+          )}
+
           <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Time</label>
-          <input
-            type="time"
+          <select
             value={time}
             onChange={(e) => setTime(e.target.value)}
-            style={inputStyle}
-          />
+            style={{ ...inputStyle, appearance: "auto", cursor: "pointer" }}
+          >
+            <option value="" disabled>Select a time</option>
+            {timeSlots.map((slot) => (
+              <option key={slot.value} value={slot.value}>{slot.label}</option>
+            ))}
+          </select>
         </div>
 
-        {/* Location */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>LOCATION</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
-            {locations.map((loc) => (
-              <button
-                key={loc.name}
-                onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
-                style={{
-                  padding: "0.6rem", borderRadius: "8px", border: "1px solid",
-                  borderColor: locationName === loc.name ? "#02C39A" : "#2A4A6B",
-                  background: locationName === loc.name ? "#0F3D2E" : "transparent",
-                  color: locationName === loc.name ? "#02C39A" : "#8AAEC8",
-                  fontSize: "0.8rem", cursor: "pointer", textAlign: "left"
-                }}
-              >
-                {loc.name}
-              </button>
-            ))}
+            {locations.map((loc) => {
+              const selected = locationName === loc.name;
+              return (
+                <button
+                  key={loc.name}
+                  onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
+                  style={{
+                    padding: "0.6rem", borderRadius: "8px", border: "1px solid",
+                    borderColor: selected ? "#02C39A" : "#2A4A6B",
+                    background: selected ? "#0F3D2E" : "transparent",
+                    color: selected ? "#02C39A" : "#8AAEC8",
+                    fontSize: "0.8rem", cursor: "pointer", textAlign: "left"
+                  }}
+                >
+                  {loc.name}
+                </button>
+              );
+            })}
           </div>
-          {locationName === "Custom location" && (
-            <>
-              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Location name</label>
-              <input type="text" placeholder="e.g. Howarth Park" onChange={(e) => setLocationName(e.target.value)} style={inputStyle} />
-              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Address</label>
-              <input type="text" placeholder="Full address" onChange={(e) => setLocationAddress(e.target.value)} style={inputStyle} />
-            </>
-          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0.25rem 0 0.85rem" }}>
+            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+            <span style={{ color: "#607080", fontSize: "0.75rem" }}>or enter a specific place</span>
+            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+          </div>
+
+          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Place or address</label>
+          <input
+            type="text"
+            placeholder="e.g. Howarth Park, Santa Rosa"
+            value={isPresetSelected ? "" : locationName}
+            onChange={(e) => { setLocationName(e.target.value); setLocationAddress(""); }}
+            style={inputStyle}
+          />
+          <p style={{ color: "#607080", fontSize: "0.72rem", margin: "-0.5rem 0 0", lineHeight: "1.4" }}>
+            Tip: include the city so the other family can find it easily.
+          </p>
         </div>
 
-        {/* Note */}
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
           <textarea
@@ -3092,6 +3734,323 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           {loading ? "Sending..." : "Send playdate invite →"}
         </button>
 
+      </div>
+    </div>
+  );
+}```
+
+---
+
+## File: src/InviteFamily.jsx
+
+```jsx
+import { useState } from "react";
+import { supabase } from "./supabase";
+
+// "Invite a family" modal. Generates a sender-locked, single-use, 48h token
+// (max 3/day). Dead-simple sharing: Send (mobile native share) + Copy link.
+export default function InviteFamily({ session, inviterName, playdateId = null, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [link, setLink] = useState("");
+  const [shareMsg, setShareMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const firstName = (inviterName || "").trim().split(/\s+/)[0] || "A parent";
+
+  const isMobile = typeof navigator !== "undefined" &&
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  const canNativeShare = isMobile && typeof navigator !== "undefined" && !!navigator.share;
+
+  const makeToken = () => {
+    if (window.crypto && window.crypto.randomUUID) {
+      return (window.crypto.randomUUID() + window.crypto.randomUUID()).replace(/-/g, "");
+    }
+    return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2)).join("");
+  };
+
+  const generate = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const { data: todays, error: countErr } = await supabase
+        .from("invites")
+        .select("id")
+        .eq("inviter_id", session.user.id)
+        .gte("created_at", startOfDay.toISOString());
+      if (countErr) throw countErr;
+
+     if ((todays || []).length >= 10) {
+        setError("You've sent 10 invites today — that's the daily limit. Try again tomorrow.");
+        setLoading(false);
+        return;
+      }
+
+      const token = makeToken();
+      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+      const { error: insErr } = await supabase.from("invites").insert({
+        token,
+        inviter_id: session.user.id,
+        playdate_id: playdateId,
+        status: "pending",
+        expires_at: expiresAt,
+      });
+      if (insErr) throw insErr;
+
+      const url = `https://huddlefamilies.com/invite/${token}`;
+      const msg = `${firstName} invited you to join Huddle — the easiest way to set up playdates for our kids. Join me here: ${url}`;
+      setLink(url);
+      setShareMsg(msg);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Join me on Huddle", text: shareMsg, url: link });
+        onClose();
+      } catch (e) {
+        // cancelled — keep modal open
+      }
+    }
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      setError("Couldn't copy — please copy the link manually.");
+    }
+  };
+
+  const overlay = {
+    position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+    background: "rgba(0,0,0,0.7)", display: "flex",
+    alignItems: "center", justifyContent: "center", zIndex: 100, padding: "1rem"
+  };
+  const modalBox = {
+    background: "#162D50", borderRadius: "16px", padding: "2rem",
+    width: "100%", maxWidth: "380px"
+  };
+  const primaryBtn = {
+    width: "100%", padding: "0.95rem", borderRadius: "10px", border: "none",
+    background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer"
+  };
+  const secondaryBtn = {
+    width: "100%", padding: "0.85rem", borderRadius: "10px",
+    border: "1px solid #2A4A6B", background: "transparent",
+    color: "#8AAEC8", fontSize: "0.95rem", fontWeight: "500", cursor: "pointer", marginTop: "0.75rem"
+  };
+
+  return (
+    <div style={overlay}>
+      <div style={modalBox}>
+        <h2 style={{ color: "#FFFFFF", fontSize: "1.2rem", margin: "0 0 0.5rem" }}>Invite a family</h2>
+        <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
+          Invite a family who isn't on Huddle yet. When they join, you'll be connected so you can set up playdates.
+        </p>
+
+        {!link ? (
+          <>
+            {error && (
+              <div style={{ background: "#3D1515", border: "1px solid #F87171", borderRadius: "8px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
+                <p style={{ color: "#F87171", fontSize: "0.8rem", margin: 0 }}>{error}</p>
+              </div>
+            )}
+            <button onClick={generate} disabled={loading} style={primaryBtn}>
+              {loading ? "Creating invite..." : "Create invite →"}
+            </button>
+            <button onClick={onClose} style={secondaryBtn}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "10px", padding: "0.7rem 0.9rem", marginBottom: "1.25rem", textAlign: "center" }}>
+              <p style={{ color: "#02C39A", fontSize: "0.85rem", margin: 0, fontWeight: "500" }}>✓ Invite ready — valid for 48 hours</p>
+            </div>
+
+            {error && (
+              <div style={{ background: "#3D1515", border: "1px solid #F87171", borderRadius: "8px", padding: "0.6rem 0.85rem", marginBottom: "1rem" }}>
+                <p style={{ color: "#F87171", fontSize: "0.8rem", margin: 0 }}>{error}</p>
+              </div>
+            )}
+
+            {canNativeShare ? (
+              <>
+                <button onClick={share} style={primaryBtn}>📤 Send invite</button>
+                <button onClick={copyLink} style={secondaryBtn}>
+                  {copied ? "✓ Link copied" : "🔗 Copy invite link"}
+                </button>
+              </>
+            ) : (
+              <button onClick={copyLink} style={primaryBtn}>
+                {copied ? "✓ Link copied — paste it anywhere" : "🔗 Copy invite link"}
+              </button>
+            )}
+
+            <button onClick={onClose} style={{ ...secondaryBtn, border: "none", color: "#607080", fontSize: "0.85rem" }}>
+              Done
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}```
+
+---
+
+## File: src/InviteLanding.jsx
+
+```jsx
+import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
+
+const INVITE_EMAIL_KEY = "huddle_invite_email";
+
+// Landing page shown to a logged-out person who opened an invite link.
+// Shows the inviter's name + photo, collects the invitee's email (which we
+// stamp onto the invite row so we can match it after signup), then proceeds.
+export default function InviteLanding({ token, onJoin }) {
+  const [loading, setLoading] = useState(true);
+  const [inviter, setInviter] = useState(null);
+  const [invalid, setInvalid] = useState(false);
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => { lookup(); }, []);
+
+  const shortName = (fullName) => {
+    if (!fullName) return "A Huddle parent";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
+  const lookup = async () => {
+    setLoading(true);
+    try {
+      const { data: invite } = await supabase
+        .from("invites")
+        .select("inviter_id, status, expires_at")
+        .eq("token", token)
+        .maybeSingle();
+
+      if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
+        setInvalid(true);
+        setLoading(false);
+        return;
+      }
+
+      const { data: p } = await supabase
+        .from("parents")
+        .select("name, photo_url")
+        .eq("id", invite.inviter_id)
+        .single();
+      setInviter(p || null);
+    } catch (e) {
+      setInvalid(true);
+    }
+    setLoading(false);
+  };
+
+  const proceed = async () => {
+    const clean = email.trim().toLowerCase();
+    if (!clean || !clean.includes("@")) {
+      setError("Please enter a valid email.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      // Stamp the invitee's email onto the invite so we can match it after signup.
+      await supabase.from("invites").update({ invited_email: clean }).eq("token", token);
+      // Stash the email so Auth can pre-fill it (so they sign up with the same one).
+      localStorage.setItem(INVITE_EMAIL_KEY, clean);
+      onJoin();
+    } catch (e) {
+      setError("Something went wrong. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Huddle</p>
+      </div>
+    );
+  }
+
+  const inputStyle = {
+    width: "100%", padding: "0.85rem 1rem", borderRadius: "10px",
+    border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF",
+    fontSize: "1rem", marginBottom: "0.75rem", boxSizing: "border-box"
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: "1.5rem" }}>
+      <div style={{ width: "100%", maxWidth: "420px", textAlign: "center" }}>
+
+        <h1 style={{ color: "#02C39A", fontSize: "2rem", fontWeight: "700", margin: "0 0 2rem" }}>Huddle</h1>
+
+        {invalid ? (
+          <>
+            <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>⏳</div>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>This invite has expired</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 2rem", lineHeight: "1.5" }}>
+              Invite links are valid for 48 hours. Ask the person who invited you to send a fresh one.
+            </p>
+            <button onClick={onJoin}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+              Join Huddle anyway →
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ width: "96px", height: "96px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2.5rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", margin: "0 auto 1.25rem", border: "3px solid #02C39A" }}>
+              {inviter?.photo_url ? (
+                <img src={inviter.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                inviter?.name?.charAt(0) || "?"
+              )}
+            </div>
+
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.4rem", fontWeight: "500", margin: "0 0 0.5rem" }}>
+              {shortName(inviter?.name)} invited you to Huddle
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.6" }}>
+              Huddle is the easiest way for parents to set up playdates. Enter your email to join — you'll be connected with {shortName(inviter?.name)} right away.
+            </p>
+
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && proceed()}
+              style={inputStyle}
+            />
+            {error && <p style={{ color: "#F87171", fontSize: "0.85rem", margin: "0 0 0.75rem" }}>{error}</p>}
+
+            <button onClick={proceed} disabled={submitting}
+              style={{ width: "100%", padding: "0.95rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+              {submitting ? "..." : "Join Huddle →"}
+            </button>
+
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "1.25rem 0 0", lineHeight: "1.5" }}>
+              Free to join. Other parents only ever see your first name and last initial.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

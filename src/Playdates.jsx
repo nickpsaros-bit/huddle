@@ -146,7 +146,6 @@ export default function Playdates({ session, onChanged }) {
 
       // Notify the host's household that a guest responded (non-blocking).
       try {
-        // The invite row -> its playdate -> the organizer household.
         const { data: inv } = await supabase
           .from("playdate_invites")
           .select("playdate_id, household_id, playdates(organizer_household_id)")
@@ -158,7 +157,6 @@ export default function Playdates({ session, onChanged }) {
         const playdateId = inv?.playdate_id;
 
         if (organizerHouseholdId && respondingHouseholdId && organizerHouseholdId !== respondingHouseholdId) {
-          // Responding household's display name.
           const { data: respMembers } = await supabase
             .from("household_members")
             .select("parents(name)")
@@ -176,7 +174,6 @@ export default function Playdates({ session, onChanged }) {
           const verb = rsvp === "yes" ? "is going to" : rsvp === "maybe" ? "might come to" : "can't make";
           const emoji = rsvp === "yes" ? "✅" : rsvp === "maybe" ? "🤔" : "😔";
 
-          // Parents in the host household.
           const { data: hostMembers } = await supabase
             .from("household_members")
             .select("parent_id")
@@ -192,8 +189,6 @@ export default function Playdates({ session, onChanged }) {
             await supabase.from("notifications").insert(rows);
           }
 
-          // On "yes" (both parties now accepted), email the calendar invite (.ics)
-          // to the joining family + host. Non-blocking; never breaks the RSVP.
           if (rsvp === "yes" && playdateId) {
             try {
               await supabase.functions.invoke("send-playdate-invite", {
@@ -221,13 +216,52 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  const removeDeadPlaydate = async (playdateId) => {
-    if (!window.confirm("Remove this playdate? Everyone declined, so it'll be deleted.")) return;
+  // Host cancels a playdate at ANY status. Notifies invited guests, then deletes
+  // the invites + the playdate. No playdate ever gets stuck in limbo.
+  const cancelPlaydate = async (pd) => {
+    if (!window.confirm("Cancel this playdate? Invited families will be notified and it'll be removed.")) return;
     setBusy(true);
     try {
-      await supabase.from("playdate_invites").delete().eq("playdate_id", playdateId);
-      await supabase.from("playdates").delete().eq("id", playdateId);
-      setMessage("Playdate removed");
+      // 1. Who's invited? (gather BEFORE deleting invites so we can notify them.)
+      const { data: invites } = await supabase
+        .from("playdate_invites")
+        .select("household_id")
+        .eq("playdate_id", pd.id);
+
+      // 2. Host's display label, for the notification body.
+      const hostLabel = await householdLabel(pd.organizer_household_id);
+      const whenStr = fmtDate(pd.proposed_date);
+
+      // 3. Notify every parent in each invited household (non-blocking).
+      try {
+        const invitedHouseholdIds = [...new Set((invites || []).map((i) => i.household_id))]
+          .filter((id) => id && id !== pd.organizer_household_id);
+
+        if (invitedHouseholdIds.length > 0) {
+          const { data: guestParents } = await supabase
+            .from("household_members")
+            .select("parent_id")
+            .in("household_id", invitedHouseholdIds);
+
+          const rows = (guestParents || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "playdate_cancelled",
+            title: "Playdate cancelled",
+            body: `${hostLabel} cancelled the playdate for ${whenStr}.`,
+          }));
+          if (rows.length > 0) {
+            await supabase.from("notifications").insert(rows);
+          }
+        }
+      } catch (notifErr) {
+        // Best-effort — don't block the cancellation.
+      }
+
+      // 4. Delete invites, then the playdate.
+      await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
+      await supabase.from("playdates").delete().eq("id", pd.id);
+
+      setMessage("Playdate cancelled");
       await fetchData();
       if (typeof onChanged === "function") onChanged();
       setTimeout(() => setMessage(""), 3000);
@@ -251,9 +285,6 @@ export default function Playdates({ session, onChanged }) {
     if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
     return { text: "Declined", bg: "#3D1515", color: "#F87171" };
   };
-
-  const isDead = (roster) =>
-    roster && roster.length > 0 && roster.every((r) => r.rsvp === "no");
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
@@ -303,7 +334,6 @@ export default function Playdates({ session, onChanged }) {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
-      // Guest sees "Add to calendar" if they're going (host + them = confirmed).
       const showCal = !dim && it.invite.rsvp === "yes";
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
@@ -347,8 +377,6 @@ export default function Playdates({ session, onChanged }) {
 
     // hosting card
     const badge = hostBadge(it.roster, dim);
-    const dead = !dim && isDead(it.roster);
-    // Host sees "Add to calendar" once at least one guest is going (confirmed).
     const showCal = !dim && it.goingCount > 0;
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
@@ -388,10 +416,10 @@ export default function Playdates({ session, onChanged }) {
           </button>
         )}
 
-        {dead && (
-          <button onClick={() => removeDeadPlaydate(pd.id)} disabled={busy}
+        {!dim && (
+          <button onClick={() => cancelPlaydate(pd)} disabled={busy}
             style={{ width: "100%", marginTop: "0.6rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
-            Remove playdate
+            Cancel playdate
           </button>
         )}
       </div>
