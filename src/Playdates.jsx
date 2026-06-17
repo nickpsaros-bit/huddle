@@ -324,18 +324,25 @@ export default function Playdates({ session, onChanged }) {
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
+  const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
 
-  const visible = items.filter((it) => !(it.kind === "invited" && it.invite.rsvp === "no"));
+  // Declined invites: shown dimmed at the very bottom (not hidden).
+  const declined = items
+    .filter((it) => isDeclined(it))
+    .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  const needsAttention = visible
+  // Everything else splits into needs-reply / upcoming / past (declined excluded).
+  const active = items.filter((it) => !isDeclined(it));
+
+  const needsAttention = active
     .filter((it) => !isPast(it) && it.kind === "invited" && it.invite.rsvp === "invited")
     .sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
 
-  const upcoming = visible
+  const upcoming = active
     .filter((it) => !isPast(it) && !(it.kind === "invited" && it.invite.rsvp === "invited"))
     .sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
 
-  const past = visible
+  const past = active
     .filter((it) => isPast(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
@@ -364,7 +371,7 @@ export default function Playdates({ session, onChanged }) {
     );
   }
 
-  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0;
+  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0 && declined.length === 0;
 
   const renderCard = (it, dim) => {
     const pd = it.playdate;
@@ -401,6 +408,13 @@ export default function Playdates({ session, onChanged }) {
                 Can't go
               </button>
             </div>
+          )}
+
+          {dim && isDeclined(it) && (
+            <button onClick={() => respond(it.invite.id, "yes")} disabled={busy}
+              style={{ width: "100%", marginTop: "0.85rem", padding: "0.55rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.8rem", cursor: "pointer" }}>
+              Changed your mind? Tap to go
+            </button>
           )}
 
           {showCal && (
@@ -509,6 +523,13 @@ export default function Playdates({ session, onChanged }) {
           <>
             <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>PAST</p>
             {past.map((it) => renderCard(it, true))}
+          </>
+        )}
+
+        {declined.length > 0 && (
+          <>
+            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>DECLINED</p>
+            {declined.map((it) => renderCard(it, true))}
           </>
         )}
       </div>
