@@ -5,12 +5,14 @@ import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
   const [classmates, setClassmates] = useState({});
   const [petsByHousehold, setPetsByHousehold] = useState({});
+  const [nextPlaydate, setNextPlaydate] = useState(null);
+  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -43,6 +45,47 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   };
 
   const getGradeLabel = (gradeNum) => grades[gradeNum] || "Unknown grade";
+
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  };
+
+  const todayLabel = () =>
+    new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  const fmtPlaydate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+
+  // Relative time for the activity feed ("2h ago", "3d ago").
+  const relTime = (iso) => {
+    if (!iso) return "";
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  // Icon + accent for each activity (notification) type.
+  const activityStyle = (type) => {
+    switch (type) {
+      case "playdate_invite": return { icon: "🎉", bg: "#13314F", color: "#8AAEC8" };
+      case "playdate_rsvp": return { icon: "✅", bg: "#0F3D2E", color: "#02C39A" };
+      case "playdate_cancelled": return { icon: "❌", bg: "#3D1515", color: "#F87171" };
+      case "invite_accepted": return { icon: "👋", bg: "#13314F", color: "#8AAEC8" };
+      default: return { icon: "🔔", bg: "#13233F", color: "#8AAEC8" };
+    }
+  };
 
   // Small inline pet badges for a household (🐕🐈🐴🐾). Returns null if none set.
   const petBadges = (hhId) => {
@@ -119,6 +162,81 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const map = {};
       for (const row of (prefs || [])) map[row.household_id] = row;
       setPetsByHousehold(map);
+    }
+
+    // ---- NEXT PLAYDATE (soonest upcoming I'm hosting or invited to & not declined) ----
+    try {
+      const nowIso = new Date().toISOString();
+      const candidates = [];
+
+      const { data: hosting } = await supabase
+        .from("playdates")
+        .select("*")
+        .eq("organizer_household_id", hhId)
+        .gte("proposed_date", nowIso);
+      for (const pd of (hosting || [])) {
+        candidates.push({ pd, role: "hosting" });
+      }
+
+      const { data: myInvites } = await supabase
+        .from("playdate_invites")
+        .select("rsvp, playdates(*)")
+        .eq("household_id", hhId);
+      for (const inv of (myInvites || [])) {
+        const pd = inv.playdates;
+        if (!pd) continue;
+        if (pd.organizer_household_id === hhId) continue;
+        if (inv.rsvp === "no") continue;
+        if (new Date(pd.proposed_date).toISOString() < nowIso) continue;
+        candidates.push({ pd, role: "invited" });
+      }
+
+      candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
+      if (candidates.length > 0) {
+        const top = candidates[0];
+        let withLabel = { ...top.pd, _role: top.role, _otherLabel: "" };
+        // Who's it with? (organizer if invited; first guest if hosting)
+        if (top.role === "invited") {
+          const { data: orgMembers } = await supabase
+            .from("household_members")
+            .select("parents(name)")
+            .eq("household_id", top.pd.organizer_household_id);
+          const names = (orgMembers || []).map((m) => m.parents?.name).filter(Boolean).map(shortName);
+          withLabel._otherLabel = names.join(" & ");
+        } else {
+          const { data: invs } = await supabase
+            .from("playdate_invites")
+            .select("household_id")
+            .eq("playdate_id", top.pd.id)
+            .limit(1);
+          if (invs && invs[0]) {
+            const { data: gMembers } = await supabase
+              .from("household_members")
+              .select("parents(name)")
+              .eq("household_id", invs[0].household_id);
+            const names = (gMembers || []).map((m) => m.parents?.name).filter(Boolean).map(shortName);
+            withLabel._otherLabel = names.join(" & ");
+          }
+        }
+        setNextPlaydate(withLabel);
+      } else {
+        setNextPlaydate(null);
+      }
+    } catch (e) {
+      setNextPlaydate(null);
+    }
+
+    // ---- RECENT ACTIVITY (last 5 notifications) ----
+    try {
+      const { data: notifs } = await supabase
+        .from("notifications")
+        .select("id, type, title, body, created_at")
+        .eq("recipient_id", session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      setActivity(notifs || []);
+    } catch (e) {
+      setActivity([]);
     }
 
     setLoading(false);
@@ -281,9 +399,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     );
   }
 
+  // Teal-accented Home header (Home's signature look — distinct from other tabs).
   const headerBar = (
-    <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-      <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0 }}>Huddle</h1>
+    <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #02C39A" }}>
+      <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0, letterSpacing: "-0.02em" }}>Huddle</h1>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         <button onClick={onBellClick}
           style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
@@ -294,12 +413,14 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             </span>
           )}
         </button>
-        <span onClick={() => setShowProfile(true)} style={{ color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", textDecoration: "underline" }}>
-          Hi, {parent?.name?.split(" ")[0]}!
-        </span>
-        {parent?.photo_url && (
+        {parent?.photo_url ? (
           <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)}
             style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
+        ) : (
+          <div onClick={() => setShowProfile(true)}
+            style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", border: "2px solid #02C39A" }}>
+            {parent?.name?.charAt(0) || "?"}
+          </div>
         )}
       </div>
     </div>
@@ -472,12 +593,70 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     );
   }
 
-  // ---- MAIN VIEW: school card(s) with tappable classroom rows ----
+  // ---- MAIN VIEW: dashboard (greeting → next playdate → activity → schools) ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
       {headerBar}
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+
+        {/* Greeting */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 2px" }}>{todayLabel()}</p>
+          <h2 style={{ color: "#FFFFFF", fontSize: "1.4rem", fontWeight: "600", margin: 0, letterSpacing: "-0.02em" }}>
+            {greeting()}, {parent?.name?.split(" ")[0] || "there"}
+          </h2>
+        </div>
+
+        {/* Next playdate hero */}
+        {nextPlaydate ? (
+          <div onClick={() => typeof onGoToPlaydates === "function" && onGoToPlaydates()}
+            style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "14px", padding: "1.1rem 1.25rem", marginBottom: "1.5rem", cursor: "pointer" }}>
+            <p style={{ color: "#02C39A", fontSize: "0.7rem", letterSpacing: "0.08em", fontWeight: "600", margin: "0 0 6px" }}>
+              {nextPlaydate._role === "hosting" ? "YOU'RE HOSTING" : "NEXT PLAYDATE"}
+            </p>
+            <p style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "600", margin: "0 0 3px" }}>
+              📅 {fmtPlaydate(nextPlaydate.proposed_date)}
+            </p>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>
+              📍 {nextPlaydate.location_name}{nextPlaydate._otherLabel ? ` · with ${nextPlaydate._otherLabel}` : ""}
+            </p>
+          </div>
+        ) : (
+          <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "14px", padding: "1.1rem 1.25rem", marginBottom: "1.5rem" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: 0 }}>
+              📅 No playdates coming up — tap <span style={{ color: "#02C39A", fontWeight: "600" }}>Huddle →</span> next to a family below to set one up.
+            </p>
+          </div>
+        )}
+
+        {/* Recent activity */}
+        {activity.length > 0 && (
+          <div style={{ marginBottom: "1.5rem" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>RECENT ACTIVITY</p>
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", overflow: "hidden" }}>
+              {activity.map((a, idx) => {
+                const st = activityStyle(a.type);
+                return (
+                  <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "0.85rem 1rem", borderBottom: idx < activity.length - 1 ? "1px solid #2A4A6B" : "none" }}>
+                    <div style={{ width: "30px", height: "30px", borderRadius: "50%", background: st.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", flexShrink: 0 }}>
+                      {st.icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "0 0 2px", lineHeight: "1.35" }}>{a.body || a.title}</p>
+                      <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0 }}>{relTime(a.created_at)}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Your schools */}
+        {memberships.length > 0 && (
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>YOUR SCHOOLS</p>
+        )}
 
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
