@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import ConfirmModal from "./ConfirmModal";
 
 export default function Playdates({ session, onChanged }) {
   const [householdId, setHouseholdId] = useState(null);
@@ -7,6 +8,7 @@ export default function Playdates({ session, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -214,16 +216,15 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Host cancels a playdate at ANY status. Order matters:
+  // The actual cancellation work (called after the user confirms in the modal).
+  // Order matters:
   // 1) email the calendar CANCELLATION (.ics METHOD:CANCEL) to "yes" families +
   //    host — MUST run BEFORE deleting, since the function reads the playdate;
   // 2) drop in-app notifications to invited guests;
   // 3) delete invites + the playdate.
-  const cancelPlaydate = async (pd) => {
-    if (!window.confirm("Cancel this playdate? Invited families will be notified and it'll be removed from their calendars.")) return;
+  const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
-      // 1. Email calendar cancellation FIRST (while the playdate still exists).
       try {
         await supabase.functions.invoke("cancel-playdate-invite", {
           body: { playdate_id: pd.id },
@@ -232,7 +233,6 @@ export default function Playdates({ session, onChanged }) {
         // Best-effort — don't block the cancellation if the email fails.
       }
 
-      // 2. Gather invited households + notify them in-app (before deleting invites).
       const { data: invites } = await supabase
         .from("playdate_invites")
         .select("household_id")
@@ -264,7 +264,6 @@ export default function Playdates({ session, onChanged }) {
         // Best-effort.
       }
 
-      // 3. Delete invites, then the playdate.
       await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
       await supabase.from("playdates").delete().eq("id", pd.id);
 
@@ -276,6 +275,18 @@ export default function Playdates({ session, onChanged }) {
       setMessage("Error: " + err.message);
     }
     setBusy(false);
+  };
+
+  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
+  const cancelPlaydate = (pd) => {
+    setConfirm({
+      title: "Cancel this playdate?",
+      body: "Invited families will be notified and it'll be removed from their calendars.",
+      confirmLabel: "Cancel playdate",
+      cancelLabel: "Keep it",
+      tone: "danger",
+      onConfirm: () => doCancelPlaydate(pd),
+    });
   };
 
   const rsvpColor = (rsvp) =>
@@ -423,7 +434,7 @@ export default function Playdates({ session, onChanged }) {
           </button>
         )}
 
-    {!dim && (
+        {!dim && (
           <button onClick={() => cancelPlaydate(pd)} disabled={busy}
             style={{ width: "100%", marginTop: "0.85rem", padding: "0.7rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", fontWeight: "500", cursor: "pointer", minHeight: "44px" }}>
             Cancel playdate
@@ -480,6 +491,8 @@ export default function Playdates({ session, onChanged }) {
           </>
         )}
       </div>
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
