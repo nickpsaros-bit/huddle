@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
+import PlaydateRequest from "./PlaydateRequest";
 
 export default function Playdates({ session, onChanged }) {
   const [householdId, setHouseholdId] = useState(null);
@@ -9,6 +10,13 @@ export default function Playdates({ session, onChanged }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null);
+
+  // Create-flow state
+  const [picking, setPicking] = useState(false);
+  const [pickPeople, setPickPeople] = useState([]);
+  const [pickLoading, setPickLoading] = useState(false);
+  const [pickSearch, setPickSearch] = useState("");
+  const [requestingPlaydate, setRequestingPlaydate] = useState(null);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -164,6 +172,82 @@ export default function Playdates({ session, onChanged }) {
     setLoading(false);
   };
 
+  // Load people you can huddle with: classmates (your classrooms) + connections.
+  // Deduped by parent id, excluding yourself and your own household.
+  const openPicker = async () => {
+    setPicking(true);
+    setPickSearch("");
+    setPickLoading(true);
+    try {
+      const userId = session.user.id;
+
+      // My household (to exclude my own household members).
+      const { data: myHm } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", userId)
+        .maybeSingle();
+      const myHouseholdId = myHm?.household_id;
+
+      const peopleMap = {}; // parent_id -> { id, name, photo_url, source }
+
+      // --- Classmates: other households in my classrooms ---
+      if (myHouseholdId) {
+        const { data: myMemberships } = await supabase
+          .from("classroom_members")
+          .select("classroom_id, school_year")
+          .eq("household_id", myHouseholdId);
+
+        for (const m of (myMemberships || [])) {
+          const { data: others } = await supabase
+            .from("classroom_members")
+            .select("households(household_members(parent_id, parents(id, name, photo_url)))")
+            .eq("classroom_id", m.classroom_id)
+            .eq("school_year", m.school_year)
+            .neq("household_id", myHouseholdId);
+
+          for (const row of (others || [])) {
+            const members = row.households?.household_members || [];
+            for (const hm2 of members) {
+              const p = hm2.parents;
+              if (p && p.id && p.id !== userId && !peopleMap[p.id]) {
+                peopleMap[p.id] = { id: p.id, name: p.name, photo_url: p.photo_url, source: "Classmate" };
+              }
+            }
+          }
+        }
+      }
+
+      // --- Connections (accepted) ---
+      const { data: conns } = await supabase
+        .from("connections")
+        .select(`
+          requester:parents!connections_requester_id_fkey(id, name, photo_url),
+          recipient:parents!connections_recipient_id_fkey(id, name, photo_url),
+          requester_id, recipient_id
+        `)
+        .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
+        .eq("status", "accepted");
+
+      for (const c of (conns || [])) {
+        const other = c.requester_id === userId ? c.recipient : c.requester;
+        if (other && other.id && other.id !== userId) {
+          if (!peopleMap[other.id]) {
+            peopleMap[other.id] = { id: other.id, name: other.name, photo_url: other.photo_url, source: "Connection" };
+          }
+        }
+      }
+
+      const list = Object.values(peopleMap).sort((a, b) =>
+        (a.name || "").localeCompare(b.name || "")
+      );
+      setPickPeople(list);
+    } catch (e) {
+      setPickPeople([]);
+    }
+    setPickLoading(false);
+  };
+
   const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
@@ -244,11 +328,6 @@ export default function Playdates({ session, onChanged }) {
   };
 
   // The actual cancellation work (called after the user confirms in the modal).
-  // Order matters:
-  // 1) email the calendar CANCELLATION (.ics METHOD:CANCEL) to "yes" families +
-  //    host — MUST run BEFORE deleting, since the function reads the playdate;
-  // 2) drop in-app notifications to invited guests;
-  // 3) delete invites + the playdate.
   const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
@@ -335,12 +414,10 @@ export default function Playdates({ session, onChanged }) {
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
 
-  // Declined invites: shown dimmed at the very bottom (not hidden).
   const declined = items
     .filter((it) => isDeclined(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  // Everything else splits into needs-reply / upcoming / past (declined excluded).
   const active = items.filter((it) => !isDeclined(it));
 
   const needsAttention = active
@@ -371,6 +448,84 @@ export default function Playdates({ session, onChanged }) {
     border: "1px solid #02C39A", background: "transparent", color: "#02C39A",
     fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
   };
+
+  // ---- If creating a playdate, render the request form (reuses existing flow) ----
+  if (requestingPlaydate) {
+    return (
+      <PlaydateRequest
+        session={session}
+        recipient={requestingPlaydate}
+        onBack={() => setRequestingPlaydate(null)}
+        onSent={() => {
+          setRequestingPlaydate(null);
+          setPicking(false);
+          fetchData();
+          if (typeof onChanged === "function") onChanged();
+        }}
+      />
+    );
+  }
+
+  // ---- PERSON PICKER VIEW (the "+" create-flow) ----
+  if (picking) {
+    const filtered = pickPeople.filter((p) =>
+      (p.name || "").toLowerCase().includes(pickSearch.toLowerCase())
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => setPicking(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Who's it with?</h1>
+          <div style={{ width: "52px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          <input
+            type="text"
+            placeholder="Search by name..."
+            value={pickSearch}
+            onChange={(e) => setPickSearch(e.target.value)}
+            style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1.25rem", boxSizing: "border-box" }}
+          />
+
+          {pickLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1.05rem", margin: "0 0 0.5rem" }}>
+                {pickPeople.length === 0 ? "No one to huddle with yet" : "No matches"}
+              </p>
+              <p style={{ color: "#607080", fontSize: "0.9rem", lineHeight: "1.5" }}>
+                {pickPeople.length === 0
+                  ? "Find parents in your classrooms on the Home tab, or connect with families in Search — then set up a playdate here."
+                  : "Try a different name."}
+              </p>
+            </div>
+          ) : (
+            filtered.map((p) => (
+              <div key={p.id}
+                onClick={() => setRequestingPlaydate({ id: p.id, name: p.name, photo_url: p.photo_url })}
+                style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                    {p.photo_url ? (
+                      <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (p.name?.charAt(0) || "?")}
+                  </div>
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(p.name)}</p>
+                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0 }}>{p.source}</p>
+                  </div>
+                </div>
+                <span style={{ color: "#02C39A", fontSize: "0.85rem", fontWeight: "600", flexShrink: 0 }}>Select →</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -435,7 +590,6 @@ export default function Playdates({ session, onChanged }) {
       );
     }
 
-    // hosting card
     const badge = hostBadge(it.roster, dim);
     const showCal = !dim && it.goingCount > 0;
     return (
@@ -500,6 +654,12 @@ export default function Playdates({ session, onChanged }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
+        {/* Create entry point — this page is where you ACT */}
+        <button onClick={openPicker}
+          style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          ➕ Set up a playdate
+        </button>
+
         {message && (
           <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "10px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
             <p style={{ color: "#02C39A", fontSize: "0.85rem", margin: 0 }}>{message}</p>
@@ -507,10 +667,10 @@ export default function Playdates({ session, onChanged }) {
         )}
 
         {nothing && (
-          <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+          <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
             <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>📅</p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No playdates yet</p>
-            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Tap "Huddle →" next to a parent on your Home screen to set one up.</p>
+            <p style={{ color: "#607080", fontSize: "0.9rem" }}>Tap "Set up a playdate" above to invite a family.</p>
           </div>
         )}
 

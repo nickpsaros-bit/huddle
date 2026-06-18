@@ -232,7 +232,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
 
    const { error: invErr } = await supabase
         .from("playdate_invites")
-        .insert({
+    .insert({
           playdate_id: playdate.id,
           household_id: theirHm.household_id,
           invited_by_household_id: myHm.household_id,
