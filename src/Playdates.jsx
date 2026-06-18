@@ -147,7 +147,16 @@ export default function Playdates({ session, onChanged }) {
       const pd = inv.playdates;
       if (!pd) continue;
       if (pd.organizer_household_id === hhId) continue;
-      const organizerLabel = await householdLabel(pd.organizer_household_id);
+      // Person-facing: who organized it (falls back to household label if no parent).
+      let organizerLabel = await householdLabel(pd.organizer_household_id);
+      if (pd.organizer_parent_id) {
+        const { data: orgParent } = await supabase
+          .from("parents")
+          .select("name")
+          .eq("id", pd.organizer_parent_id)
+          .maybeSingle();
+        if (orgParent?.name) organizerLabel = shortName(orgParent.name);
+      }
       all.push({ kind: "invited", playdate: pd, invite: inv, organizerLabel });
     }
 
@@ -160,7 +169,7 @@ export default function Playdates({ session, onChanged }) {
     try {
       await supabase
         .from("playdate_invites")
-        .update({ rsvp, responded_at: new Date().toISOString() })
+        .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
 
       try {

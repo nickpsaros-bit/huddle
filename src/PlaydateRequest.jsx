@@ -230,12 +230,13 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-      const { error: invErr } = await supabase
+   const { error: invErr } = await supabase
         .from("playdate_invites")
         .insert({
           playdate_id: playdate.id,
           household_id: theirHm.household_id,
           invited_by_household_id: myHm.household_id,
+          invited_parent_id: recipient.id,
           rsvp: "invited",
         });
       if (invErr) throw invErr;
