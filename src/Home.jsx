@@ -5,14 +5,15 @@ import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
   const [classmates, setClassmates] = useState({});
   const [petsByHousehold, setPetsByHousehold] = useState({});
   const [nextPlaydate, setNextPlaydate] = useState(null);
-  const [activity, setActivity] = useState([]);
+  const [statConnections, setStatConnections] = useState(0);
+  const [statUpcoming, setStatUpcoming] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -191,7 +192,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         candidates.push({ pd, role: "invited" });
       }
 
-      candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
+   candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
+      setStatUpcoming(candidates.length);
       if (candidates.length > 0) {
         const top = candidates[0];
         let withLabel = { ...top.pd, _role: top.role, _otherLabel: "" };
@@ -227,16 +229,16 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     }
 
     // ---- RECENT ACTIVITY (last 5 notifications) ----
+ // ---- STAT TILES: connections count ----
     try {
-      const { data: notifs } = await supabase
-        .from("notifications")
-        .select("id, type, title, body, created_at")
-        .eq("recipient_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(5);
-      setActivity(notifs || []);
+      const { data: conns } = await supabase
+        .from("connections")
+        .select("id")
+        .or(`requester_id.eq.${session.user.id},recipient_id.eq.${session.user.id}`)
+        .eq("status", "accepted");
+      setStatConnections((conns || []).length);
     } catch (e) {
-      setActivity([]);
+      setStatConnections(0);
     }
 
     setLoading(false);
@@ -630,28 +632,31 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           </div>
         )}
 
-        {/* Recent activity */}
-        {activity.length > 0 && (
-          <div style={{ marginBottom: "1.5rem" }}>
-            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>RECENT ACTIVITY</p>
-            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", overflow: "hidden" }}>
-              {activity.map((a, idx) => {
-                const st = activityStyle(a.type);
-                return (
-                  <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "0.85rem 1rem", borderBottom: idx < activity.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                    <div style={{ width: "30px", height: "30px", borderRadius: "50%", background: st.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", flexShrink: 0 }}>
-                      {st.icon}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "0 0 2px", lineHeight: "1.35" }}>{a.body || a.title}</p>
-                      <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0 }}>{relTime(a.created_at)}</p>
-                    </div>
-                  </div>
-                );
-              })}
+       {/* Stat tiles */}
+        {(() => {
+          const familiesAtSchool = new Set(
+            Object.values(classmates).flatMap((g) =>
+              (g?.rows || []).map((cm) => cm.household_id)
+            ).filter(Boolean)
+          ).size;
+          const tiles = [
+            { label: "Connections", value: statConnections, go: onGoToNetwork },
+            { label: "Families at your school", value: familiesAtSchool, go: null },
+            { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
+          ];
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
+              {tiles.map((t) => (
+                <div key={t.label}
+                  onClick={() => t.go && t.go()}
+                  style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 0.5rem", textAlign: "center", cursor: t.go ? "pointer" : "default" }}>
+                  <p style={{ color: "#02C39A", fontSize: "1.6rem", fontWeight: "700", margin: "0 0 2px" }}>{t.value}</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.68rem", margin: 0, lineHeight: "1.25" }}>{t.label}</p>
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Your schools */}
         {memberships.length > 0 && (
