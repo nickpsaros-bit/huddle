@@ -300,7 +300,7 @@ export default function Playdates({ session, onChanged }) {
             await supabase.from("notifications").insert(rows);
           }
 
-          if (rsvp === "yes" && playdateId) {
+        if (rsvp === "yes" && playdateId) {
             try {
               await supabase.functions.invoke("send-playdate-invite", {
                 body: {
@@ -310,6 +310,20 @@ export default function Playdates({ session, onChanged }) {
               });
             } catch (emailErr) {
               // Best-effort — the in-app RSVP still succeeds.
+            }
+          }
+
+          // Guest declined → email the HOST (they shouldn't have to check the app).
+          if (rsvp === "no" && playdateId) {
+            try {
+              await supabase.functions.invoke("notify-host-decline", {
+                body: {
+                  playdate_id: playdateId,
+                  declining_household_id: respondingHouseholdId,
+                },
+              });
+            } catch (emailErr) {
+              // Best-effort — the in-app decline still succeeds.
             }
           }
         }
