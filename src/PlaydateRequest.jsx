@@ -2,7 +2,13 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 
-export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
+export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent }) {
+  // Normalize to a list: supports single `recipient` (Home/Network) or `recipients` array (multi-select picker).
+  const recipientList = (recipients && recipients.length > 0)
+    ? recipients
+    : (recipient ? [recipient] : []);
+  const isMulti = recipientList.length > 1;
+
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [locationName, setLocationName] = useState("");
@@ -13,11 +19,13 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [coords, setCoords] = useState(null);
   const [sent, setSent] = useState(false);
 
-  // Pets: organizer's own pets, the "bringing" toggles, and recipient's comfort prefs.
+  // Pets: organizer's own pets, the "bringing" toggles, and recipients' aggregated comfort prefs.
   const [myPets, setMyPets] = useState({ has_dog: false, has_cat: false });
   const [bringingDog, setBringingDog] = useState(false);
   const [bringingCat, setBringingCat] = useState(false);
-  const [recipientPrefs, setRecipientPrefs] = useState({ prefer_no_dogs: false, prefer_no_cats: false });
+  // Aggregated across ALL recipients: does ANYONE prefer no dogs / no cats?
+  const [anyPreferNoDogs, setAnyPreferNoDogs] = useState(false);
+  const [anyPreferNoCats, setAnyPreferNoCats] = useState(false);
   const [confirm, setConfirm] = useState(null);
 
   const locations = [
@@ -27,6 +35,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     { name: "Our House", address: "My home" },
     { name: "Their House", address: "Their home" },
   ];
+
+  const recipientIdsKey = recipientList.map((r) => r.id).join(",");
 
  useEffect(() => {
     (async () => {
@@ -46,25 +56,28 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .maybeSingle();
         if (myPrefs) setMyPets({ has_dog: !!myPrefs.has_dog, has_cat: !!myPrefs.has_cat });
 
-        // Recipient's comfort preferences (for the cross-check at send).
-        const { data: theirHm } = await supabase
-          .from("household_members")
-          .select("household_id")
-          .eq("parent_id", recipient.id)
-          .single();
-        if (theirHm) {
-          const { data: theirPrefs } = await supabase
-            .from("household_preferences")
-            .select("prefer_no_dogs, prefer_no_cats")
-            .eq("household_id", theirHm.household_id)
-            .maybeSingle();
-          if (theirPrefs) setRecipientPrefs({
-            prefer_no_dogs: !!theirPrefs.prefer_no_dogs,
-            prefer_no_cats: !!theirPrefs.prefer_no_cats,
-          });
+        // Recipients' comfort preferences, aggregated (does ANYONE prefer no dogs/cats?).
+        let dogs = false, cats = false;
+        for (const r of recipientList) {
+          const { data: theirHm } = await supabase
+            .from("household_members")
+            .select("household_id")
+            .eq("parent_id", r.id)
+            .single();
+          if (theirHm) {
+            const { data: theirPrefs } = await supabase
+              .from("household_preferences")
+              .select("prefer_no_dogs, prefer_no_cats")
+              .eq("household_id", theirHm.household_id)
+              .maybeSingle();
+            if (theirPrefs?.prefer_no_dogs) dogs = true;
+            if (theirPrefs?.prefer_no_cats) cats = true;
+          }
         }
+        setAnyPreferNoDogs(dogs);
+        setAnyPreferNoCats(cats);
 
-        // Get a classroom this household is in, then that classroom's school_id.
+        // Get a classroom this household is in, then that classroom's school_id (for the gradient).
         const { data: cm } = await supabase
           .from("classroom_members")
           .select("classroom_id")
@@ -93,7 +106,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         // No coords -> gradient simply won't show.
       }
     })();
-  }, [session, recipient]);
+  }, [session, recipientIdsKey]);
 
   const computeSunTimes = (dateStr, lat, lng) => {
     if (!dateStr || lat == null || lng == null) return null;
@@ -183,7 +196,15 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     return Math.max(0, Math.min(100, ((min - startMin) / (endMin - startMin)) * 100));
   })();
 
+  const shortName = (fullName) => {
+    if (!fullName) return "this family";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
   // The actual send (runs directly, or after the user OKs the pet heads-up).
+  // Creates ONE playdate, then ONE invite row per recipient (+ notification each).
   const sendRequest = async () => {
     setLoading(true);
     setError("");
@@ -197,15 +218,21 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         .single();
       if (myErr) throw myErr;
 
-      const { data: theirHm, error: theirErr } = await supabase
-        .from("household_members")
-        .select("household_id")
-        .eq("parent_id", recipient.id)
-        .single();
-      if (theirErr) throw theirErr;
+      // Resolve each recipient -> their household, skipping anyone in my own household.
+      const targets = [];
+      for (const r of recipientList) {
+        const { data: theirHm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", r.id)
+          .single();
+        if (theirHm && theirHm.household_id !== myHm.household_id) {
+          targets.push({ parentId: r.id, householdId: theirHm.household_id });
+        }
+      }
 
-      if (theirHm.household_id === myHm.household_id) {
-        setError("That parent is in your own household.");
+      if (targets.length === 0) {
+        setError("No valid families to invite.");
         setLoading(false);
         return;
       }
@@ -230,17 +257,18 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-   const { error: invErr } = await supabase
-        .from("playdate_invites")
-    .insert({
-          playdate_id: playdate.id,
-          household_id: theirHm.household_id,
-          invited_by_household_id: myHm.household_id,
-          invited_parent_id: recipient.id,
-          rsvp: "invited",
-        });
+      // One invite row per recipient.
+      const inviteRows = targets.map((t) => ({
+        playdate_id: playdate.id,
+        household_id: t.householdId,
+        invited_by_household_id: myHm.household_id,
+        invited_parent_id: t.parentId,
+        rsvp: "invited",
+      }));
+      const { error: invErr } = await supabase.from("playdate_invites").insert(inviteRows);
       if (invErr) throw invErr;
 
+      // Best-effort: notify every invited household.
       try {
         const { data: myMembers } = await supabase
           .from("household_members")
@@ -256,10 +284,11 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .filter(Boolean);
         const inviterLabel = inviterNames.length > 0 ? inviterNames.join(" & ") : "A family";
 
+        const targetHouseholdIds = targets.map((t) => t.householdId);
         const { data: theirMembers } = await supabase
           .from("household_members")
           .select("parent_id")
-          .eq("household_id", theirHm.household_id);
+          .in("household_id", targetHouseholdIds);
 
         const rows = (theirMembers || []).map((m) => ({
           recipient_id: m.parent_id,
@@ -270,16 +299,14 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         if (rows.length > 0) {
           await supabase.from("notifications").insert(rows);
         }
- } catch (notifErr) {
+      } catch (notifErr) {
         // Best-effort — don't block the invite.
       }
 
-      // Show a success state, then return to where they came from.
       setSent(true);
       setTimeout(() => { onSent(); }, 1800);
 
     } catch (err) {
-
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
@@ -288,7 +315,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     }
   };
 
-  // Button handler: validate, run the pet cross-check, then send (directly or after confirm).
+  // Button handler: validate, run the aggregated pet cross-check, then send.
   const attemptSend = () => {
     if (!date || !time || !locationName) {
       setError("Please fill in date, time and location");
@@ -296,18 +323,19 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     }
     setError("");
 
-    // Cross-check: bringing a pet the recipient would rather not be around?
-    const dogConflict = bringingDog && recipientPrefs.prefer_no_dogs;
-    const catConflict = bringingCat && recipientPrefs.prefer_no_cats;
+    const dogConflict = bringingDog && anyPreferNoDogs;
+    const catConflict = bringingCat && anyPreferNoCats;
 
     if (dogConflict || catConflict) {
       const animals = [];
       if (dogConflict) animals.push("dogs");
       if (catConflict) animals.push("cats");
       const animalLabel = animals.join(" and ");
+      // Generic wording — protects which specific family set the preference.
+      const who = isMulti ? "Some families you invited" : "This family";
       setConfirm({
         title: "A quick heads-up",
-        body: `${shortName(recipient.name)}'s family would rather not be around ${animalLabel}. You can still send the invite — just wanted you to know.`,
+        body: `${who} would rather not be around ${animalLabel}. You can still send — just wanted you to know.`,
         confirmLabel: "Send anyway",
         cancelLabel: "Go back",
         tone: "primary",
@@ -325,16 +353,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  const shortName = (fullName) => {
-    if (!fullName) return "this family";
-    const parts = fullName.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0];
-    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
-  };
-
   const isPresetSelected = locations.some((l) => l.name === locationName);
 
-  // Reusable pet toggle pill (matches Profile's style; 44px tap target).
   const petToggle = (active, label, onClick) => (
     <button
       onClick={onClick}
@@ -350,7 +370,11 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     </button>
   );
 
-  // Success confirmation — shown briefly after the invite is sent.
+  // Label for the recipient card / success screen.
+  const recipientHeading = isMulti
+    ? `${recipientList.length} families`
+    : `${shortName(recipientList[0]?.name)}'s family`;
+
   if (sent) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
@@ -358,7 +382,9 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>🎉</div>
           <h2 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
-            {shortName(recipient.name)}'s family will get your playdate invite. You'll be notified when they reply.
+            {isMulti
+              ? `${recipientList.length} families will get your playdate invite. You'll be notified when they reply.`
+              : `${shortName(recipientList[0]?.name)}'s family will get your playdate invite. You'll be notified when they reply.`}
           </p>
           <button onClick={() => onSent()}
             style={{ padding: "0.75rem 1.5rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
@@ -370,6 +396,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   }
 
   const showBringPets = myPets.has_dog || myPets.has_cat;
+  const firstRecipient = recipientList[0];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
@@ -383,16 +410,24 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       <div style={{ padding: "1.5rem", maxWidth: "500px", margin: "0 auto" }}>
 
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-            {recipient.photo_url ? (
-              <img src={recipient.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            ) : (
-              recipient.name?.charAt(0) || "?"
-            )}
-          </div>
+          {isMulti ? (
+            <div style={{ display: "flex", marginRight: "4px" }}>
+              {recipientList.slice(0, 3).map((r, i) => (
+                <div key={r.id} style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", border: "2px solid #162D50", marginLeft: i > 0 ? "-12px" : 0 }}>
+                  {r.photo_url ? <img src={r.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (r.name?.charAt(0) || "?")}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+              {firstRecipient?.photo_url ? (
+                <img src={firstRecipient.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (firstRecipient?.name?.charAt(0) || "?")}
+            </div>
+          )}
           <div>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(recipient.name)}'s family</p>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Sending a playdate invite</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{recipientHeading}</p>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{isMulti ? "Sending one playdate invite to everyone" : "Sending a playdate invite"}</p>
           </div>
         </div>
 
@@ -484,7 +519,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             style={inputStyle}
           />
           <p style={{ color: "#607080", fontSize: "0.72rem", margin: "-0.5rem 0 0", lineHeight: "1.4" }}>
-            Tip: include the city so the other family can find it easily.
+            Tip: include the city so the other families can find it easily.
           </p>
         </div>
 
@@ -492,7 +527,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.4rem", letterSpacing: "0.05em" }}>BRINGING A PET?</p>
             <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
-              Let the other family know if a furry friend is coming along.
+              Let the other families know if a furry friend is coming along.
             </p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {myPets.has_dog && petToggle(bringingDog, "🐕 Bringing our dog", () => setBringingDog((v) => !v))}
@@ -523,7 +558,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
           }}
         >
-          {loading ? "Sending..." : "Send playdate invite →"}
+          {loading ? "Sending..." : isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →"}
         </button>
 
       </div>
