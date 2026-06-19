@@ -326,6 +326,19 @@ export default function Playdates({ session, onChanged }) {
               // Best-effort — the in-app decline still succeeds.
             }
           }
+          // Guest declined → email the HOST (they shouldn't have to check the app).
+          if (rsvp === "no" && playdateId) {
+            try {
+              await supabase.functions.invoke("notify-host-decline", {
+                body: {
+                  playdate_id: playdateId,
+                  declining_household_id: respondingHouseholdId,
+                },
+              });
+            } catch (emailErr) {
+              // Best-effort — the in-app decline still succeeds.
+            }
+          }
         }
       } catch (notifErr) {
         // Best-effort — don't block the RSVP.
