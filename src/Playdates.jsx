@@ -17,6 +17,10 @@ export default function Playdates({ session, onChanged }) {
   const [pickLoading, setPickLoading] = useState(false);
   const [pickSearch, setPickSearch] = useState("");
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  // Multi-select + premium gate
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [myPlan, setMyPlan] = useState("free");
+  const [premiumPrompt, setPremiumPrompt] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -36,8 +40,6 @@ export default function Playdates({ session, onChanged }) {
     if (names.length === 0) return "A family";
     return names.map(shortName).join(" & ");
   };
- 
-  
 
   const householdInitial = async (hhId) => {
     const { data } = await supabase
@@ -71,16 +73,13 @@ export default function Playdates({ session, onChanged }) {
     return status;
   };
 
-
-
   const fmtDate = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
-  // Pet line for a playdate (🐕/🐈). guest=true => "The host plans to bring...";
-  // guest=false (hosting view) => "You're bringing...". Returns null if no pet flagged.
+  // Pet line for a playdate (🐕/🐈).
   const petLine = (pd, guest) => {
     const animals = [];
     if (pd.bringing_dog) animals.push("dog");
@@ -144,6 +143,18 @@ export default function Playdates({ session, onChanged }) {
     const hhId = hm.household_id;
     setHouseholdId(hhId);
 
+    // Load my plan (for the multi-invite premium gate).
+    try {
+      const { data: hh } = await supabase
+        .from("households")
+        .select("plan")
+        .eq("id", hhId)
+        .maybeSingle();
+      setMyPlan(hh?.plan === "premium" ? "premium" : "free");
+    } catch (e) {
+      setMyPlan("free");
+    }
+
     const all = [];
 
     const { data: hosting } = await supabase
@@ -156,8 +167,10 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .select("*")
         .eq("playdate_id", pd.id);
+      // Hide the host's own row from the displayed roster (they're the host, shown separately).
+      const guestInvites = (invites || []).filter((inv) => inv.household_id !== hhId);
       const roster = [];
-      for (const inv of (invites || [])) {
+      for (const inv of guestInvites) {
         roster.push({
           ...inv,
           label: await householdLabel(inv.household_id),
@@ -181,7 +194,6 @@ export default function Playdates({ session, onChanged }) {
       const pd = inv.playdates;
       if (!pd) continue;
       if (pd.organizer_household_id === hhId) continue;
-      // Person-facing: who organized it (falls back to household label if no parent).
       let organizerLabel = await householdLabel(pd.organizer_household_id);
       if (pd.organizer_parent_id) {
         const { data: orgParent } = await supabase
@@ -198,16 +210,16 @@ export default function Playdates({ session, onChanged }) {
     setLoading(false);
   };
 
-  // Load people you can huddle with: classmates (your classrooms) + connections.
-  // Deduped by parent id, excluding yourself and your own household.
+  // Load people you can huddle with: classmates + connections. Deduped, excludes self/own household.
   const openPicker = async () => {
     setPicking(true);
     setPickSearch("");
+    setSelectedIds([]);
+    setPremiumPrompt(false);
     setPickLoading(true);
     try {
       const userId = session.user.id;
 
-      // My household (to exclude my own household members).
       const { data: myHm } = await supabase
         .from("household_members")
         .select("household_id")
@@ -215,9 +227,8 @@ export default function Playdates({ session, onChanged }) {
         .maybeSingle();
       const myHouseholdId = myHm?.household_id;
 
-      const peopleMap = {}; // parent_id -> { id, name, photo_url, source }
+      const peopleMap = {};
 
-      // --- Classmates: other households in my classrooms ---
       if (myHouseholdId) {
         const { data: myMemberships } = await supabase
           .from("classroom_members")
@@ -244,7 +255,6 @@ export default function Playdates({ session, onChanged }) {
         }
       }
 
-      // --- Connections (accepted) ---
       const { data: conns } = await supabase
         .from("connections")
         .select(`
@@ -274,23 +284,51 @@ export default function Playdates({ session, onChanged }) {
     setPickLoading(false);
   };
 
+  // Toggle a person in the multi-select. Free users are hard-capped at 1.
+  const togglePerson = (p) => {
+    setPremiumPrompt(false);
+    setSelectedIds((prev) => {
+      if (prev.includes(p.id)) {
+        return prev.filter((id) => id !== p.id);
+      }
+      // Adding a new one:
+      if (myPlan !== "premium" && prev.length >= 1) {
+        // Hard cap for free users — show the premium prompt, don't add.
+        setPremiumPrompt(true);
+        return prev;
+      }
+      return [...prev, p.id];
+    });
+  };
+
+  // Continue → hand the selected people to PlaydateRequest as a recipients array.
+  const continueWithSelected = () => {
+    const chosen = pickPeople.filter((p) => selectedIds.includes(p.id));
+    if (chosen.length === 0) return;
+    setRequestingPlaydate(
+      chosen.map((p) => ({ id: p.id, name: p.name, photo_url: p.photo_url }))
+    );
+  };
+
   const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
-  await supabase
+      await supabase
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
 
       // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
+      let playdateIdForStatus = null;
       try {
         const { data: invRow } = await supabase
           .from("playdate_invites")
           .select("playdate_id")
           .eq("id", inviteId)
           .single();
-        if (invRow?.playdate_id) {
-          await recomputePlaydateStatus(invRow.playdate_id);
+        playdateIdForStatus = invRow?.playdate_id || null;
+        if (playdateIdForStatus) {
+          await recomputePlaydateStatus(playdateIdForStatus);
         }
       } catch (statusErr) {
         // Best-effort — don't block the RSVP if recompute fails.
@@ -340,7 +378,7 @@ export default function Playdates({ session, onChanged }) {
             await supabase.from("notifications").insert(rows);
           }
 
-        if (rsvp === "yes" && playdateId) {
+          if (rsvp === "yes" && playdateId) {
             try {
               await supabase.functions.invoke("send-playdate-invite", {
                 body: {
@@ -349,7 +387,7 @@ export default function Playdates({ session, onChanged }) {
                 },
               });
             } catch (emailErr) {
-              // Best-effort — the in-app RSVP still succeeds.
+              // Best-effort.
             }
           }
 
@@ -363,20 +401,7 @@ export default function Playdates({ session, onChanged }) {
                 },
               });
             } catch (emailErr) {
-              // Best-effort — the in-app decline still succeeds.
-            }
-          }
-          // Guest declined → email the HOST (they shouldn't have to check the app).
-          if (rsvp === "no" && playdateId) {
-            try {
-              await supabase.functions.invoke("notify-host-decline", {
-                body: {
-                  playdate_id: playdateId,
-                  declining_household_id: respondingHouseholdId,
-                },
-              });
-            } catch (emailErr) {
-              // Best-effort — the in-app decline still succeeds.
+              // Best-effort.
             }
           }
         }
@@ -394,7 +419,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // The actual cancellation work (called after the user confirms in the modal).
   const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
@@ -403,7 +427,7 @@ export default function Playdates({ session, onChanged }) {
           body: { playdate_id: pd.id },
         });
       } catch (calErr) {
-        // Best-effort — don't block the cancellation if the email fails.
+        // Best-effort.
       }
 
       const { data: invites } = await supabase
@@ -450,7 +474,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
   const cancelPlaydate = (pd) => {
     setConfirm({
       title: "Cancel this playdate?",
@@ -521,11 +544,13 @@ export default function Playdates({ session, onChanged }) {
     return (
       <PlaydateRequest
         session={session}
-        recipient={requestingPlaydate}
+        recipients={Array.isArray(requestingPlaydate) ? requestingPlaydate : undefined}
+        recipient={Array.isArray(requestingPlaydate) ? undefined : requestingPlaydate}
         onBack={() => setRequestingPlaydate(null)}
         onSent={() => {
           setRequestingPlaydate(null);
           setPicking(false);
+          setSelectedIds([]);
           fetchData();
           if (typeof onChanged === "function") onChanged();
         }}
@@ -533,13 +558,14 @@ export default function Playdates({ session, onChanged }) {
     );
   }
 
-  // ---- PERSON PICKER VIEW (the "+" create-flow) ----
+  // ---- PERSON PICKER VIEW (the "+" create-flow, multi-select) ----
   if (picking) {
     const filtered = pickPeople.filter((p) =>
       (p.name || "").toLowerCase().includes(pickSearch.toLowerCase())
     );
+    const count = selectedIds.length;
     return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: count > 0 ? "120px" : "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
           <button onClick={() => setPicking(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Who's it with?</h1>
@@ -552,8 +578,27 @@ export default function Playdates({ session, onChanged }) {
             placeholder="Search by name..."
             value={pickSearch}
             onChange={(e) => setPickSearch(e.target.value)}
-            style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1.25rem", boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box" }}
           />
+
+          {myPlan === "premium" ? (
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem" }}>
+              Select one or more families to invite to the same playdate.
+            </p>
+          ) : (
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem" }}>
+              Pick a family to invite. ✨ Inviting multiple families is a premium feature.
+            </p>
+          )}
+
+          {premiumPrompt && (
+            <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1.25rem" }}>
+              <p style={{ color: "#F59E0B", fontSize: "0.85rem", margin: "0 0 4px", fontWeight: "600" }}>✨ Invite multiple families with Premium</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                Free playdates are one family at a time. Multi-family invites are coming soon as a premium feature.
+              </p>
+            </div>
+          )}
 
           {pickLoading ? (
             <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
@@ -570,26 +615,42 @@ export default function Playdates({ session, onChanged }) {
               </p>
             </div>
           ) : (
-            filtered.map((p) => (
-              <div key={p.id}
-                onClick={() => setRequestingPlaydate({ id: p.id, name: p.name, photo_url: p.photo_url })}
-                style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
-                    {p.photo_url ? (
-                      <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (p.name?.charAt(0) || "?")}
+            filtered.map((p) => {
+              const isSelected = selectedIds.includes(p.id);
+              return (
+                <div key={p.id}
+                  onClick={() => togglePerson(p)}
+                  style={{ background: isSelected ? "#0F3D2E" : "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: `1px solid ${isSelected ? "#02C39A" : "#2A4A6B"}`, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                      {p.photo_url ? (
+                        <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (p.name?.charAt(0) || "?")}
+                    </div>
+                    <div>
+                      <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(p.name)}</p>
+                      <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0 }}>{p.source}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(p.name)}</p>
-                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0 }}>{p.source}</p>
+                  <div style={{ width: "24px", height: "24px", borderRadius: "50%", border: `2px solid ${isSelected ? "#02C39A" : "#2A4A6B"}`, background: isSelected ? "#02C39A" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {isSelected && <span style={{ color: "#0F2044", fontSize: "0.8rem", fontWeight: "700" }}>✓</span>}
                   </div>
                 </div>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem", fontWeight: "600", flexShrink: 0 }}>Select →</span>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
+
+        {count > 0 && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#162D50", borderTop: "1px solid #2A4A6B", padding: "1rem 1.5rem", paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}>
+            <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+              <button onClick={continueWithSelected}
+                style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer" }}>
+                Continue with {count} {count === 1 ? "family" : "families"} →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -721,7 +782,6 @@ export default function Playdates({ session, onChanged }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Create entry point — this page is where you ACT */}
         <button onClick={openPicker}
           style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           ➕ Set up a playdate
