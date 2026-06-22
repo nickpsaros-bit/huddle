@@ -32,11 +32,6 @@ export default function App() {
   const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
   const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
 
-  // On first load: capture an invite token from either the path (/invite/{token})
-  // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
-  // IMPORTANT: only treat this as an "invite arrival" (show the landing page) when
-  // the token came from the URL THIS visit. A leftover token in localStorage is
-  // kept only as a same-device consume fallback — it must NOT hijack the homepage.
   useEffect(() => {
     const path = window.location.pathname || "";
     const params = new URLSearchParams(window.location.search);
@@ -48,20 +43,16 @@ export default function App() {
     else if (pathMatch && pathMatch[1]) token = pathMatch[1];
 
     if (token) {
-      // Real invite arrival via URL — stash it and show the landing page.
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
       setArrivedViaInvite(true);
       window.history.replaceState({}, "", "/");
     } else {
-      // No URL token. Keep any stored token ONLY for post-login consume —
-      // do NOT set arrivedViaInvite, so the landing page never shows here.
       const stored = localStorage.getItem(INVITE_KEY);
       if (stored) setInviteToken(stored);
     }
   }, []);
 
-  // Auth session lifecycle + focus refresh.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -104,9 +95,6 @@ export default function App() {
     };
   }, []);
 
-  // Consume a pending invite once the user is logged in AND fully set up.
-  // Runs reliably after render (not mid-render), so the connection forms
-  // whether they just signed up or were already a user opening a link.
   useEffect(() => {
     if (session && hasProfile) {
       consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
@@ -157,15 +145,10 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Consume a pending invite after login by matching the logged-in user's EMAIL
-  // to the invite's invited_email. Email survives every redirect/device/browser,
-  // so this is reliable even when a texted link opens in a different app.
-  // Falls back to the token (localStorage) if present.
   const consumeInvite = async (userId, userEmail) => {
     try {
       let invite = null;
 
-      // Primary: match by the email the invitee entered on the landing page.
       if (userEmail) {
         const { data: byEmail } = await supabase
           .from("invites")
@@ -178,7 +161,6 @@ export default function App() {
         if (byEmail) invite = byEmail;
       }
 
-      // Fallback: token in localStorage (same-device flows).
       if (!invite) {
         const token = localStorage.getItem(INVITE_KEY);
         if (token) {
@@ -191,7 +173,6 @@ export default function App() {
         }
       }
 
-      // Nothing to do, expired, or already consumed.
       if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
         localStorage.removeItem(INVITE_KEY);
         localStorage.removeItem(INVITE_EMAIL_KEY);
@@ -199,7 +180,6 @@ export default function App() {
         return;
       }
 
-      // Don't connect someone to themselves.
       if (invite.inviter_id === userId) {
         localStorage.removeItem(INVITE_KEY);
         localStorage.removeItem(INVITE_EMAIL_KEY);
@@ -207,7 +187,6 @@ export default function App() {
         return;
       }
 
-      // Create the connection if one doesn't already exist (either direction).
       const { data: existing } = await supabase
         .from("connections")
         .select("id")
@@ -220,7 +199,6 @@ export default function App() {
           status: "accepted",
         });
 
-        // Notify the inviter that their invite was accepted.
         try {
           const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
           const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
@@ -234,7 +212,6 @@ export default function App() {
         } catch (e) { /* best-effort */ }
       }
 
-      // Mark the invite consumed.
       await supabase.from("invites")
         .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
         .eq("id", invite.id);
@@ -289,43 +266,54 @@ export default function App() {
     }
 
     const nowMs = Date.now();
-    let hasMaybeOrUnanswered = false;
-    let hasGoing = false;
+
+    // ---- Playdate badge: count invites still awaiting MY reply ----
     let unrepliedCount = 0;
+
+    // ---- Playdate halo: reflect the SOONEST upcoming playdate's status ----
+    // (confirmed = teal/green, pending = amber, none = no halo).
+    // Gather all my upcoming playdates (hosting OR invited and not declined),
+    // pick the soonest, and use its lifecycle status.
+    const upcoming = []; // { date, status }
 
     const { data: myInv } = await supabase
       .from("playdate_invites")
-      .select("rsvp, playdates(proposed_date, organizer_household_id)")
+      .select("rsvp, playdates(proposed_date, organizer_household_id, status)")
       .eq("household_id", myHh.household_id);
 
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue;
+      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
       if (new Date(pd.proposed_date).getTime() < nowMs) continue;
-      if (inv.rsvp === "invited") { hasMaybeOrUnanswered = true; unrepliedCount++; }
-      else if (inv.rsvp === "maybe") { hasMaybeOrUnanswered = true; }
-      else if (inv.rsvp === "yes") { hasGoing = true; }
+      if (inv.rsvp === "invited") unrepliedCount++;
+      if (inv.rsvp === "no") continue; // declined → not "my" upcoming playdate
+      upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
     const { data: hosting } = await supabase
       .from("playdates")
-      .select("id, proposed_date")
+      .select("proposed_date, status")
       .eq("organizer_household_id", myHh.household_id)
       .gte("proposed_date", new Date(nowMs).toISOString());
 
     for (const pd of (hosting || [])) {
-      const { data: invs } = await supabase
-        .from("playdate_invites")
-        .select("rsvp")
-        .eq("playdate_id", pd.id);
-      const list = invs || [];
-      if (list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited")) hasMaybeOrUnanswered = true;
-      if (list.some((i) => i.rsvp === "yes")) hasGoing = true;
+      upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
     setPlaydateBadge(unrepliedCount);
-    setPlaydateHalo(hasMaybeOrUnanswered ? "amber" : (hasGoing ? "teal" : null));
+
+    // Pick the soonest upcoming playdate that isn't cancelled.
+    const live = upcoming
+      .filter((u) => u.status !== "cancelled")
+      .sort((a, b) => a.date - b.date);
+
+    if (live.length === 0) {
+      setPlaydateHalo(null);
+    } else {
+      const soonest = live[0];
+      setPlaydateHalo(soonest.status === "confirmed" ? "teal" : "amber");
+    }
   };
 
   const handleNavigate = (tabId) => {
@@ -343,9 +331,6 @@ export default function App() {
     );
   }
 
-  // Logged-OUT user who ARRIVED via an invite link this visit: show the landing
-  // page first, until they tap "Join" (which falls through to Auth). A stale
-  // localStorage token alone does NOT trigger this — only a real URL arrival.
   if (!session && arrivedViaInvite && inviteToken && !dismissedInviteLanding) {
     return (
       <InviteLanding
@@ -372,8 +357,8 @@ export default function App() {
   }
 
   let screen;
-if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
+  if (activeTab === "home") {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   } else if (activeTab === "search") {
     screen = <Search session={session} />;
   } else if (activeTab === "network") {
@@ -382,8 +367,8 @@ if (activeTab === "home") {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
-} else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
+  } else {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   }
 
   return (
