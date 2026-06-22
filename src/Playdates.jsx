@@ -284,7 +284,6 @@ export default function Playdates({ session, onChanged }) {
     setPickLoading(false);
   };
 
-  // Toggle a person in the multi-select. Free users are hard-capped at 1.
   const togglePerson = (p) => {
     setPremiumPrompt(false);
     setSelectedIds((prev) => {
@@ -299,7 +298,6 @@ export default function Playdates({ session, onChanged }) {
     });
   };
 
-  // Continue → hand the selected people to PlaydateRequest as a recipients array.
   const continueWithSelected = () => {
     const chosen = pickPeople.filter((p) => selectedIds.includes(p.id));
     if (chosen.length === 0) return;
@@ -486,25 +484,29 @@ export default function Playdates({ session, onChanged }) {
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
-  const hostBadge = (roster, dim) => {
-    if (dim) return { text: "Hosted", bg: "#1A3A5C", color: "#8AAEC8" };
-    if (!roster || roster.length === 0) return { text: "No guests yet", bg: "#1A3A5C", color: "#8AAEC8" };
-    const going = roster.filter((r) => r.rsvp === "yes").length;
-    if (going > 0) return { text: `${going} going`, bg: "#0F3D2E", color: "#02C39A" };
-    const anyOpen = roster.some((r) => r.rsvp === "invited" || r.rsvp === "maybe");
-    if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
-    return { text: "Declined", bg: "#3D1515", color: "#F87171" };
+  // Status badge driven by the lifecycle engine's pd.status.
+  const statusBadge = (status) => {
+    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
+    if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
+    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" }; // pending (or anything else)
   };
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
+  const isCancelled = (it) => it.playdate.status === "cancelled";
+
+  // Cancelled (engine) OR declined (this household said no) → grayed bottom sections.
+  const cancelled = items
+    .filter((it) => isCancelled(it) && !isDeclined(it))
+    .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
   const declined = items
     .filter((it) => isDeclined(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  const active = items.filter((it) => !isDeclined(it));
+  // Active = not declined and not cancelled.
+  const active = items.filter((it) => !isDeclined(it) && !isCancelled(it));
 
   const needsAttention = active
     .filter((it) => !isPast(it) && it.kind === "invited" && it.invite.rsvp === "invited")
@@ -655,13 +657,14 @@ export default function Playdates({ session, onChanged }) {
     );
   }
 
-  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0 && declined.length === 0;
+  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0 && declined.length === 0 && cancelled.length === 0;
 
   const renderCard = (it, dim) => {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
       const showCal = !dim && it.invite.rsvp === "yes";
+      const sb = statusBadge(pd.status);
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
@@ -669,7 +672,7 @@ export default function Playdates({ session, onChanged }) {
             {!dim && needsReply ? (
               <span style={{ fontSize: "0.65rem", background: "#3D1F0A", color: "#F59E0B", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap", border: "1px solid #854F0B" }}>Needs reply</span>
             ) : (
-              <span style={{ fontSize: "0.7rem", color: rsvpColor(it.invite.rsvp), fontWeight: "600", whiteSpace: "nowrap" }}>{rsvpLabel(it.invite.rsvp)}</span>
+              <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>{sb.text}</span>
             )}
           </div>
           <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}</p>
@@ -710,8 +713,8 @@ export default function Playdates({ session, onChanged }) {
       );
     }
 
-    const badge = hostBadge(it.roster, dim);
-    const showCal = !dim && it.goingCount > 0;
+    const sb = statusBadge(pd.status);
+    const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -719,8 +722,8 @@ export default function Playdates({ session, onChanged }) {
             <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
-          <span style={{ fontSize: "0.65rem", background: badge.bg, color: badge.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-            {badge.text}
+          <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
+            {sb.text}
           </span>
         </div>
 
@@ -814,9 +817,16 @@ export default function Playdates({ session, onChanged }) {
           </>
         )}
 
+        {cancelled.length > 0 && (
+          <>
+            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>CANCELLED</p>
+            {cancelled.map((it) => renderCard(it, true))}
+          </>
+        )}
+
         {declined.length > 0 && (
           <>
-            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>DECLINED</p>
+            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length + cancelled.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>DECLINED</p>
             {declined.map((it) => renderCard(it, true))}
           </>
         )}
