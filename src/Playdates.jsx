@@ -277,10 +277,24 @@ export default function Playdates({ session, onChanged }) {
   const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
-      await supabase
+  await supabase
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
+
+      // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
+      try {
+        const { data: invRow } = await supabase
+          .from("playdate_invites")
+          .select("playdate_id")
+          .eq("id", inviteId)
+          .single();
+        if (invRow?.playdate_id) {
+          await recomputePlaydateStatus(invRow.playdate_id);
+        }
+      } catch (statusErr) {
+        // Best-effort — don't block the RSVP if recompute fails.
+      }
 
       try {
         const { data: inv } = await supabase
