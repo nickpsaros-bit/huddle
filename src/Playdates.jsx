@@ -167,7 +167,7 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .select("*")
         .eq("playdate_id", pd.id);
-      // Hide the host's own row from the displayed roster (they're the host, shown separately).
+      // Hide the host's own row from the displayed roster (shown separately as host).
       const guestInvites = (invites || []).filter((inv) => inv.household_id !== hhId);
       const roster = [];
       for (const inv of guestInvites) {
@@ -291,9 +291,7 @@ export default function Playdates({ session, onChanged }) {
       if (prev.includes(p.id)) {
         return prev.filter((id) => id !== p.id);
       }
-      // Adding a new one:
       if (myPlan !== "premium" && prev.length >= 1) {
-        // Hard cap for free users — show the premium prompt, don't add.
         setPremiumPrompt(true);
         return prev;
       }
@@ -319,16 +317,14 @@ export default function Playdates({ session, onChanged }) {
         .eq("id", inviteId);
 
       // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
-      let playdateIdForStatus = null;
       try {
         const { data: invRow } = await supabase
           .from("playdate_invites")
           .select("playdate_id")
           .eq("id", inviteId)
           .single();
-        playdateIdForStatus = invRow?.playdate_id || null;
-        if (playdateIdForStatus) {
-          await recomputePlaydateStatus(playdateIdForStatus);
+        if (invRow?.playdate_id) {
+          await recomputePlaydateStatus(invRow.playdate_id);
         }
       } catch (statusErr) {
         // Best-effort — don't block the RSVP if recompute fails.
@@ -565,7 +561,7 @@ export default function Playdates({ session, onChanged }) {
     );
     const count = selectedIds.length;
     return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: count > 0 ? "120px" : "80px" }}>
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
           <button onClick={() => setPicking(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Who's it with?</h1>
@@ -582,13 +578,20 @@ export default function Playdates({ session, onChanged }) {
           />
 
           {myPlan === "premium" ? (
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem" }}>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
               Select one or more families to invite to the same playdate.
             </p>
           ) : (
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem" }}>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
               Pick a family to invite. ✨ Inviting multiple families is a premium feature.
             </p>
+          )}
+
+          {count > 0 && (
+            <button onClick={continueWithSelected}
+              style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.25rem" }}>
+              Continue with {count} {count === 1 ? "family" : "families"} →
+            </button>
           )}
 
           {premiumPrompt && (
@@ -640,17 +643,6 @@ export default function Playdates({ session, onChanged }) {
             })
           )}
         </div>
-
-        {count > 0 && (
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#162D50", borderTop: "1px solid #2A4A6B", padding: "1rem 1.5rem", paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}>
-            <div style={{ maxWidth: "600px", margin: "0 auto" }}>
-              <button onClick={continueWithSelected}
-                style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer" }}>
-                Continue with {count} {count === 1 ? "family" : "families"} →
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
