@@ -257,7 +257,8 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-      // One invite row per recipient.
+   // One invite row per recipient, PLUS the host's own row (rsvp='yes')
+      // so "who's going" is one clean count and the host counts toward confirmation.
       const inviteRows = targets.map((t) => ({
         playdate_id: playdate.id,
         household_id: t.householdId,
@@ -265,6 +266,13 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
         invited_parent_id: t.parentId,
         rsvp: "invited",
       }));
+      inviteRows.push({
+        playdate_id: playdate.id,
+        household_id: myHm.household_id,
+        invited_by_household_id: myHm.household_id,
+        invited_parent_id: session.user.id,
+        rsvp: "yes",
+      });
       const { error: invErr } = await supabase.from("playdate_invites").insert(inviteRows);
       if (invErr) throw invErr;
 
