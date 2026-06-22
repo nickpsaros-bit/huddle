@@ -36,6 +36,8 @@ export default function Playdates({ session, onChanged }) {
     if (names.length === 0) return "A family";
     return names.map(shortName).join(" & ");
   };
+ 
+  
 
   const householdInitial = async (hhId) => {
     const { data } = await supabase
@@ -46,6 +48,30 @@ export default function Playdates({ session, onChanged }) {
     const nm = data?.[0]?.parents?.name;
     return nm ? nm.charAt(0).toUpperCase() : "?";
   };
+
+  // Recompute a playdate's status from its invites and persist it.
+  // Rule: Confirmed = >=2 firm "yes". Pending = >=1 yes and >=2 parties still
+  // in play (could still reach 2 yes). Cancelled = can't reach 2.
+  const recomputePlaydateStatus = async (playdateId) => {
+    const { data: invites } = await supabase
+      .from("playdate_invites")
+      .select("rsvp")
+      .eq("playdate_id", playdateId);
+
+    const rows = invites || [];
+    const yesCount = rows.filter((r) => r.rsvp === "yes").length;
+    const aliveCount = rows.filter((r) => ["yes", "maybe", "invited"].includes(r.rsvp)).length;
+
+    let status;
+    if (yesCount >= 2) status = "confirmed";
+    else if (yesCount >= 1 && aliveCount >= 2) status = "pending";
+    else status = "cancelled";
+
+    await supabase.from("playdates").update({ status }).eq("id", playdateId);
+    return status;
+  };
+
+
 
   const fmtDate = (iso) => {
     if (!iso) return "";
