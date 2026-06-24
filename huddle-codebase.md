@@ -1,6 +1,6 @@
 # Huddle Codebase Snapshot
 
-Updated: June 18, 2026
+Updated: June 22, 2026
 
 
 ---
@@ -59,11 +59,6 @@ export default function App() {
   const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
   const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
 
-  // On first load: capture an invite token from either the path (/invite/{token})
-  // or the query string (?invite=TOKEN, which is how it returns after auth redirect).
-  // IMPORTANT: only treat this as an "invite arrival" (show the landing page) when
-  // the token came from the URL THIS visit. A leftover token in localStorage is
-  // kept only as a same-device consume fallback — it must NOT hijack the homepage.
   useEffect(() => {
     const path = window.location.pathname || "";
     const params = new URLSearchParams(window.location.search);
@@ -75,20 +70,16 @@ export default function App() {
     else if (pathMatch && pathMatch[1]) token = pathMatch[1];
 
     if (token) {
-      // Real invite arrival via URL — stash it and show the landing page.
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
       setArrivedViaInvite(true);
       window.history.replaceState({}, "", "/");
     } else {
-      // No URL token. Keep any stored token ONLY for post-login consume —
-      // do NOT set arrivedViaInvite, so the landing page never shows here.
       const stored = localStorage.getItem(INVITE_KEY);
       if (stored) setInviteToken(stored);
     }
   }, []);
 
-  // Auth session lifecycle + focus refresh.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -131,9 +122,6 @@ export default function App() {
     };
   }, []);
 
-  // Consume a pending invite once the user is logged in AND fully set up.
-  // Runs reliably after render (not mid-render), so the connection forms
-  // whether they just signed up or were already a user opening a link.
   useEffect(() => {
     if (session && hasProfile) {
       consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
@@ -184,15 +172,10 @@ export default function App() {
     setHasProfile(memberships && memberships.length > 0);
   };
 
-  // Consume a pending invite after login by matching the logged-in user's EMAIL
-  // to the invite's invited_email. Email survives every redirect/device/browser,
-  // so this is reliable even when a texted link opens in a different app.
-  // Falls back to the token (localStorage) if present.
   const consumeInvite = async (userId, userEmail) => {
     try {
       let invite = null;
 
-      // Primary: match by the email the invitee entered on the landing page.
       if (userEmail) {
         const { data: byEmail } = await supabase
           .from("invites")
@@ -205,7 +188,6 @@ export default function App() {
         if (byEmail) invite = byEmail;
       }
 
-      // Fallback: token in localStorage (same-device flows).
       if (!invite) {
         const token = localStorage.getItem(INVITE_KEY);
         if (token) {
@@ -218,7 +200,6 @@ export default function App() {
         }
       }
 
-      // Nothing to do, expired, or already consumed.
       if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
         localStorage.removeItem(INVITE_KEY);
         localStorage.removeItem(INVITE_EMAIL_KEY);
@@ -226,7 +207,6 @@ export default function App() {
         return;
       }
 
-      // Don't connect someone to themselves.
       if (invite.inviter_id === userId) {
         localStorage.removeItem(INVITE_KEY);
         localStorage.removeItem(INVITE_EMAIL_KEY);
@@ -234,7 +214,6 @@ export default function App() {
         return;
       }
 
-      // Create the connection if one doesn't already exist (either direction).
       const { data: existing } = await supabase
         .from("connections")
         .select("id")
@@ -247,7 +226,6 @@ export default function App() {
           status: "accepted",
         });
 
-        // Notify the inviter that their invite was accepted.
         try {
           const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
           const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
@@ -261,7 +239,6 @@ export default function App() {
         } catch (e) { /* best-effort */ }
       }
 
-      // Mark the invite consumed.
       await supabase.from("invites")
         .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
         .eq("id", invite.id);
@@ -316,43 +293,54 @@ export default function App() {
     }
 
     const nowMs = Date.now();
-    let hasMaybeOrUnanswered = false;
-    let hasGoing = false;
+
+    // ---- Playdate badge: count invites still awaiting MY reply ----
     let unrepliedCount = 0;
+
+    // ---- Playdate halo: reflect the SOONEST upcoming playdate's status ----
+    // (confirmed = teal/green, pending = amber, none = no halo).
+    // Gather all my upcoming playdates (hosting OR invited and not declined),
+    // pick the soonest, and use its lifecycle status.
+    const upcoming = []; // { date, status }
 
     const { data: myInv } = await supabase
       .from("playdate_invites")
-      .select("rsvp, playdates(proposed_date, organizer_household_id)")
+      .select("rsvp, playdates(proposed_date, organizer_household_id, status)")
       .eq("household_id", myHh.household_id);
 
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue;
+      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
       if (new Date(pd.proposed_date).getTime() < nowMs) continue;
-      if (inv.rsvp === "invited") { hasMaybeOrUnanswered = true; unrepliedCount++; }
-      else if (inv.rsvp === "maybe") { hasMaybeOrUnanswered = true; }
-      else if (inv.rsvp === "yes") { hasGoing = true; }
+      if (inv.rsvp === "invited") unrepliedCount++;
+      if (inv.rsvp === "no") continue; // declined → not "my" upcoming playdate
+      upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
     const { data: hosting } = await supabase
       .from("playdates")
-      .select("id, proposed_date")
+      .select("proposed_date, status")
       .eq("organizer_household_id", myHh.household_id)
       .gte("proposed_date", new Date(nowMs).toISOString());
 
     for (const pd of (hosting || [])) {
-      const { data: invs } = await supabase
-        .from("playdate_invites")
-        .select("rsvp")
-        .eq("playdate_id", pd.id);
-      const list = invs || [];
-      if (list.some((i) => i.rsvp === "maybe" || i.rsvp === "invited")) hasMaybeOrUnanswered = true;
-      if (list.some((i) => i.rsvp === "yes")) hasGoing = true;
+      upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
     setPlaydateBadge(unrepliedCount);
-    setPlaydateHalo(hasMaybeOrUnanswered ? "amber" : (hasGoing ? "teal" : null));
+
+    // Pick the soonest upcoming playdate that isn't cancelled.
+    const live = upcoming
+      .filter((u) => u.status !== "cancelled")
+      .sort((a, b) => a.date - b.date);
+
+    if (live.length === 0) {
+      setPlaydateHalo(null);
+    } else {
+      const soonest = live[0];
+      setPlaydateHalo(soonest.status === "confirmed" ? "teal" : "amber");
+    }
   };
 
   const handleNavigate = (tabId) => {
@@ -370,9 +358,6 @@ export default function App() {
     );
   }
 
-  // Logged-OUT user who ARRIVED via an invite link this visit: show the landing
-  // page first, until they tap "Join" (which falls through to Auth). A stale
-  // localStorage token alone does NOT trigger this — only a real URL arrival.
   if (!session && arrivedViaInvite && inviteToken && !dismissedInviteLanding) {
     return (
       <InviteLanding
@@ -399,8 +384,8 @@ export default function App() {
   }
 
   let screen;
-if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
+  if (activeTab === "home") {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   } else if (activeTab === "search") {
     screen = <Search session={session} />;
   } else if (activeTab === "network") {
@@ -409,8 +394,8 @@ if (activeTab === "home") {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
     screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
-} else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} />;
+  } else {
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   }
 
   return (
@@ -3309,6 +3294,10 @@ export default function Playdates({ session, onChanged }) {
   const [pickLoading, setPickLoading] = useState(false);
   const [pickSearch, setPickSearch] = useState("");
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  // Multi-select + premium gate
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [myPlan, setMyPlan] = useState("free");
+  const [premiumPrompt, setPremiumPrompt] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -3339,14 +3328,35 @@ export default function Playdates({ session, onChanged }) {
     return nm ? nm.charAt(0).toUpperCase() : "?";
   };
 
+  // Recompute a playdate's status from its invites and persist it.
+  // Rule: Confirmed = >=2 firm "yes". Pending = >=1 yes and >=2 parties still
+  // in play (could still reach 2 yes). Cancelled = can't reach 2.
+  const recomputePlaydateStatus = async (playdateId) => {
+    const { data: invites } = await supabase
+      .from("playdate_invites")
+      .select("rsvp")
+      .eq("playdate_id", playdateId);
+
+    const rows = invites || [];
+    const yesCount = rows.filter((r) => r.rsvp === "yes").length;
+    const aliveCount = rows.filter((r) => ["yes", "maybe", "invited"].includes(r.rsvp)).length;
+
+    let status;
+    if (yesCount >= 2) status = "confirmed";
+    else if (yesCount >= 1 && aliveCount >= 2) status = "pending";
+    else status = "cancelled";
+
+    await supabase.from("playdates").update({ status }).eq("id", playdateId);
+    return status;
+  };
+
   const fmtDate = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
-  // Pet line for a playdate (🐕/🐈). guest=true => "The host plans to bring...";
-  // guest=false (hosting view) => "You're bringing...". Returns null if no pet flagged.
+  // Pet line for a playdate (🐕/🐈).
   const petLine = (pd, guest) => {
     const animals = [];
     if (pd.bringing_dog) animals.push("dog");
@@ -3410,6 +3420,18 @@ export default function Playdates({ session, onChanged }) {
     const hhId = hm.household_id;
     setHouseholdId(hhId);
 
+    // Load my plan (for the multi-invite premium gate).
+    try {
+      const { data: hh } = await supabase
+        .from("households")
+        .select("plan")
+        .eq("id", hhId)
+        .maybeSingle();
+      setMyPlan(hh?.plan === "premium" ? "premium" : "free");
+    } catch (e) {
+      setMyPlan("free");
+    }
+
     const all = [];
 
     const { data: hosting } = await supabase
@@ -3422,8 +3444,10 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .select("*")
         .eq("playdate_id", pd.id);
+      // Hide the host's own row from the displayed roster (shown separately as host).
+      const guestInvites = (invites || []).filter((inv) => inv.household_id !== hhId);
       const roster = [];
-      for (const inv of (invites || [])) {
+      for (const inv of guestInvites) {
         roster.push({
           ...inv,
           label: await householdLabel(inv.household_id),
@@ -3447,7 +3471,6 @@ export default function Playdates({ session, onChanged }) {
       const pd = inv.playdates;
       if (!pd) continue;
       if (pd.organizer_household_id === hhId) continue;
-      // Person-facing: who organized it (falls back to household label if no parent).
       let organizerLabel = await householdLabel(pd.organizer_household_id);
       if (pd.organizer_parent_id) {
         const { data: orgParent } = await supabase
@@ -3464,16 +3487,16 @@ export default function Playdates({ session, onChanged }) {
     setLoading(false);
   };
 
-  // Load people you can huddle with: classmates (your classrooms) + connections.
-  // Deduped by parent id, excluding yourself and your own household.
+  // Load people you can huddle with: classmates + connections. Deduped, excludes self/own household.
   const openPicker = async () => {
     setPicking(true);
     setPickSearch("");
+    setSelectedIds([]);
+    setPremiumPrompt(false);
     setPickLoading(true);
     try {
       const userId = session.user.id;
 
-      // My household (to exclude my own household members).
       const { data: myHm } = await supabase
         .from("household_members")
         .select("household_id")
@@ -3481,9 +3504,8 @@ export default function Playdates({ session, onChanged }) {
         .maybeSingle();
       const myHouseholdId = myHm?.household_id;
 
-      const peopleMap = {}; // parent_id -> { id, name, photo_url, source }
+      const peopleMap = {};
 
-      // --- Classmates: other households in my classrooms ---
       if (myHouseholdId) {
         const { data: myMemberships } = await supabase
           .from("classroom_members")
@@ -3510,7 +3532,6 @@ export default function Playdates({ session, onChanged }) {
         }
       }
 
-      // --- Connections (accepted) ---
       const { data: conns } = await supabase
         .from("connections")
         .select(`
@@ -3540,6 +3561,28 @@ export default function Playdates({ session, onChanged }) {
     setPickLoading(false);
   };
 
+  const togglePerson = (p) => {
+    setPremiumPrompt(false);
+    setSelectedIds((prev) => {
+      if (prev.includes(p.id)) {
+        return prev.filter((id) => id !== p.id);
+      }
+      if (myPlan !== "premium" && prev.length >= 1) {
+        setPremiumPrompt(true);
+        return prev;
+      }
+      return [...prev, p.id];
+    });
+  };
+
+  const continueWithSelected = () => {
+    const chosen = pickPeople.filter((p) => selectedIds.includes(p.id));
+    if (chosen.length === 0) return;
+    setRequestingPlaydate(
+      chosen.map((p) => ({ id: p.id, name: p.name, photo_url: p.photo_url }))
+    );
+  };
+
   const respond = async (inviteId, rsvp) => {
     setBusy(true);
     try {
@@ -3547,6 +3590,20 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
+
+      // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
+      try {
+        const { data: invRow } = await supabase
+          .from("playdate_invites")
+          .select("playdate_id")
+          .eq("id", inviteId)
+          .single();
+        if (invRow?.playdate_id) {
+          await recomputePlaydateStatus(invRow.playdate_id);
+        }
+      } catch (statusErr) {
+        // Best-effort — don't block the RSVP if recompute fails.
+      }
 
       try {
         const { data: inv } = await supabase
@@ -3601,7 +3658,21 @@ export default function Playdates({ session, onChanged }) {
                 },
               });
             } catch (emailErr) {
-              // Best-effort — the in-app RSVP still succeeds.
+              // Best-effort.
+            }
+          }
+
+          // Guest declined → email the HOST (they shouldn't have to check the app).
+          if (rsvp === "no" && playdateId) {
+            try {
+              await supabase.functions.invoke("notify-host-decline", {
+                body: {
+                  playdate_id: playdateId,
+                  declining_household_id: respondingHouseholdId,
+                },
+              });
+            } catch (emailErr) {
+              // Best-effort.
             }
           }
         }
@@ -3619,7 +3690,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // The actual cancellation work (called after the user confirms in the modal).
   const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
@@ -3628,7 +3698,7 @@ export default function Playdates({ session, onChanged }) {
           body: { playdate_id: pd.id },
         });
       } catch (calErr) {
-        // Best-effort — don't block the cancellation if the email fails.
+        // Best-effort.
       }
 
       const { data: invites } = await supabase
@@ -3675,7 +3745,6 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
-  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
   const cancelPlaydate = (pd) => {
     setConfirm({
       title: "Cancel this playdate?",
@@ -3692,25 +3761,29 @@ export default function Playdates({ session, onChanged }) {
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
-  const hostBadge = (roster, dim) => {
-    if (dim) return { text: "Hosted", bg: "#1A3A5C", color: "#8AAEC8" };
-    if (!roster || roster.length === 0) return { text: "No guests yet", bg: "#1A3A5C", color: "#8AAEC8" };
-    const going = roster.filter((r) => r.rsvp === "yes").length;
-    if (going > 0) return { text: `${going} going`, bg: "#0F3D2E", color: "#02C39A" };
-    const anyOpen = roster.some((r) => r.rsvp === "invited" || r.rsvp === "maybe");
-    if (anyOpen) return { text: "Pending", bg: "#1A3A5C", color: "#8AAEC8" };
-    return { text: "Declined", bg: "#3D1515", color: "#F87171" };
+  // Status badge driven by the lifecycle engine's pd.status.
+  const statusBadge = (status) => {
+    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
+    if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
+    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" }; // pending (or anything else)
   };
 
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
+  const isCancelled = (it) => it.playdate.status === "cancelled";
+
+  // Cancelled (engine) OR declined (this household said no) → grayed bottom sections.
+  const cancelled = items
+    .filter((it) => isCancelled(it) && !isDeclined(it))
+    .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
   const declined = items
     .filter((it) => isDeclined(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  const active = items.filter((it) => !isDeclined(it));
+  // Active = not declined and not cancelled.
+  const active = items.filter((it) => !isDeclined(it) && !isCancelled(it));
 
   const needsAttention = active
     .filter((it) => !isPast(it) && it.kind === "invited" && it.invite.rsvp === "invited")
@@ -3746,11 +3819,13 @@ export default function Playdates({ session, onChanged }) {
     return (
       <PlaydateRequest
         session={session}
-        recipient={requestingPlaydate}
+        recipients={Array.isArray(requestingPlaydate) ? requestingPlaydate : undefined}
+        recipient={Array.isArray(requestingPlaydate) ? undefined : requestingPlaydate}
         onBack={() => setRequestingPlaydate(null)}
         onSent={() => {
           setRequestingPlaydate(null);
           setPicking(false);
+          setSelectedIds([]);
           fetchData();
           if (typeof onChanged === "function") onChanged();
         }}
@@ -3758,11 +3833,12 @@ export default function Playdates({ session, onChanged }) {
     );
   }
 
-  // ---- PERSON PICKER VIEW (the "+" create-flow) ----
+  // ---- PERSON PICKER VIEW (the "+" create-flow, multi-select) ----
   if (picking) {
     const filtered = pickPeople.filter((p) =>
       (p.name || "").toLowerCase().includes(pickSearch.toLowerCase())
     );
+    const count = selectedIds.length;
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
@@ -3777,8 +3853,34 @@ export default function Playdates({ session, onChanged }) {
             placeholder="Search by name..."
             value={pickSearch}
             onChange={(e) => setPickSearch(e.target.value)}
-            style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1.25rem", boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box" }}
           />
+
+          {myPlan === "premium" ? (
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
+              Select one or more families to invite to the same playdate.
+            </p>
+          ) : (
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
+              Pick a family to invite. ✨ Inviting multiple families is a premium feature.
+            </p>
+          )}
+
+          {count > 0 && (
+            <button onClick={continueWithSelected}
+              style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.25rem" }}>
+              Continue with {count} {count === 1 ? "family" : "families"} →
+            </button>
+          )}
+
+          {premiumPrompt && (
+            <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1.25rem" }}>
+              <p style={{ color: "#F59E0B", fontSize: "0.85rem", margin: "0 0 4px", fontWeight: "600" }}>✨ Invite multiple families with Premium</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                Free playdates are one family at a time. Multi-family invites are coming soon as a premium feature.
+              </p>
+            </div>
+          )}
 
           {pickLoading ? (
             <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
@@ -3795,24 +3897,29 @@ export default function Playdates({ session, onChanged }) {
               </p>
             </div>
           ) : (
-            filtered.map((p) => (
-              <div key={p.id}
-                onClick={() => setRequestingPlaydate({ id: p.id, name: p.name, photo_url: p.photo_url })}
-                style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
-                    {p.photo_url ? (
-                      <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (p.name?.charAt(0) || "?")}
+            filtered.map((p) => {
+              const isSelected = selectedIds.includes(p.id);
+              return (
+                <div key={p.id}
+                  onClick={() => togglePerson(p)}
+                  style={{ background: isSelected ? "#0F3D2E" : "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: `1px solid ${isSelected ? "#02C39A" : "#2A4A6B"}`, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                      {p.photo_url ? (
+                        <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (p.name?.charAt(0) || "?")}
+                    </div>
+                    <div>
+                      <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(p.name)}</p>
+                      <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0 }}>{p.source}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(p.name)}</p>
-                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0 }}>{p.source}</p>
+                  <div style={{ width: "24px", height: "24px", borderRadius: "50%", border: `2px solid ${isSelected ? "#02C39A" : "#2A4A6B"}`, background: isSelected ? "#02C39A" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {isSelected && <span style={{ color: "#0F2044", fontSize: "0.8rem", fontWeight: "700" }}>✓</span>}
                   </div>
                 </div>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem", fontWeight: "600", flexShrink: 0 }}>Select →</span>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -3827,13 +3934,14 @@ export default function Playdates({ session, onChanged }) {
     );
   }
 
-  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0 && declined.length === 0;
+  const nothing = needsAttention.length === 0 && upcoming.length === 0 && past.length === 0 && declined.length === 0 && cancelled.length === 0;
 
   const renderCard = (it, dim) => {
     const pd = it.playdate;
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
       const showCal = !dim && it.invite.rsvp === "yes";
+      const sb = statusBadge(pd.status);
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
@@ -3841,7 +3949,7 @@ export default function Playdates({ session, onChanged }) {
             {!dim && needsReply ? (
               <span style={{ fontSize: "0.65rem", background: "#3D1F0A", color: "#F59E0B", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap", border: "1px solid #854F0B" }}>Needs reply</span>
             ) : (
-              <span style={{ fontSize: "0.7rem", color: rsvpColor(it.invite.rsvp), fontWeight: "600", whiteSpace: "nowrap" }}>{rsvpLabel(it.invite.rsvp)}</span>
+              <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>{sb.text}</span>
             )}
           </div>
           <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}</p>
@@ -3882,8 +3990,8 @@ export default function Playdates({ session, onChanged }) {
       );
     }
 
-    const badge = hostBadge(it.roster, dim);
-    const showCal = !dim && it.goingCount > 0;
+    const sb = statusBadge(pd.status);
+    const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -3891,8 +3999,8 @@ export default function Playdates({ session, onChanged }) {
             <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
-          <span style={{ fontSize: "0.65rem", background: badge.bg, color: badge.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-            {badge.text}
+          <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
+            {sb.text}
           </span>
         </div>
 
@@ -3946,7 +4054,6 @@ export default function Playdates({ session, onChanged }) {
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Create entry point — this page is where you ACT */}
         <button onClick={openPicker}
           style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           ➕ Set up a playdate
@@ -3987,9 +4094,16 @@ export default function Playdates({ session, onChanged }) {
           </>
         )}
 
+        {cancelled.length > 0 && (
+          <>
+            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>CANCELLED</p>
+            {cancelled.map((it) => renderCard(it, true))}
+          </>
+        )}
+
         {declined.length > 0 && (
           <>
-            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>DECLINED</p>
+            <p style={{ ...sectionLabel, marginTop: (needsAttention.length + upcoming.length + past.length + cancelled.length) > 0 ? "1.5rem" : 0, color: "#607080" }}>DECLINED</p>
             {declined.map((it) => renderCard(it, true))}
           </>
         )}
@@ -4009,7 +4123,13 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 
-export default function PlaydateRequest({ session, recipient, onBack, onSent }) {
+export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent }) {
+  // Normalize to a list: supports single `recipient` (Home/Network) or `recipients` array (multi-select picker).
+  const recipientList = (recipients && recipients.length > 0)
+    ? recipients
+    : (recipient ? [recipient] : []);
+  const isMulti = recipientList.length > 1;
+
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [locationName, setLocationName] = useState("");
@@ -4020,11 +4140,13 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   const [coords, setCoords] = useState(null);
   const [sent, setSent] = useState(false);
 
-  // Pets: organizer's own pets, the "bringing" toggles, and recipient's comfort prefs.
+  // Pets: organizer's own pets, the "bringing" toggles, and recipients' aggregated comfort prefs.
   const [myPets, setMyPets] = useState({ has_dog: false, has_cat: false });
   const [bringingDog, setBringingDog] = useState(false);
   const [bringingCat, setBringingCat] = useState(false);
-  const [recipientPrefs, setRecipientPrefs] = useState({ prefer_no_dogs: false, prefer_no_cats: false });
+  // Aggregated across ALL recipients: does ANYONE prefer no dogs / no cats?
+  const [anyPreferNoDogs, setAnyPreferNoDogs] = useState(false);
+  const [anyPreferNoCats, setAnyPreferNoCats] = useState(false);
   const [confirm, setConfirm] = useState(null);
 
   const locations = [
@@ -4034,6 +4156,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     { name: "Our House", address: "My home" },
     { name: "Their House", address: "Their home" },
   ];
+
+  const recipientIdsKey = recipientList.map((r) => r.id).join(",");
 
  useEffect(() => {
     (async () => {
@@ -4053,25 +4177,28 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .maybeSingle();
         if (myPrefs) setMyPets({ has_dog: !!myPrefs.has_dog, has_cat: !!myPrefs.has_cat });
 
-        // Recipient's comfort preferences (for the cross-check at send).
-        const { data: theirHm } = await supabase
-          .from("household_members")
-          .select("household_id")
-          .eq("parent_id", recipient.id)
-          .single();
-        if (theirHm) {
-          const { data: theirPrefs } = await supabase
-            .from("household_preferences")
-            .select("prefer_no_dogs, prefer_no_cats")
-            .eq("household_id", theirHm.household_id)
-            .maybeSingle();
-          if (theirPrefs) setRecipientPrefs({
-            prefer_no_dogs: !!theirPrefs.prefer_no_dogs,
-            prefer_no_cats: !!theirPrefs.prefer_no_cats,
-          });
+        // Recipients' comfort preferences, aggregated (does ANYONE prefer no dogs/cats?).
+        let dogs = false, cats = false;
+        for (const r of recipientList) {
+          const { data: theirHm } = await supabase
+            .from("household_members")
+            .select("household_id")
+            .eq("parent_id", r.id)
+            .single();
+          if (theirHm) {
+            const { data: theirPrefs } = await supabase
+              .from("household_preferences")
+              .select("prefer_no_dogs, prefer_no_cats")
+              .eq("household_id", theirHm.household_id)
+              .maybeSingle();
+            if (theirPrefs?.prefer_no_dogs) dogs = true;
+            if (theirPrefs?.prefer_no_cats) cats = true;
+          }
         }
+        setAnyPreferNoDogs(dogs);
+        setAnyPreferNoCats(cats);
 
-        // Get a classroom this household is in, then that classroom's school_id.
+        // Get a classroom this household is in, then that classroom's school_id (for the gradient).
         const { data: cm } = await supabase
           .from("classroom_members")
           .select("classroom_id")
@@ -4100,7 +4227,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         // No coords -> gradient simply won't show.
       }
     })();
-  }, [session, recipient]);
+  }, [session, recipientIdsKey]);
 
   const computeSunTimes = (dateStr, lat, lng) => {
     if (!dateStr || lat == null || lng == null) return null;
@@ -4190,7 +4317,15 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     return Math.max(0, Math.min(100, ((min - startMin) / (endMin - startMin)) * 100));
   })();
 
+  const shortName = (fullName) => {
+    if (!fullName) return "this family";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+  };
+
   // The actual send (runs directly, or after the user OKs the pet heads-up).
+  // Creates ONE playdate, then ONE invite row per recipient (+ notification each).
   const sendRequest = async () => {
     setLoading(true);
     setError("");
@@ -4204,15 +4339,21 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         .single();
       if (myErr) throw myErr;
 
-      const { data: theirHm, error: theirErr } = await supabase
-        .from("household_members")
-        .select("household_id")
-        .eq("parent_id", recipient.id)
-        .single();
-      if (theirErr) throw theirErr;
+      // Resolve each recipient -> their household, skipping anyone in my own household.
+      const targets = [];
+      for (const r of recipientList) {
+        const { data: theirHm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", r.id)
+          .single();
+        if (theirHm && theirHm.household_id !== myHm.household_id) {
+          targets.push({ parentId: r.id, householdId: theirHm.household_id });
+        }
+      }
 
-      if (theirHm.household_id === myHm.household_id) {
-        setError("That parent is in your own household.");
+      if (targets.length === 0) {
+        setError("No valid families to invite.");
         setLoading(false);
         return;
       }
@@ -4237,17 +4378,26 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
-   const { error: invErr } = await supabase
-        .from("playdate_invites")
-    .insert({
-          playdate_id: playdate.id,
-          household_id: theirHm.household_id,
-          invited_by_household_id: myHm.household_id,
-          invited_parent_id: recipient.id,
-          rsvp: "invited",
-        });
+   // One invite row per recipient, PLUS the host's own row (rsvp='yes')
+      // so "who's going" is one clean count and the host counts toward confirmation.
+      const inviteRows = targets.map((t) => ({
+        playdate_id: playdate.id,
+        household_id: t.householdId,
+        invited_by_household_id: myHm.household_id,
+        invited_parent_id: t.parentId,
+        rsvp: "invited",
+      }));
+      inviteRows.push({
+        playdate_id: playdate.id,
+        household_id: myHm.household_id,
+        invited_by_household_id: myHm.household_id,
+        invited_parent_id: session.user.id,
+        rsvp: "yes",
+      });
+      const { error: invErr } = await supabase.from("playdate_invites").insert(inviteRows);
       if (invErr) throw invErr;
 
+      // Best-effort: notify every invited household.
       try {
         const { data: myMembers } = await supabase
           .from("household_members")
@@ -4263,10 +4413,11 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           .filter(Boolean);
         const inviterLabel = inviterNames.length > 0 ? inviterNames.join(" & ") : "A family";
 
+        const targetHouseholdIds = targets.map((t) => t.householdId);
         const { data: theirMembers } = await supabase
           .from("household_members")
           .select("parent_id")
-          .eq("household_id", theirHm.household_id);
+          .in("household_id", targetHouseholdIds);
 
         const rows = (theirMembers || []).map((m) => ({
           recipient_id: m.parent_id,
@@ -4277,16 +4428,14 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
         if (rows.length > 0) {
           await supabase.from("notifications").insert(rows);
         }
- } catch (notifErr) {
+      } catch (notifErr) {
         // Best-effort — don't block the invite.
       }
 
-      // Show a success state, then return to where they came from.
       setSent(true);
       setTimeout(() => { onSent(); }, 1800);
 
     } catch (err) {
-
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
       }
@@ -4295,7 +4444,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     }
   };
 
-  // Button handler: validate, run the pet cross-check, then send (directly or after confirm).
+  // Button handler: validate, run the aggregated pet cross-check, then send.
   const attemptSend = () => {
     if (!date || !time || !locationName) {
       setError("Please fill in date, time and location");
@@ -4303,18 +4452,19 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     }
     setError("");
 
-    // Cross-check: bringing a pet the recipient would rather not be around?
-    const dogConflict = bringingDog && recipientPrefs.prefer_no_dogs;
-    const catConflict = bringingCat && recipientPrefs.prefer_no_cats;
+    const dogConflict = bringingDog && anyPreferNoDogs;
+    const catConflict = bringingCat && anyPreferNoCats;
 
     if (dogConflict || catConflict) {
       const animals = [];
       if (dogConflict) animals.push("dogs");
       if (catConflict) animals.push("cats");
       const animalLabel = animals.join(" and ");
+      // Generic wording — protects which specific family set the preference.
+      const who = isMulti ? "Some families you invited" : "This family";
       setConfirm({
         title: "A quick heads-up",
-        body: `${shortName(recipient.name)}'s family would rather not be around ${animalLabel}. You can still send the invite — just wanted you to know.`,
+        body: `${who} would rather not be around ${animalLabel}. You can still send — just wanted you to know.`,
         confirmLabel: "Send anyway",
         cancelLabel: "Go back",
         tone: "primary",
@@ -4332,16 +4482,8 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  const shortName = (fullName) => {
-    if (!fullName) return "this family";
-    const parts = fullName.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0];
-    return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
-  };
-
   const isPresetSelected = locations.some((l) => l.name === locationName);
 
-  // Reusable pet toggle pill (matches Profile's style; 44px tap target).
   const petToggle = (active, label, onClick) => (
     <button
       onClick={onClick}
@@ -4357,7 +4499,11 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
     </button>
   );
 
-  // Success confirmation — shown briefly after the invite is sent.
+  // Label for the recipient card / success screen.
+  const recipientHeading = isMulti
+    ? `${recipientList.length} families`
+    : `${shortName(recipientList[0]?.name)}'s family`;
+
   if (sent) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
@@ -4365,7 +4511,9 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>🎉</div>
           <h2 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
-            {shortName(recipient.name)}'s family will get your playdate invite. You'll be notified when they reply.
+            {isMulti
+              ? `${recipientList.length} families will get your playdate invite. You'll be notified when they reply.`
+              : `${shortName(recipientList[0]?.name)}'s family will get your playdate invite. You'll be notified when they reply.`}
           </p>
           <button onClick={() => onSent()}
             style={{ padding: "0.75rem 1.5rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
@@ -4377,6 +4525,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
   }
 
   const showBringPets = myPets.has_dog || myPets.has_cat;
+  const firstRecipient = recipientList[0];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
@@ -4390,16 +4539,24 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
       <div style={{ padding: "1.5rem", maxWidth: "500px", margin: "0 auto" }}>
 
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-            {recipient.photo_url ? (
-              <img src={recipient.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            ) : (
-              recipient.name?.charAt(0) || "?"
-            )}
-          </div>
+          {isMulti ? (
+            <div style={{ display: "flex", marginRight: "4px" }}>
+              {recipientList.slice(0, 3).map((r, i) => (
+                <div key={r.id} style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", border: "2px solid #162D50", marginLeft: i > 0 ? "-12px" : 0 }}>
+                  {r.photo_url ? <img src={r.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (r.name?.charAt(0) || "?")}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+              {firstRecipient?.photo_url ? (
+                <img src={firstRecipient.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (firstRecipient?.name?.charAt(0) || "?")}
+            </div>
+          )}
           <div>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(recipient.name)}'s family</p>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Sending a playdate invite</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{recipientHeading}</p>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{isMulti ? "Sending one playdate invite to everyone" : "Sending a playdate invite"}</p>
           </div>
         </div>
 
@@ -4491,7 +4648,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             style={inputStyle}
           />
           <p style={{ color: "#607080", fontSize: "0.72rem", margin: "-0.5rem 0 0", lineHeight: "1.4" }}>
-            Tip: include the city so the other family can find it easily.
+            Tip: include the city so the other families can find it easily.
           </p>
         </div>
 
@@ -4499,7 +4656,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
           <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.4rem", letterSpacing: "0.05em" }}>BRINGING A PET?</p>
             <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
-              Let the other family know if a furry friend is coming along.
+              Let the other families know if a furry friend is coming along.
             </p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {myPets.has_dog && petToggle(bringingDog, "🐕 Bringing our dog", () => setBringingDog((v) => !v))}
@@ -4530,7 +4687,7 @@ export default function PlaydateRequest({ session, recipient, onBack, onSent }) 
             color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
           }}
         >
-          {loading ? "Sending..." : "Send playdate invite →"}
+          {loading ? "Sending..." : isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →"}
         </button>
 
       </div>

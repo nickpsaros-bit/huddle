@@ -413,6 +413,56 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
+  // Host nudges guests who haven't firmed up (rsvp = maybe or invited) on a pending playdate.
+  // Sends an in-app notification to each un-firmed guest's parents.
+  const nudgeGuests = async (it) => {
+    setBusy(true);
+    try {
+      const pd = it.playdate;
+      // Un-firmed guest households (maybe / invited) from the roster (host already excluded).
+      const targetHouseholdIds = [...new Set(
+        (it.roster || [])
+          .filter((r) => r.rsvp === "maybe" || r.rsvp === "invited")
+          .map((r) => r.household_id)
+      )].filter(Boolean);
+
+      if (targetHouseholdIds.length === 0) {
+        setMessage("Everyone's already replied!");
+        setTimeout(() => setMessage(""), 3000);
+        setBusy(false);
+        return;
+      }
+
+      // Host label for the message.
+      const hostLabel = await householdLabel(pd.organizer_household_id);
+      const whenStr = fmtDate(pd.proposed_date);
+
+      // Parents of each un-firmed guest household.
+      const { data: guestParents } = await supabase
+        .from("household_members")
+        .select("parent_id")
+        .in("household_id", targetHouseholdIds);
+
+      const rows = (guestParents || []).map((m) => ({
+        recipient_id: m.parent_id,
+        type: "playdate_nudge",
+        title: "Can you make this playdate? 🤔",
+        body: `${hostLabel} is hoping you can confirm or decline their playdate for ${whenStr}. Open the Playdates tab to reply.`,
+      }));
+
+      if (rows.length > 0) {
+        await supabase.from("notifications").insert(rows);
+      }
+
+      setMessage("Nudge sent!");
+      if (typeof onChanged === "function") onChanged();
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setBusy(false);
+  };
+
   const doCancelPlaydate = async (pd) => {
     setBusy(true);
     try {
@@ -488,7 +538,7 @@ export default function Playdates({ session, onChanged }) {
   const statusBadge = (status) => {
     if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
     if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
-    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" }; // pending (or anything else)
+    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" };
   };
 
   const now = Date.now();
@@ -496,7 +546,6 @@ export default function Playdates({ session, onChanged }) {
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
   const isCancelled = (it) => it.playdate.status === "cancelled";
 
-  // Cancelled (engine) OR declined (this household said no) → grayed bottom sections.
   const cancelled = items
     .filter((it) => isCancelled(it) && !isDeclined(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
@@ -505,7 +554,6 @@ export default function Playdates({ session, onChanged }) {
     .filter((it) => isDeclined(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  // Active = not declined and not cancelled.
   const active = items.filter((it) => !isDeclined(it) && !isCancelled(it));
 
   const needsAttention = active
@@ -715,6 +763,9 @@ export default function Playdates({ session, onChanged }) {
 
     const sb = statusBadge(pd.status);
     const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
+    // Host nudge: only on pending hosting cards with someone still un-firmed.
+    const unfirmedCount = (it.roster || []).filter((r) => r.rsvp === "maybe" || r.rsvp === "invited").length;
+    const showNudge = !dim && pd.status === "pending" && unfirmedCount > 0;
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -748,6 +799,13 @@ export default function Playdates({ session, onChanged }) {
             </div>
           ))}
         </div>
+
+        {showNudge && (
+          <button onClick={() => nudgeGuests(it)} disabled={busy}
+            style={{ width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #854F0B", background: "transparent", color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+            👋 Nudge {unfirmedCount === 1 ? "the family who hasn't replied" : `the ${unfirmedCount} who haven't replied`}
+          </button>
+        )}
 
         {showCal && (
           <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
