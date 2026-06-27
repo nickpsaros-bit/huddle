@@ -19,6 +19,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
+  const [scopedSchool, setScopedSchool] = useState(null); // { id, name } when adding within a school card; null = full picker
   const [newGrade, setNewGrade] = useState("");
   const [newTeacher, setNewTeacher] = useState("");
   const [newSchoolSearch, setNewSchoolSearch] = useState("");
@@ -244,6 +245,58 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setLoading(false);
   };
 
+  // Load the teachers already at a given school (for the teacher autocomplete).
+  const loadTeachersForSchool = async (schoolId) => {
+    const { data } = await supabase.from("classrooms").select("teacher_name").eq("school_id", schoolId).limit(50);
+    const unique = [...new Set((data || []).map(c => c.teacher_name).filter(Boolean))];
+    setNewTeacherResults(unique);
+  };
+
+  // Open the modal SCOPED to an existing school (from inside that school's card).
+  // School is locked; only grade + teacher are entered. Teachers pre-suggested.
+  const openAddClassroomToSchool = async (school) => {
+    // school: { id, name }
+    setScopedSchool({ id: school.id, name: school.name });
+    setNewGrade("");
+    setNewTeacher("");
+    setNewSchoolSearch(school.name);
+    setNewSelectedSchool(school);
+    setNewSchoolResults([]);
+    setShowNewSchoolDropdown(false);
+    setShowNewTeacherDropdown(false);
+    setMembershipError("");
+    setNewTeacherResults([]);
+    setAddingClassroom(true);
+    await loadTeachersForSchool(school.id);
+  };
+
+  // Open the modal UNSCOPED (full school picker) — "Add a different school".
+  const openAddDifferentSchool = () => {
+    setScopedSchool(null);
+    setNewGrade("");
+    setNewTeacher("");
+    setNewSchoolSearch("");
+    setNewSelectedSchool(null);
+    setNewSchoolResults([]);
+    setNewTeacherResults([]);
+    setShowNewSchoolDropdown(false);
+    setShowNewTeacherDropdown(false);
+    setMembershipError("");
+    setAddingClassroom(true);
+  };
+
+  const closeAddClassroom = () => {
+    setAddingClassroom(false);
+    setScopedSchool(null);
+    setNewGrade("");
+    setNewTeacher("");
+    setNewSchoolSearch("");
+    setNewSelectedSchool(null);
+    setNewTeacherResults([]);
+    setShowNewSchoolDropdown(false);
+    setShowNewTeacherDropdown(false);
+  };
+
   const searchNewSchools = async (query) => {
     setNewSchoolSearch(query);
     setNewSelectedSchool(null);
@@ -259,9 +312,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setNewSelectedSchool(school);
     setNewSchoolSearch(school.name);
     setShowNewSchoolDropdown(false);
-    const { data } = await supabase.from("classrooms").select("teacher_name").eq("school_id", school.id).limit(20);
-    const unique = [...new Set((data || []).map(c => c.teacher_name))];
-    setNewTeacherResults(unique);
+    await loadTeachersForSchool(school.id);
   };
 
   const newTeacherMismatch = newTeacherResults.length > 0 && newTeacher &&
@@ -272,7 +323,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setMembershipError("");
     try {
       let school;
-      if (newSelectedSchool) {
+      if (scopedSchool) {
+        // Locked to the card's school — never create a new school here.
+        school = { id: scopedSchool.id, name: scopedSchool.name };
+      } else if (newSelectedSchool) {
         school = newSelectedSchool;
       } else {
         const code = newSchoolSearch.toUpperCase().replace(/\s+/g, "").slice(0, 10) + Date.now().toString().slice(-4);
@@ -304,9 +358,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       });
       if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
 
-      setAddingClassroom(false);
-      setNewGrade(""); setNewTeacher("");
-      setNewSchoolSearch(""); setNewSelectedSchool(null); setNewTeacherResults([]);
+      closeAddClassroom();
       fetchData();
     } catch (err) { setMembershipError(err.message); }
     setSavingMembership(false);
@@ -358,8 +410,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   const membershipsBySchool = memberships.reduce((acc, m) => {
     const schoolName = m.classrooms?.schools?.name || "Unknown School";
+    const schoolId = m.classrooms?.schools?.id || null;
     const schoolKey = schoolName.toLowerCase().replace(/\s+/g, "-");
-    if (!acc[schoolKey]) acc[schoolKey] = { name: schoolName, classrooms: [] };
+    if (!acc[schoolKey]) acc[schoolKey] = { name: schoolName, id: schoolId, classrooms: [] };
     acc[schoolKey].classrooms.push(m);
     return acc;
   }, {});
@@ -428,44 +481,61 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     </div>
   );
 
-  // Shared add-classroom modal (used in both views).
+  // Shared add-classroom modal (used in both views). When scopedSchool is set,
+  // the school is LOCKED (read-only header, no picker, no school creation);
+  // when null, the full school search/create picker is shown.
   const addClassroomModal = addingClassroom && (
     <div style={overlay}>
       <div style={modalBox}>
-        <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>Add a school or classroom</h2>
+        <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>
+          {scopedSchool ? "Add a classroom" : "Add a school or classroom"}
+        </h2>
+
+        {/* School: read-only header when scoped, full picker when not */}
+        {scopedSchool ? (
+          <div style={{ marginBottom: "1rem" }}>
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School</label>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", borderRadius: "10px", background: "#1A3A5C", border: "1px solid #2A4A6B" }}>
+              <span style={{ fontSize: "1.05rem" }}>🏫</span>
+              <span style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500" }}>{scopedSchool.name}</span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
+            <div style={{ position: "relative", marginBottom: "1rem" }}>
+              <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
+                onChange={(e) => searchNewSchools(e.target.value)}
+                style={{ ...inputStyle, marginBottom: 0 }} />
+              {showNewSchoolDropdown && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
+                  {newSchoolResults.map(school => (
+                    <div key={school.id} onClick={() => selectNewSchool(school)}
+                      style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
+                      🏫 {school.name}
+                    </div>
+                  ))}
+                  <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
+                    style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
+                    + Add "{newSchoolSearch}" as a new school
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {newSelectedSchool && (
+              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
+                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
+              </div>
+            )}
+          </>
+        )}
 
         <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Grade</label>
         <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} style={inputStyle}>
           <option value="">Select grade...</option>
           {grades.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-
-        <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School name</label>
-        <div style={{ position: "relative", marginBottom: "1rem" }}>
-          <input type="text" placeholder="Start typing school name..." value={newSchoolSearch}
-            onChange={(e) => searchNewSchools(e.target.value)}
-            style={{ ...inputStyle, marginBottom: 0 }} />
-          {showNewSchoolDropdown && (
-            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
-              {newSchoolResults.map(school => (
-                <div key={school.id} onClick={() => selectNewSchool(school)}
-                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                  🏫 {school.name}
-                </div>
-              ))}
-              <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
-                style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
-                + Add "{newSchoolSearch}" as a new school
-              </div>
-            </div>
-          )}
-        </div>
-
-        {newSelectedSchool && (
-          <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-            <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
-          </div>
-        )}
 
         <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
         <div style={{ position: "relative", marginBottom: "1rem" }}>
@@ -503,9 +573,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
         {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
         <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setAddingClassroom(false)} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-          <button onClick={saveNewClassroom} disabled={!newGrade || !newSchoolSearch || !newTeacher || savingMembership}
-            style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || !newSchoolSearch || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+          <button onClick={closeAddClassroom} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
+          <button onClick={saveNewClassroom} disabled={!newGrade || (!scopedSchool && !newSchoolSearch) || !newTeacher || savingMembership}
+            style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || (!scopedSchool && !newSchoolSearch) || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
             {savingMembership ? "Saving..." : "Add classroom →"}
           </button>
         </div>
@@ -690,7 +760,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                   </div>
                 );
               })}
-              <div onClick={() => setAddingClassroom(true)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
+              <div onClick={() => openAddClassroomToSchool({ id: school.id, name: school.name })} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", cursor: "pointer", borderTop: "1px dashed #2A4A6B" }}>
                 <div style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1px dashed #2A4A6B", display: "flex", alignItems: "center", justifyContent: "center", color: "#607080", fontSize: "1rem" }}>+</div>
                 <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Add another classroom</p>
               </div>
@@ -705,7 +775,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
               Add your school and classroom to find other families to huddle with.
             </p>
-            <button onClick={() => setAddingClassroom(true)}
+            <button onClick={openAddDifferentSchool}
               style={{ padding: "0.85rem 1.5rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
               ➕ Add a classroom
             </button>
@@ -713,7 +783,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         )}
 
         {memberships.length > 0 && (
-          <button onClick={() => setAddingClassroom(true)}
+          <button onClick={openAddDifferentSchool}
             style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "#162D50", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
             🏫 Add a different school
           </button>
