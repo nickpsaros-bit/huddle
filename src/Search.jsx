@@ -9,6 +9,8 @@ export default function Search({ session }) {
   const [myHouseholdId, setMyHouseholdId] = useState(null);
   const [connections, setConnections] = useState([]);
   const [message, setMessage] = useState("");
+  const [emailResult, setEmailResult] = useState(null); // cross-school match by email
+  const [emailSearched, setEmailSearched] = useState(false);
 
   useEffect(() => {
     fetchMyData();
@@ -47,12 +49,41 @@ export default function Search({ session }) {
     setConnections(conns || []);
   };
 
+  const isEmail = (s) => s.includes("@") && s.includes(".") && !s.endsWith("@");
+
   const search = async (q) => {
     setQuery(q);
+    setEmailResult(null);
+    setEmailSearched(false);
+
     if (q.length < 2) {
       setResults([]);
       return;
     }
+
+    // If the query looks like an email, do a cross-school exact-email lookup instead.
+    if (isEmail(q.trim())) {
+      setResults([]);
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("lookup-user-by-email", {
+          body: { email: q.trim().toLowerCase() },
+        });
+        if (!error && data && data.found && data.hasProfile && data.parent) {
+          // Don't show yourself.
+          if (data.parent.id !== session.user.id) {
+            setEmailResult(data.parent);
+          }
+        }
+      } catch (e) {
+        // Best-effort — no match shown on error.
+      }
+      setEmailSearched(true);
+      setLoading(false);
+      return;
+    }
+
+    // Otherwise: normal school-scoped NAME search (unchanged).
     setLoading(true);
 
     const { data: parents } = await supabase
@@ -139,6 +170,49 @@ export default function Search({ session }) {
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
 
+  // Renders the Connect / Pending / Accept / Connected control for any parent id.
+  const connectionControl = (parentId, sameHousehold) => {
+    if (sameHousehold) {
+      return <span style={{ color: "#8AAEC8", fontSize: "0.8rem", flexShrink: 0 }}>In your household</span>;
+    }
+    const conn = getConnectionStatus(parentId);
+    if (!conn) {
+      return (
+        <button
+          onClick={() => sendRequest(parentId)}
+          style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+          Connect
+        </button>
+      );
+    }
+    if (conn.status === "pending" && conn.isRequester) {
+      return <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>;
+    }
+    if (conn.status === "pending" && !conn.isRequester) {
+      return (
+        <button
+          onClick={() => acceptRequest(parentId)}
+          style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+          Accept
+        </button>
+      );
+    }
+    if (conn.status === "accepted") {
+      return <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>;
+    }
+    return null;
+  };
+
+  const avatar = (photo_url, name, size) => (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size === "48px" ? "1.2rem" : "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+      {photo_url ? (
+        <img src={photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        name ? name.trim().charAt(0) : "?"
+      )}
+    </div>
+  );
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
@@ -146,7 +220,7 @@ export default function Search({ session }) {
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: "0 0 1rem" }}>Find Parents</h1>
         <input
           type="text"
-          placeholder="Search by parent name..."
+          placeholder="Search by name, or enter an email..."
           value={query}
           onChange={(e) => search(e.target.value)}
           style={{
@@ -160,6 +234,9 @@ export default function Search({ session }) {
             boxSizing: "border-box"
           }}
         />
+        <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0.6rem 0 0", lineHeight: "1.4" }}>
+          Search by name for parents at your school — or enter someone's exact email to connect with them at any school.
+        </p>
       </div>
 
       <div style={{ padding: "1rem 1.5rem", maxWidth: "600px", margin: "0 auto"}}>
@@ -174,24 +251,56 @@ export default function Search({ session }) {
           <p style={{ color: "#607080", fontSize: "0.9rem", textAlign: "center", padding: "2rem" }}>Searching...</p>
         )}
 
-        {!loading && query.length >= 2 && results.length === 0 && (
+        {/* EMAIL LOOKUP RESULT (cross-school) */}
+        {!loading && emailResult && (
+          <>
+            <p style={{ color: "#8AAEC8", fontSize: "0.75rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>FOUND BY EMAIL</p>
+            <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #02C39A", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                {avatar(emailResult.photo_url, emailResult.name, "48px")}
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(emailResult.name)}</p>
+                  <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>On Huddle</p>
+                </div>
+              </div>
+              {connectionControl(emailResult.id, myHouseholdId && emailResult.id === session.user.id)}
+            </div>
+          </>
+        )}
+
+        {/* EMAIL SEARCHED, NO MATCH */}
+        {!loading && emailSearched && !emailResult && (
+          <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+            <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>📭</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No one found with that email</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
+              Double-check the spelling, or invite them to Huddle from the Home tab.
+            </p>
+          </div>
+        )}
+
+        {/* NAME SEARCH — NO RESULTS */}
+        {!loading && !emailSearched && query.length >= 2 && results.length === 0 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>🔍</p>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No parents found</p>
-            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Try searching by a different name</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
+              Only parents at your school show up by name. To connect with someone at another school, enter their exact email.
+            </p>
           </div>
         )}
 
+        {/* EMPTY STATE */}
         {!loading && query.length < 2 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>👋</p>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>Find parents at your school</p>
-            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Type a name to search</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>Find parents to connect with</p>
+            <p style={{ color: "#607080", fontSize: "0.85rem" }}>Type a name, or an email address</p>
           </div>
         )}
 
+        {/* NAME SEARCH RESULTS */}
         {results.map((parent) => {
-          const conn = getConnectionStatus(parent.id);
           const sameHousehold = myHouseholdId && parent.householdId === myHouseholdId;
           const classroomLabel = (parent.classrooms || []).map(c =>
             `${c.classrooms?.teacher_name} (${grades[c.classrooms?.grade] || "?"})`
@@ -200,45 +309,13 @@ export default function Search({ session }) {
           return (
             <div key={parent.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent:"center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                  {parent.photo_url ? (
-                    <img src={parent.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    parent.name ? parent.name.charAt(0) : "?"
-                  )}
-                </div>
+                {avatar(parent.photo_url, parent.name, "48px")}
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>{shortName(parent.name)}</p>
                   <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{classroomLabel || "Same school"}</p>
                 </div>
               </div>
-
-              {sameHousehold ? (
-                <span style={{ color: "#8AAEC8", fontSize: "0.8rem", flexShrink: 0 }}>In your household</span>
-              ) : (
-                <>
-                  {!conn && (
-                    <button
-                      onClick={() => sendRequest(parent.id)}
-                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                      Connect
-                    </button>
-                  )}
-                  {conn && conn.status === "pending" && conn.isRequester && (
-                    <span style={{ color: "#607080", fontSize: "0.8rem", flexShrink: 0 }}>Pending...</span>
-                  )}
-                  {conn && conn.status === "pending" && !conn.isRequester && (
-                    <button
-                      onClick={() => acceptRequest(parent.id)}
-                      style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
-                      Accept
-                    </button>
-                  )}
-                  {conn && conn.status === "accepted" && (
-                    <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>
-                  )}
-                </>
-              )}
+              {connectionControl(parent.id, sameHousehold)}
             </div>
           );
         })}
@@ -246,4 +323,3 @@ export default function Search({ session }) {
     </div>
   );
 }
-
