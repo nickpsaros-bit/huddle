@@ -20,6 +20,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
   const [scopedSchool, setScopedSchool] = useState(null); // { id, name } when adding within a school card; null = full picker
+  // Teacher/grade conflict step: when the typed teacher already exists at this
+  // school under different grade(s), we pause to ask "same teacher, or different
+  // person with the same name?" { school, schoolYear, existing: [{id,grade}], typedGrade }
+  const [gradeConflict, setGradeConflict] = useState(null);
   const [newGrade, setNewGrade] = useState("");
   const [newTeacher, setNewTeacher] = useState("");
   const [newSchoolSearch, setNewSchoolSearch] = useState("");
@@ -266,6 +270,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setShowNewTeacherDropdown(false);
     setMembershipError("");
     setNewTeacherResults([]);
+    setGradeConflict(null);
     setAddingClassroom(true);
     await loadTeachersForSchool(school.id);
   };
@@ -288,6 +293,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const closeAddClassroom = () => {
     setAddingClassroom(false);
     setScopedSchool(null);
+    setGradeConflict(null);
     setNewGrade("");
     setNewTeacher("");
     setNewSchoolSearch("");
@@ -369,6 +375,34 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   // True only when the typed name matches nothing at all (brand-new teacher).
   const isBrandNewTeacher = newTeacher.trim().length > 0 && !exactTeacherMatch && !nearTeacherMatch;
 
+  // Does the actual classroom find-or-create + membership insert, given a
+  // resolved school + the exact classroom id to join (or null to create at
+  // gradeIdx). Used by both the normal save and the conflict-resolution buttons.
+  const commitClassroom = async (school, schoolYear, joinClassroomId, gradeIdx, teacherName) => {
+    let classroom = null;
+    if (joinClassroomId) {
+      classroom = { id: joinClassroomId };
+    } else {
+      const cleanTeacher = teacherName.trim().replace(/\s+/g, " ");
+      const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
+        .insert({ school_id: school.id, teacher_name: cleanTeacher, grade: gradeIdx, school_year: schoolYear })
+        .select().single();
+      if (classroomErr) throw classroomErr;
+      classroom = newClassroom;
+    }
+
+    const { error: memberErr } = await supabase.from("classroom_members").insert({
+      household_id: householdId,
+      classroom_id: classroom.id,
+      school_year: schoolYear,
+    });
+    if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
+
+    setGradeConflict(null);
+    closeAddClassroom();
+    fetchData();
+  };
+
   const saveNewClassroom = async () => {
     setSavingMembership(true);
     setMembershipError("");
@@ -389,39 +423,49 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
       const currentYear = new Date().getFullYear();
       const schoolYear = `${currentYear}-${currentYear + 1}`;
+      const gradeIdx = grades.indexOf(newGrade);
 
-      // Duplicate-safe teacher resolution: fetch this school+year's classrooms and
-      // match the typed teacher case-insensitively (trim + collapse spaces). If one
-      // exists under ANY casing/spacing, reuse it (and its canonical name) rather
-      // than creating a near-duplicate classroom that would split the network.
+      // Fetch this school+year's classrooms and find any under the SAME teacher
+      // (case-insensitive trim). A classroom is keyed by teacher AND grade, so:
+      //  - exact teacher+grade match → join it silently (true duplicate).
+      //  - teacher matches but grade differs → PAUSE and ask: same teacher in a
+      //    new grade, or a different person with the same name? (We can't know.)
       const typedNorm = newTeacher.trim().replace(/\s+/g, " ").toLowerCase();
       const { data: schoolClassrooms } = await supabase.from("classrooms")
         .select("id, teacher_name, grade, school_year")
         .eq("school_id", school.id)
         .eq("school_year", schoolYear);
 
-      let classroom = (schoolClassrooms || []).find(
+      const sameTeacher = (schoolClassrooms || []).filter(
         (c) => (c.teacher_name || "").trim().replace(/\s+/g, " ").toLowerCase() === typedNorm
-      ) || null;
+      );
 
-      if (!classroom) {
-        const cleanTeacher = newTeacher.trim().replace(/\s+/g, " ");
-        const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
-          .insert({ school_id: school.id, teacher_name: cleanTeacher, grade: grades.indexOf(newGrade), school_year: schoolYear })
-          .select().single();
-        if (classroomErr) throw classroomErr;
-        classroom = newClassroom;
+      const exact = sameTeacher.find((c) => c.grade === gradeIdx);
+      if (exact) {
+        // Exact teacher + grade already exists → join silently.
+        await commitClassroom(school, schoolYear, exact.id, gradeIdx, newTeacher);
+        setSavingMembership(false);
+        return;
       }
 
-      const { error: memberErr } = await supabase.from("classroom_members").insert({
-        household_id: householdId,
-        classroom_id: classroom.id,
-        school_year: schoolYear,
-      });
-      if (memberErr && !memberErr.message.includes("duplicate")) throw memberErr;
+      if (sameTeacher.length > 0) {
+        // Teacher exists here but under different grade(s) → ask the user.
+        setGradeConflict({
+          school,
+          schoolYear,
+          gradeIdx,
+          teacherName: newTeacher.trim().replace(/\s+/g, " "),
+          existing: sameTeacher
+            .slice()
+            .sort((a, b) => a.grade - b.grade)
+            .map((c) => ({ id: c.id, grade: c.grade })),
+        });
+        setSavingMembership(false);
+        return;
+      }
 
-      closeAddClassroom();
-      fetchData();
+      // No teacher match at all → create fresh.
+      await commitClassroom(school, schoolYear, null, gradeIdx, newTeacher);
     } catch (err) { setMembershipError(err.message); }
     setSavingMembership(false);
   };
@@ -549,6 +593,60 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const addClassroomModal = addingClassroom && (
     <div style={overlay}>
       <div style={modalBox}>
+        {gradeConflict ? (
+          <>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.75rem" }}>
+              {gradeConflict.teacherName} already teaches here
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
+              A teacher named “{gradeConflict.teacherName}” is already set up at {gradeConflict.school.name} for{" "}
+              {gradeConflict.existing.map((e, i) => (
+                <span key={e.id}>
+                  <strong style={{ color: "#FFFFFF" }}>{getGradeLabel(e.grade)}</strong>
+                  {i < gradeConflict.existing.length - 1 ? (i === gradeConflict.existing.length - 2 ? " and " : ", ") : ""}
+                </span>
+              ))}
+              . You're adding <strong style={{ color: "#FFFFFF" }}>{getGradeLabel(gradeConflict.gradeIdx)}</strong>.
+            </p>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+              Is this the same teacher in a different grade, or a different teacher who happens to have the same name?
+            </p>
+
+            {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
+
+            {/* Join one of the existing grades for this teacher */}
+            {gradeConflict.existing.map((e) => (
+              <button key={e.id} disabled={savingMembership}
+                onClick={async () => {
+                  setSavingMembership(true); setMembershipError("");
+                  try { await commitClassroom(gradeConflict.school, gradeConflict.schoolYear, e.id, e.grade, gradeConflict.teacherName); }
+                  catch (err) { setMembershipError(err.message); }
+                  setSavingMembership(false);
+                }}
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.6rem", minHeight: "44px" }}>
+                Join {getGradeLabel(e.grade)} — same teacher, existing class
+              </button>
+            ))}
+
+            {/* Add the new grade anyway (multi-grade teacher OR different person, same name) */}
+            <button disabled={savingMembership}
+              onClick={async () => {
+                setSavingMembership(true); setMembershipError("");
+                try { await commitClassroom(gradeConflict.school, gradeConflict.schoolYear, null, gradeConflict.gradeIdx, gradeConflict.teacherName); }
+                catch (err) { setMembershipError(err.message); }
+                setSavingMembership(false);
+              }}
+              style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.6rem", minHeight: "44px" }}>
+              Add {getGradeLabel(gradeConflict.gradeIdx)} anyway
+            </button>
+
+            <button onClick={() => setGradeConflict(null)} disabled={savingMembership}
+              style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "none", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", minHeight: "44px" }}>
+              ← Back
+            </button>
+          </>
+        ) : (
+        <>
         <h2 style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 1.5rem" }}>
           {scopedSchool ? "Add a classroom" : "Add a school or classroom"}
         </h2>
@@ -648,6 +746,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             {savingMembership ? "Saving..." : "Add classroom →"}
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
