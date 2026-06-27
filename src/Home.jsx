@@ -315,8 +315,59 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     await loadTeachersForSchool(school.id);
   };
 
-  const newTeacherMismatch = newTeacherResults.length > 0 && newTeacher &&
-    !newTeacherResults.find(t => t.toLowerCase() === newTeacher.toLowerCase());
+  // Normalize a teacher name for matching only (trim, collapse spaces, lowercase).
+  // Display always uses the original casing.
+  const normTeacher = (s) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  // Tiny edit-distance (Levenshtein) for near-match detection.
+  const editDistance = (a, b) => {
+    a = a || ""; b = b || "";
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      }
+    }
+    return dp[m][n];
+  };
+
+  // Is the typed name an EXACT (normalized) match to an existing teacher? Returns
+  // the canonical existing name (original casing) if so, else null.
+  const exactTeacherMatch = (() => {
+    const typed = normTeacher(newTeacher);
+    if (!typed) return null;
+    return newTeacherResults.find((t) => normTeacher(t) === typed) || null;
+  })();
+
+  // The closest existing teacher that is NOT an exact match but is "near" — a
+  // likely typo or title variant (one contains the other, or small edit distance).
+  const nearTeacherMatch = (() => {
+    const typed = normTeacher(newTeacher);
+    if (!typed || exactTeacherMatch) return null;
+    let best = null;
+    let bestScore = Infinity;
+    for (const t of newTeacherResults) {
+      const cand = normTeacher(t);
+      if (!cand) continue;
+      const contains = cand.includes(typed) || typed.includes(cand);
+      const dist = editDistance(typed, cand);
+      // Treat as near if one contains the other, or the edit distance is small
+      // relative to length (catches "hopkin" vs "hopkins", "mrs hopkins" vs "hopkins").
+      const threshold = Math.max(2, Math.floor(Math.min(typed.length, cand.length) * 0.34));
+      if (contains || dist <= threshold) {
+        if (dist < bestScore) { bestScore = dist; best = t; }
+      }
+    }
+    return best;
+  })();
+
+  // True only when the typed name matches nothing at all (brand-new teacher).
+  const isBrandNewTeacher = newTeacher.trim().length > 0 && !exactTeacherMatch && !nearTeacherMatch;
 
   const saveNewClassroom = async () => {
     setSavingMembership(true);
@@ -338,14 +389,25 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
       const currentYear = new Date().getFullYear();
       const schoolYear = `${currentYear}-${currentYear + 1}`;
-      let classroom;
-      const { data: existingClassroom } = await supabase.from("classrooms").select()
-        .eq("school_id", school.id).eq("teacher_name", newTeacher).eq("school_year", schoolYear).maybeSingle();
-      if (existingClassroom) {
-        classroom = existingClassroom;
-      } else {
+
+      // Duplicate-safe teacher resolution: fetch this school+year's classrooms and
+      // match the typed teacher case-insensitively (trim + collapse spaces). If one
+      // exists under ANY casing/spacing, reuse it (and its canonical name) rather
+      // than creating a near-duplicate classroom that would split the network.
+      const typedNorm = newTeacher.trim().replace(/\s+/g, " ").toLowerCase();
+      const { data: schoolClassrooms } = await supabase.from("classrooms")
+        .select("id, teacher_name, grade, school_year")
+        .eq("school_id", school.id)
+        .eq("school_year", schoolYear);
+
+      let classroom = (schoolClassrooms || []).find(
+        (c) => (c.teacher_name || "").trim().replace(/\s+/g, " ").toLowerCase() === typedNorm
+      ) || null;
+
+      if (!classroom) {
+        const cleanTeacher = newTeacher.trim().replace(/\s+/g, " ");
         const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
-          .insert({ school_id: school.id, teacher_name: newTeacher, grade: grades.indexOf(newGrade), school_year: schoolYear })
+          .insert({ school_id: school.id, teacher_name: cleanTeacher, grade: grades.indexOf(newGrade), school_year: schoolYear })
           .select().single();
         if (classroomErr) throw classroomErr;
         classroom = newClassroom;
@@ -538,37 +600,44 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         </select>
 
         <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Teacher's name</label>
-        <div style={{ position: "relative", marginBottom: "1rem" }}>
+        <div style={{ position: "relative", marginBottom: "0.5rem" }}>
           <input type="text"
             placeholder={newTeacherResults.length > 0 ? "Select or type teacher name..." : "Mrs. Johnson"}
             value={newTeacher}
             onChange={(e) => { setNewTeacher(e.target.value); setShowNewTeacherDropdown(e.target.value.length > 0); }}
             onFocus={() => { if (newTeacherResults.length > 0) setShowNewTeacherDropdown(true); }}
-            style={{ ...inputStyle, marginBottom: 0, borderColor: newTeacherMismatch ? "#854F0B" : "#2A4A6B" }} />
-          {showNewTeacherDropdown && newTeacherResults.length > 0 && (
+            style={{ ...inputStyle, marginBottom: 0, borderColor: "#2A4A6B" }} />
+          {showNewTeacherDropdown && newTeacherResults.filter(t => normTeacher(t).includes(normTeacher(newTeacher))).length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10, maxHeight: "200px", overflowY: "auto" }}>
-              {newTeacherResults.filter(t => t.toLowerCase().includes(newTeacher.toLowerCase())).map(teacher => (
+              {newTeacherResults.filter(t => normTeacher(t).includes(normTeacher(newTeacher))).map(teacher => (
                 <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
                   style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
                   📚 {teacher}
                 </div>
               ))}
-              {newTeacherMismatch && (
-                <div onClick={() => setShowNewTeacherDropdown(false)}
-                  style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem", borderTop: "1px solid #2A4A6B" }}>
-                  + Add "{newTeacher}" as a new teacher
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        {newTeacherMismatch && (
-          <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
-            <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
-              ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
+        {/* Near-match: offer the close existing teacher as a tap-to-use chip,
+            while still allowing the typed name to be added as new. */}
+        {nearTeacherMatch && (
+          <div style={{ background: "#13314F", border: "1px solid #2A4A6B", borderRadius: "8px", padding: "0.6rem 0.75rem", marginBottom: "1rem" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.5rem", lineHeight: "1.4" }}>
+              Did you mean an existing teacher? Pick one to join the same class, or keep your spelling to add a new teacher.
             </p>
+            <button onClick={() => { setNewTeacher(nearTeacherMatch); setShowNewTeacherDropdown(false); }}
+              style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A", borderRadius: "8px", padding: "0.4rem 0.8rem", fontSize: "0.82rem", fontWeight: "600", cursor: "pointer", minHeight: "40px" }}>
+              📚 Use "{nearTeacherMatch}"
+            </button>
           </div>
+        )}
+
+        {/* Brand-new teacher (matches nothing): neutral confirmation, not a warning. */}
+        {isBrandNewTeacher && (
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
+            New teacher — “{newTeacher.trim()}” will be added{scopedSchool ? ` to ${scopedSchool.name}` : ""}.
+          </p>
         )}
 
         {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
