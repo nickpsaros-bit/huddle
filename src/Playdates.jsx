@@ -206,6 +206,40 @@ export default function Playdates({ session, onChanged }) {
       all.push({ kind: "invited", playdate: pd, invite: inv, organizerLabel });
     }
 
+    // ---- SELF-HEAL: settle expired-but-unconfirmed playdates ----
+    // A playdate whose date has passed while still "pending" was never
+    // confirmed and never actively cancelled — it simply lapsed. Persist it
+    // as "cancelled" so the data doesn't accumulate stale "pending" rows that
+    // render as zombie cards. Display still distinguishes these as "Expired"
+    // via effectiveStatus() below. De-duplicate playdate IDs first (a playdate
+    // can appear as both a hosting row and an invited row in `all`).
+    const nowMs = Date.now();
+    const toSettle = [];
+    const seenSettle = new Set();
+    for (const it of all) {
+      const pd = it.playdate;
+      if (!pd || seenSettle.has(pd.id)) continue;
+      seenSettle.add(pd.id);
+      const past = new Date(pd.proposed_date).getTime() < nowMs;
+      if (past && pd.status !== "confirmed" && pd.status !== "cancelled") {
+        toSettle.push(pd.id);
+      }
+    }
+    if (toSettle.length > 0) {
+      try {
+        await supabase.from("playdates").update({ status: "cancelled" }).in("id", toSettle);
+        // Reflect locally so this render is already correct.
+        const settleSet = new Set(toSettle);
+        for (const it of all) {
+          if (it.playdate && settleSet.has(it.playdate.id)) {
+            it.playdate = { ...it.playdate, status: "cancelled" };
+          }
+        }
+      } catch (settleErr) {
+        // Best-effort — display layer (effectiveStatus) still handles it.
+      }
+    }
+
     setItems(all);
     setLoading(false);
   };
@@ -534,17 +568,31 @@ export default function Playdates({ session, onChanged }) {
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
-  // Status badge driven by the lifecycle engine's pd.status.
-  const statusBadge = (status) => {
-    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
-    if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
-    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" };
-  };
-
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
   const isCancelled = (it) => it.playdate.status === "cancelled";
+
+  // Effective lifecycle status for display. A playdate whose date has passed
+  // while never reaching "confirmed" is "expired" — it lapsed, nobody actively
+  // cancelled it. This keeps the badge truthful even before the self-heal write
+  // in fetchData lands (or if it failed). Note: the self-heal persists these as
+  // "cancelled" in the DB, so isCancelled() routes them into the CANCELLED
+  // section; effectiveStatus only governs the BADGE text/color shown on the card.
+  const effectiveStatus = (it) => {
+    const pd = it.playdate;
+    if (pd.status === "confirmed") return "confirmed";
+    if (isPast(it) && pd.status !== "confirmed") return "expired";
+    return pd.status; // "pending" | "cancelled"
+  };
+
+  // Status badge driven by the lifecycle engine's status.
+  const statusBadge = (status) => {
+    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
+    if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
+    if (status === "expired") return { text: "Expired", bg: "#13233F", color: "#8AAEC8" };
+    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" };
+  };
 
   const cancelled = items
     .filter((it) => isCancelled(it) && !isDeclined(it))
@@ -712,7 +760,7 @@ export default function Playdates({ session, onChanged }) {
     if (it.kind === "invited") {
       const needsReply = it.invite.rsvp === "invited";
       const showCal = !dim && it.invite.rsvp === "yes";
-      const sb = statusBadge(pd.status);
+      const sb = statusBadge(effectiveStatus(it));
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
@@ -761,7 +809,7 @@ export default function Playdates({ session, onChanged }) {
       );
     }
 
-    const sb = statusBadge(pd.status);
+    const sb = statusBadge(effectiveStatus(it));
     const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
     // Host nudge: only on pending hosting cards with someone still un-firmed.
     const unfirmedCount = (it.roster || []).filter((r) => r.rsvp === "maybe" || r.rsvp === "invited").length;
