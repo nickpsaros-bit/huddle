@@ -21,6 +21,14 @@ export default function ProfileScreen({ session, onBack }) {
   });
   const [savingPrefs, setSavingPrefs] = useState(false);
 
+  // ---- Link a household member (find a co-parent in your classrooms) ----
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkPeople, setLinkPeople] = useState([]);
+  const [linkBusyId, setLinkBusyId] = useState(null);
+  const [pendingRequest, setPendingRequest] = useState(null); // an outgoing join request I've already sent
+
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => {
@@ -101,6 +109,15 @@ export default function ProfileScreen({ session, onBack }) {
         prefer_no_cats: !!pref.prefer_no_cats,
       });
     }
+
+    // Any outgoing household-link request I've already sent that's still pending?
+    const { data: outgoing } = await supabase
+      .from("household_join_requests")
+      .select("id, target_household_id, status, created_at")
+      .eq("requesting_parent_id", session.user.id)
+      .eq("status", "pending")
+      .maybeSingle();
+    setPendingRequest(outgoing || null);
   };
 
   const savePrefs = async () => {
@@ -128,6 +145,120 @@ export default function ProfileScreen({ session, onBack }) {
       setMessage("Error: " + err.message);
     }
     setSavingPrefs(false);
+  };
+
+  // Open the link panel and load people in MY classrooms who are in a DIFFERENT
+  // household than mine (candidates to merge into my household as a co-parent).
+  const openLink = async () => {
+    setLinkOpen(true);
+    setLinkSearch("");
+    setLinkLoading(true);
+    try {
+      const userId = session.user.id;
+      if (!householdId) { setLinkPeople([]); setLinkLoading(false); return; }
+
+      const { data: myMs } = await supabase
+        .from("classroom_members")
+        .select("classroom_id, school_year")
+        .eq("household_id", householdId);
+
+      const peopleMap = {};
+      for (const m of (myMs || [])) {
+        const { data: others } = await supabase
+          .from("classroom_members")
+          .select("household_id, households(household_members(parent_id, parents(id, name, photo_url)))")
+          .eq("classroom_id", m.classroom_id)
+          .eq("school_year", m.school_year)
+          .neq("household_id", householdId);
+
+        for (const row of (others || [])) {
+          const members = row.households?.household_members || [];
+          for (const hm2 of members) {
+            const p = hm2.parents;
+            if (p && p.id && p.id !== userId && !peopleMap[p.id]) {
+              peopleMap[p.id] = {
+                id: p.id,
+                name: p.name,
+                photo_url: p.photo_url,
+                household_id: row.household_id,
+              };
+            }
+          }
+        }
+      }
+
+      const list = Object.values(peopleMap).sort((a, b) =>
+        (a.name || "").localeCompare(b.name || "")
+      );
+      setLinkPeople(list);
+    } catch (e) {
+      setLinkPeople([]);
+    }
+    setLinkLoading(false);
+  };
+
+  // Send a household-link request to the chosen person's household.
+  // Inbox.jsx (approveJoin) handles the approval + merge on the other side.
+  const askToLink = async (person) => {
+    if (!person?.household_id) return;
+    setLinkBusyId(person.id);
+    setMessage("");
+    try {
+      const { data: inserted, error } = await supabase
+        .from("household_join_requests")
+        .insert({
+          requesting_parent_id: session.user.id,
+          target_household_id: person.household_id,
+          status: "pending",
+        })
+        .select("id, target_household_id, status, created_at")
+        .single();
+      if (error && !error.message.includes("duplicate")) throw error;
+
+      // Notify the target household's members (best-effort).
+      try {
+        const { data: me } = await supabase.from("parents").select("name").eq("id", session.user.id).single();
+        const myLabel = shortName(me?.name);
+        const { data: targetMembers } = await supabase
+          .from("household_members")
+          .select("parent_id")
+          .eq("household_id", person.household_id);
+        const rows = (targetMembers || []).map((m) => ({
+          recipient_id: m.parent_id,
+          type: "household_join_request",
+          title: "Household link request 🏡",
+          body: `${myLabel} wants to join your household. Open your notifications to approve.`,
+        }));
+        if (rows.length > 0) await supabase.from("notifications").insert(rows);
+      } catch (notifErr) {
+        // Best-effort.
+      }
+
+      if (inserted) setPendingRequest(inserted);
+      setLinkOpen(false);
+      setMessage(`Request sent to ${shortName(person.name)}. They'll need to approve it.`);
+      setTimeout(() => setMessage(""), 4000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setLinkBusyId(null);
+  };
+
+  // Cancel an outgoing pending request.
+  const cancelRequest = async () => {
+    if (!pendingRequest) return;
+    setMessage("");
+    try {
+      await supabase
+        .from("household_join_requests")
+        .update({ status: "cancelled", resolved_at: new Date().toISOString() })
+        .eq("id", pendingRequest.id);
+      setPendingRequest(null);
+      setMessage("Request cancelled.");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
   };
 
   const uploadPhoto = async (e) => {
@@ -306,7 +437,7 @@ export default function ProfileScreen({ session, onBack }) {
 
         {/* YOUR HOUSEHOLD */}
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.75rem", overflow: "hidden" }}>
           {householdMembers.length === 0 ? (
             <div style={{ padding: "1rem 1.25rem" }}>
               <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>Just you for now.</p>
@@ -333,6 +464,72 @@ export default function ProfileScreen({ session, onBack }) {
             })
           )}
         </div>
+
+        {/* Find / link a co-parent into the household */}
+        {pendingRequest ? (
+          <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #854F0B", marginBottom: "1rem", padding: "1rem 1.25rem" }}>
+            <p style={{ color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", margin: "0 0 4px" }}>Link request pending</p>
+            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", lineHeight: "1.4" }}>
+              You've asked to join another household. It's waiting on their approval.
+            </p>
+            <button onClick={cancelRequest}
+              style={{ width: "100%", padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", minHeight: "44px" }}>
+              Cancel request
+            </button>
+          </div>
+        ) : !linkOpen ? (
+          <button onClick={openLink}
+            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#02C39A", fontSize: "0.9rem", fontWeight: "500", cursor: "pointer", marginBottom: "1rem", minHeight: "44px" }}>
+            ＋ Find a household member
+          </button>
+        ) : (
+          <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>Link a co-parent</p>
+              <button onClick={() => setLinkOpen(false)}
+                style={{ background: "transparent", border: "none", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer" }}>
+                Close
+              </button>
+            </div>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+              Find another parent in your classrooms to merge into your household. They'll need to approve the request.
+            </p>
+
+            <input type="text" placeholder="Search by name..." value={linkSearch}
+              onChange={(e) => setLinkSearch(e.target.value)}
+              style={{ width: "100%", padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.85rem" }} />
+
+            {linkLoading ? (
+              <p style={{ color: "#607080", fontSize: "0.85rem", textAlign: "center", padding: "1rem" }}>Loading...</p>
+            ) : (() => {
+              const filtered = linkPeople.filter((p) =>
+                (p.name || "").toLowerCase().includes(linkSearch.toLowerCase())
+              );
+              if (linkPeople.length === 0) {
+                return <p style={{ color: "#607080", fontSize: "0.82rem", margin: 0, lineHeight: "1.5" }}>No other parents found in your classrooms yet. Add your classrooms on the Home tab so co-parents can show up here.</p>;
+              }
+              if (filtered.length === 0) {
+                return <p style={{ color: "#607080", fontSize: "0.82rem", margin: 0 }}>No matches. Try a different name.</p>;
+              }
+              return filtered.map((p) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "0.6rem 0", borderBottom: "1px solid #2A4A6B" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                    <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                      {p.photo_url ? (
+                        <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (p.name?.charAt(0) || "?")}
+                    </div>
+                    <span style={{ color: "#FFFFFF", fontSize: "0.88rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shortName(p.name)}</span>
+                  </div>
+                  <button onClick={() => askToLink(p)} disabled={linkBusyId === p.id}
+                    style={{ flexShrink: 0, padding: "0.45rem 0.85rem", borderRadius: "8px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.8rem", fontWeight: "600", cursor: "pointer", minHeight: "40px" }}>
+                    {linkBusyId === p.id ? "Sending..." : "Ask to link"}
+                  </button>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
 
         {/* PETS & PLAYDATE PREFERENCES (household-level) */}
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>PETS & PLAYDATE PREFERENCES</p>
