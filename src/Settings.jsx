@@ -9,6 +9,10 @@ export default function Settings({ session, onBack }) {
   const [view, setView] = useState("main"); // "main" | "terms" | "privacy" | "adminBugs"
   const [message, setMessage] = useState("");
 
+  // ---- Discoverability (school-wide visibility toggle) ----
+  const [discoverable, setDiscoverable] = useState(true);
+  const [discoverBusy, setDiscoverBusy] = useState(false);
+
   // ---- Passkeys / Face ID ----
   const [passkeys, setPasskeys] = useState([]);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
@@ -34,10 +38,29 @@ export default function Settings({ session, onBack }) {
   const fetchParent = async () => {
     const { data } = await supabase
       .from("parents")
-      .select("id, name, is_admin, created_at")
+      .select("id, name, is_admin, created_at, discoverable")
       .eq("id", session.user.id)
       .single();
     setParent(data);
+    if (data && typeof data.discoverable === "boolean") setDiscoverable(data.discoverable);
+  };
+
+  const toggleDiscoverable = async () => {
+    const next = !discoverable;
+    setDiscoverable(next); // optimistic
+    setDiscoverBusy(true);
+    try {
+      const { error } = await supabase
+        .from("parents")
+        .update({ discoverable: next })
+        .eq("id", session.user.id);
+      if (error) throw error;
+    } catch (e) {
+      setDiscoverable(!next); // revert on failure
+      setMessage("Couldn't update that setting. Try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
+    setDiscoverBusy(false);
   };
 
   const fetchConsents = async () => {
@@ -329,6 +352,24 @@ export default function Settings({ session, onBack }) {
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
               {parent?.created_at ? new Date(parent.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—"}
             </p>
+          </div>
+        </div>
+
+        {/* PRIVACY */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>PRIVACY</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", padding: "1.25rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.35rem" }}>Let other parents at my school find me</p>
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0, lineHeight: "1.5" }}>
+                When on, parents at your school can find you by browsing classrooms. When off, only parents in your own classrooms, people you're already connected with, and anyone who searches your exact email can find you.
+              </p>
+            </div>
+            {/* Toggle switch */}
+            <button onClick={toggleDiscoverable} disabled={discoverBusy} aria-label="Toggle discoverability"
+              style={{ flexShrink: 0, width: "52px", height: "32px", borderRadius: "16px", border: "none", cursor: discoverBusy ? "default" : "pointer", background: discoverable ? "#02C39A" : "#2A4A6B", position: "relative", transition: "background 0.2s", padding: 0, marginTop: "2px" }}>
+              <span style={{ position: "absolute", top: "3px", left: discoverable ? "23px" : "3px", width: "26px", height: "26px", borderRadius: "50%", background: "#FFFFFF", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+            </button>
           </div>
         </div>
 
