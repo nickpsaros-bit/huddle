@@ -6,6 +6,7 @@ import Profile from "./Profile";
 import Home from "./Home";
 import NavBar from "./NavBar";
 import ProfileScreen from "./ProfileScreen";
+import Settings from "./Settings";
 import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
@@ -23,6 +24,7 @@ export default function App() {
   const [hasProfile, setHasProfile] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
   const [playdateHalo, setPlaydateHalo] = useState(null);
@@ -356,6 +358,10 @@ export default function App() {
     return <Inbox session={session} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
   }
 
+  if (showSettings) {
+    return <Settings session={session} onBack={() => setShowSettings(false)} />;
+  }
+
   let screen;
   if (activeTab === "home") {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
@@ -366,7 +372,7 @@ export default function App() {
   } else if (activeTab === "playdates") {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
   } else if (activeTab === "profile") {
-    screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} />;
+    screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} onOpenSettings={() => setShowSettings(true)} />;
   } else {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   }
