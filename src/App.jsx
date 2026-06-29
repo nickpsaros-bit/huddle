@@ -6,7 +6,7 @@ import Profile from "./Profile";
 import Home from "./Home";
 import NavBar from "./NavBar";
 import ProfileScreen from "./ProfileScreen";
-import Settings from "./Settings";
+import Settings from "./Settings.jsx";
 import Search from "./Search";
 import Inbox from "./Inbox";
 import Network from "./Network";
@@ -116,16 +116,62 @@ export default function App() {
   };
 
   const checkProfile = async (userId) => {
-    const { data: parentData } = await supabase
+const checkProfile = async (userId) => {
+    // 1) Read the parents row. CRITICAL: distinguish a FAILED read (error) from a
+    //    genuinely-absent profile. A failed read must NOT dump an existing user
+    //    into the signup flow (that's what happened during the RLS incident).
+    const { data: parentData, error: parentErr } = await supabase
       .from("parents")
       .select("id, name")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
+    if (parentErr) {
+      // Read failed (RLS, network, transient). Do NOT conclude "new user."
+      // Leave hasProfile unchanged and retry shortly.
+      console.warn("checkProfile: parents read failed, will retry:", parentErr.message);
+      setTimeout(() => checkProfile(userId), 1500);
+      return;
+    }
+
+    // Query succeeded and there's truly no profile row → genuinely new user.
     if (!parentData || !parentData.name) {
       setHasProfile(false);
       return;
     }
+
+    // 2) Household check — same error-vs-absent distinction.
+    const { data: hm, error: hmErr } = await supabase
+      .from("household_members")
+      .select("household_id")
+      .eq("parent_id", userId)
+      .maybeSingle();
+
+    if (hmErr) {
+      console.warn("checkProfile: household read failed, will retry:", hmErr.message);
+      setTimeout(() => checkProfile(userId), 1500);
+      return;
+    }
+    if (!hm) {
+      setHasProfile(false);
+      return;
+    }
+
+    // 3) Classroom membership check.
+    const { data: memberships, error: cmErr } = await supabase
+      .from("classroom_members")
+      .select("id")
+      .eq("household_id", hm.household_id)
+      .limit(1);
+
+    if (cmErr) {
+      console.warn("checkProfile: classroom read failed, will retry:", cmErr.message);
+      setTimeout(() => checkProfile(userId), 1500);
+      return;
+    }
+
+    setHasProfile(memberships && memberships.length > 0);
+  };
 
     const { data: hm } = await supabase
       .from("household_members")

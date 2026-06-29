@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function Profile({ session, onComplete }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checkingExisting, setCheckingExisting] = useState(true);
 
   // Step 1: parent info
   const [parentName, setParentName] = useState("");
@@ -20,6 +21,44 @@ export default function Profile({ session, onComplete }) {
   const [showTeacherDropdown, setShowTeacherDropdown] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
+
+  // GUARD: if this authenticated user ALREADY has a household, they already have
+  // an account — do NOT let them run signup again (which would create a duplicate
+  // household). Send them straight into the app.
+  useEffect(() => {
+    let cancelled = false;
+    const checkExisting = async () => {
+      try {
+        const { data: hm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", session.user.id)
+          .maybeSingle();
+        if (!cancelled && hm) {
+          // Already set up — skip signup entirely.
+          onComplete();
+          return;
+        }
+      } catch (e) {
+        // If the check fails, fall through to signup (safe default) but don't crash.
+      }
+      if (!cancelled) setCheckingExisting(false);
+    };
+    checkExisting();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Name validation: reject emails, junk, too-short. Returns an error string or "".
+  const validateName = (raw) => {
+    const name = (raw || "").trim();
+    if (name.length < 2) return "Please enter your name.";
+    if (/@/.test(name) || /\S+@\S+\.\S+/.test(name)) {
+      return "That looks like an email. Please enter your name (e.g. Jane Smith).";
+    }
+    if (/^\d+$/.test(name)) return "Please enter your name, not just numbers.";
+    if (/https?:\/\//i.test(name)) return "Please enter your name.";
+    return "";
+  };
 
   const searchSchools = async (query) => {
     setSchoolSearch(query);
@@ -45,12 +84,14 @@ export default function Profile({ session, onComplete }) {
     !teacherResults.find(t => t.toLowerCase() === teacher.toLowerCase());
 
   const saveStep1 = async () => {
+    const nameError = validateName(parentName);
+    if (nameError) { setError(nameError); return; }
     setLoading(true);
     setError("");
     try {
       const { error: parentErr } = await supabase.from("parents").upsert({
         id: session.user.id,
-        name: parentName,
+        name: parentName.trim(),
       });
       if (parentErr) throw parentErr;
       setStep(2);
@@ -64,6 +105,19 @@ export default function Profile({ session, onComplete }) {
     setLoading(true);
     setError("");
     try {
+      // DUPLICATE GUARD: re-check for an existing household right before creating one.
+      // If the user already has a household (e.g. double-submit, or they got here
+      // via a stale state), do NOT create a second one — just enter the app.
+      const { data: existingHh } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", session.user.id)
+        .maybeSingle();
+      if (existingHh) {
+        onComplete();
+        return;
+      }
+
       // School: existing or new
       let school;
       if (selectedSchool) {
@@ -114,7 +168,7 @@ export default function Profile({ session, onComplete }) {
         });
       if (memberErr) throw memberErr;
 
-  const { error: cmErr } = await supabase.from("classroom_members").insert({
+      const { error: cmErr } = await supabase.from("classroom_members").insert({
         household_id: household.id,
         classroom_id: classroom.id,
         school_year: schoolYear,
@@ -147,6 +201,16 @@ export default function Profile({ session, onComplete }) {
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
+  // While we check whether this user already has an account, show a neutral loader
+  // (prevents a flash of the signup form for existing users).
+  if (checkingExisting) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Huddle</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: "1.5rem" }}>
       <div style={{ width: "100%", maxWidth: "440px" }}>
@@ -175,7 +239,9 @@ export default function Profile({ session, onComplete }) {
 
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Your full name</label>
             <input type="text" placeholder="Jane Smith" value={parentName}
-              onChange={(e) => setParentName(e.target.value)} style={inputStyle} />
+              onChange={(e) => { setParentName(e.target.value); if (error) setError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && parentName && saveStep1()}
+              style={inputStyle} />
 
             {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
 
