@@ -29,12 +29,18 @@ export default function ProfileScreen({ session, onBack }) {
   const [linkBusyId, setLinkBusyId] = useState(null);
   const [pendingRequest, setPendingRequest] = useState(null); // an outgoing join request I've already sent
 
+  // ---- Passkeys / Face ID (faster sign-in) ----
+  const [passkeys, setPasskeys] = useState([]);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyMsg, setPasskeyMsg] = useState("");
+
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
   useEffect(() => {
     fetchProfile();
     fetchConsents();
     fetchFamily();
+    loadPasskeys();
   }, []);
 
   // Privacy-safe short name: "Nick Psaros" -> "Nick P."
@@ -292,6 +298,55 @@ export default function ProfileScreen({ session, onBack }) {
     setMessage("Name updated!");
     fetchProfile();
     setTimeout(() => setMessage(""), 3000);
+  };
+
+  // Load this user's registered passkeys (best-effort; beta API).
+  const loadPasskeys = async () => {
+    try {
+      const { data, error } = await supabase.auth.passkey.list();
+      if (!error && Array.isArray(data)) setPasskeys(data);
+    } catch (e) {
+      // Passkeys not enabled / not supported — leave the list empty.
+    }
+  };
+
+  // Enroll a passkey on THIS device (Face ID / Touch ID). User is already
+  // signed in, which is required to register.
+  const addPasskey = async () => {
+    setPasskeyBusy(true);
+    setPasskeyMsg("");
+    try {
+      const { error } = await supabase.auth.registerPasskey();
+      if (error) {
+        const code = error.code || "";
+        if (code === "webauthn_credential_exists") {
+          setPasskeyMsg("This device already has Face ID sign-in set up. 👍");
+        } else if (error.name === "NotAllowedError" || /cancel/i.test(error.message || "")) {
+          setPasskeyMsg(""); // user backed out
+        } else {
+          setPasskeyMsg(error.message || "Couldn't set up Face ID on this device.");
+        }
+      } else {
+        setPasskeyMsg("Face ID sign-in is on for this device. ✅");
+        loadPasskeys();
+      }
+    } catch (e) {
+      setPasskeyMsg("This device or browser doesn't support Face ID sign-in.");
+    }
+    setPasskeyBusy(false);
+  };
+
+  const removePasskey = async (passkeyId) => {
+    setPasskeyBusy(true);
+    setPasskeyMsg("");
+    try {
+      await supabase.auth.passkey.delete({ passkeyId });
+      setPasskeyMsg("Removed.");
+      loadPasskeys();
+    } catch (e) {
+      setPasskeyMsg("Couldn't remove that passkey. Try again.");
+    }
+    setPasskeyBusy(false);
   };
 
   const signOut = async () => {
@@ -566,6 +621,36 @@ export default function ProfileScreen({ session, onBack }) {
             style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
             {savingPrefs ? "Saving..." : "Save pets & preferences"}
           </button>
+        </div>
+
+        {/* Faster sign-in: passkeys / Face ID */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", overflow: "hidden" }}>
+          <div style={{ padding: "1.25rem", borderBottom: passkeys.length > 0 ? "1px solid #2A4A6B" : "none" }}>
+            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>🔐 Face ID / Touch ID</p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+              Turn on Face ID for this device to sign back in with a tap — no email link needed next time.
+            </p>
+            <button onClick={addPasskey} disabled={passkeyBusy}
+              style={{ padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", minHeight: "44px" }}>
+              {passkeyBusy ? "Setting up..." : "Set up Face ID on this device"}
+            </button>
+            {passkeyMsg && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "0.6rem 0 0" }}>{passkeyMsg}</p>}
+          </div>
+          {passkeys.map((pk) => (
+            <div key={pk.id} style={{ padding: "0.85rem 1.25rem", borderTop: "1px solid #2A4A6B", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "0 0 2px" }}>{pk.friendly_name || "Passkey"}</p>
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0 }}>
+                  Added {pk.created_at ? new Date(pk.created_at).toLocaleDateString() : ""}
+                </p>
+              </div>
+              <button onClick={() => removePasskey(pk.id)} disabled={passkeyBusy}
+                style={{ background: "transparent", border: "none", color: "#F87171", fontSize: "0.8rem", cursor: "pointer", minHeight: "44px" }}>
+                Remove
+              </button>
+            </div>
+          ))}
         </div>
 
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", marginTop: "1.5rem" }}>

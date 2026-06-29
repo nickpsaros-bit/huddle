@@ -10,6 +10,7 @@ export default function Auth({ onAuth }) {
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -35,6 +36,34 @@ export default function Auth({ onAuth }) {
     if (error) {
       setError(error.message);
       setGoogleLoading(false);
+    }
+  };
+
+  // Passkey / Face ID sign-in. Discoverable-credential flow: no email needed —
+  // the device shows the user their Huddle passkey(s) and they pick one.
+  // On success, onAuthStateChange in App.jsx picks up the SIGNED_IN event.
+  const signInWithPasskey = async () => {
+    setPasskeyLoading(true);
+    setError("");
+    try {
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) {
+        // Common, non-alarming cases: user cancelled the prompt, or this device
+        // has no Huddle passkey yet. Keep the message gentle and point to email.
+        const code = error.code || "";
+        if (code === "webauthn_credential_not_found") {
+          setError("No Face ID sign-in is set up on this device yet. Use email or Google below, then turn on Face ID in your profile.");
+        } else if (error.name === "NotAllowedError" || /cancel/i.test(error.message || "")) {
+          setError(""); // user backed out — no need to shout
+        } else {
+          setError(error.message || "Couldn't sign in with Face ID. Try email or Google.");
+        }
+        setPasskeyLoading(false);
+      }
+      // success → App.jsx reacts to SIGNED_IN; nothing else to do here.
+    } catch (e) {
+      setError("This device or browser doesn't support Face ID sign-in. Use email or Google.");
+      setPasskeyLoading(false);
     }
   };
 
@@ -71,6 +100,13 @@ export default function Auth({ onAuth }) {
     width: "100%", padding: "0.85rem", borderRadius: "10px",
     border: "1px solid #2A4A6B", background: "#FFFFFF",
     color: "#1F1F1F", fontSize: "1rem", fontWeight: "500",
+    cursor: "pointer", display: "flex", alignItems: "center",
+    justifyContent: "center", gap: "10px", marginBottom: "1rem"
+  };
+  const passkeyBtn = {
+    width: "100%", padding: "0.85rem", borderRadius: "10px",
+    border: "1px solid #02C39A", background: "#0F3D2E",
+    color: "#02C39A", fontSize: "1rem", fontWeight: "600",
     cursor: "pointer", display: "flex", alignItems: "center",
     justifyContent: "center", gap: "10px", marginBottom: "1rem"
   };
@@ -162,8 +198,20 @@ export default function Auth({ onAuth }) {
           <>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Welcome back</h2>
             <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
-              Sign in with the Google account or email you used to join.
+              Use Face ID if you've set it up, or sign in with Google or your email.
             </p>
+
+            {/* Fast path: passkey / Face ID. Sits above the rest as the 1-tap return. */}
+            <button onClick={signInWithPasskey} disabled={passkeyLoading} style={passkeyBtn}>
+              <span style={{ fontSize: "1.1rem" }}>🔐</span>
+              {passkeyLoading ? "Waiting for Face ID..." : "Sign in with Face ID"}
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
+              <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+              <span style={{ color: "#607080", fontSize: "0.8rem" }}>or</span>
+              <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+            </div>
+
             {renderAuthControls("Send magic link →")}
             <button onClick={() => { setError(""); setMode("intro"); }}
               style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
