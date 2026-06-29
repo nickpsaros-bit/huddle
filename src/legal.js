@@ -2,7 +2,7 @@
 // When you update these, bump the VERSION number to trigger re-consent.
 
 export const TERMS_VERSION = "1.0.0";
-export const PRIVACY_VERSION = "1.0.0";
+export const PRIVACY_VERSION = "1.1.0";
 
 export const TERMS_OF_SERVICE = `# Terms of Service
 
@@ -121,12 +121,14 @@ Email: admin@huddlefamilies.com
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
-**Effective date:** June 14, 2026
-**Version:** 1.0.0
+**Effective date:** June 28, 2026
+**Version:** 1.1.0
 
 This Privacy Policy describes how Huddle ("we," "us," or "our") collects, uses, and shares information when you use the Huddle service at huddlefamilies.com (the "Service").
 
 By using Huddle, you agree to this Privacy Policy.
+
+> **What's new in 1.1.0:** We added details about the information we collect when you report a problem or contact support, and about passkey ("Face ID" / "Touch ID") sign-in.
 
 ---
 
@@ -148,6 +150,8 @@ When you sign up and use Huddle, we collect:
 - **Your school affiliation** — the name of the school, the name of the classroom teacher, and the grade level you self-identify as a parent in
 - **Your connections** — the list of other Huddle users you have connected with
 - **Your messages and playdate requests** — content you send through Huddle to other connected parents
+- **Problem reports and support requests** — if you report a problem or contact support, we collect what you write, the screen or area you tell us about, and basic information about your device and browser (such as device or browser type), so we can investigate and fix the issue
+- **Sign-in credentials** — if you choose to enable passkey sign-in ("Face ID," "Touch ID," or a device PIN or security key), we store a public key and related sign-in metadata for your account. Your biometric data (such as your face or fingerprint) **never leaves your device** and is never sent to or stored by Huddle
 - **Basic technical data** — IP address, browser type, device information, and session timestamps, used for security and service reliability
 
 We **do not** collect names, photos, or any identifying information about minor children. Children are never users of Huddle and are never represented as records in our system.
@@ -159,6 +163,7 @@ We use your information to:
 - Provide and maintain the Huddle service
 - Help you find and connect with other parents at your child's school
 - Send you notifications about connection requests, messages, and other parents' actions you've opted into
+- Investigate, troubleshoot, and fix problems you report, and respond to your support requests
 - Improve and develop the Service
 - Protect the security and integrity of the Service
 - Comply with legal obligations
@@ -180,6 +185,7 @@ We minimize data retention by design:
 
 - **Playdate messages** — automatically deleted 24 hours after the scheduled playdate
 - **General messages** — automatically deleted after 30 days from the last message (configurable by user)
+- **Problem reports** — retained while we investigate and for a reasonable period afterward to track recurring issues, then deleted
 - **Account data after deletion** — permanently removed within 30 days of account deletion
 - **Profile data** — retained as long as your account is active
 
@@ -190,6 +196,7 @@ We believe in data minimization. The less we keep, the less risk to you.
 You can:
 
 - **Update your profile** at any time through the Profile screen
+- **Manage passkey sign-in** — you can add or remove a passkey for a device at any time in Settings under "Faster sign-in"
 - **Disconnect from another parent** at any time through your Network screen
 - **Delete your account** by contacting us at the email below. When you delete your account, we will permanently remove your profile, photo, messages, and connections within 30 days
 - **Request a copy** of the data we hold about you
@@ -199,7 +206,7 @@ If you are a California resident, you have additional rights under the Californi
 
 ## 7. Data security
 
-We use industry-standard security practices to protect your information, including encrypted connections (HTTPS), secure authentication, and access controls. However, no online service is completely secure. You use Huddle at your own risk.
+We use industry-standard security practices to protect your information, including encrypted connections (HTTPS), secure authentication, and access controls. Passkey sign-in, when you choose to use it, is based on the WebAuthn standard and keeps your biometric data on your own device. However, no online service is completely secure. You use Huddle at your own risk.
 
 ## 8. Children's privacy
 

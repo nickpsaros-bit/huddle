@@ -168,17 +168,67 @@ export default function Settings({ session, onBack }) {
     </div>
   );
 
-  // ---- Legal doc viewer ----
+  // ---- Legal doc viewer (light "paper" document styling) ----
   if (view === "terms" || view === "privacy") {
     const doc = view === "terms" ? TERMS_OF_SERVICE : PRIVACY_POLICY;
     const title = view === "terms" ? "Terms of Service" : "Privacy Policy";
+
+    // Pull the effective date + version lines out of the markdown so we can show
+    // them in a styled document header, and render the rest as the body.
+    const effMatch = doc.match(/\*\*Effective date:\*\*\s*(.+)/);
+    const verMatch = doc.match(/\*\*Version:\*\*\s*(.+)/);
+    const effective = effMatch ? effMatch[1].trim() : "";
+    const version = verMatch ? verMatch[1].trim() : "";
+    // Body = everything after the first horizontal rule, so the title/date/version
+    // (which we render in the styled header) aren't duplicated.
+    const body = doc.includes("\n---\n") ? doc.split("\n---\n").slice(1).join("\n---\n") : doc;
+
+    // Markdown → styled "document" elements (serif, generous spacing, dark on white).
+    const mdComponents = {
+      h1: (props) => <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "1.5rem", fontWeight: 700, color: "#1A1A2E", margin: "1.75rem 0 0.75rem", lineHeight: 1.3 }} {...props} />,
+      h2: (props) => <h2 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "1.15rem", fontWeight: 700, color: "#1A1A2E", margin: "1.75rem 0 0.6rem", lineHeight: 1.35 }} {...props} />,
+      h3: (props) => <h3 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "1rem", fontWeight: 700, color: "#1A1A2E", margin: "1.25rem 0 0.5rem" }} {...props} />,
+      p: (props) => <p style={{ fontSize: "0.95rem", lineHeight: 1.7, color: "#33333D", margin: "0 0 1rem" }} {...props} />,
+      ul: (props) => <ul style={{ fontSize: "0.95rem", lineHeight: 1.7, color: "#33333D", margin: "0 0 1rem", paddingLeft: "1.25rem" }} {...props} />,
+      ol: (props) => <ol style={{ fontSize: "0.95rem", lineHeight: 1.7, color: "#33333D", margin: "0 0 1rem", paddingLeft: "1.25rem" }} {...props} />,
+      li: (props) => <li style={{ margin: "0 0 0.4rem" }} {...props} />,
+      strong: (props) => <strong style={{ color: "#1A1A2E", fontWeight: 700 }} {...props} />,
+      em: (props) => <em style={{ color: "#6B6B7B" }} {...props} />,
+      a: (props) => <a style={{ color: "#0F6FFF", textDecoration: "none" }} {...props} />,
+      hr: () => <hr style={{ border: "none", borderTop: "1px solid #E2E2EA", margin: "1.75rem 0" }} />,
+      blockquote: (props) => <blockquote style={{ background: "#F2F6FF", border: "1px solid #D6E4FF", borderRadius: "10px", padding: "0.85rem 1rem", margin: "0 0 1.25rem", fontSize: "0.9rem", color: "#2A3A5C" }} {...props} />,
+    };
+
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
         {headerBar(title, () => setView("main"))}
-        <div style={{ padding: "1.5rem", maxWidth: "700px", margin: "0 auto" }}>
-          <div style={{ color: "#FFFFFF", fontSize: "0.9rem", lineHeight: "1.6" }}>
-            <ReactMarkdown>{doc}</ReactMarkdown>
+        <div style={{ padding: "1.25rem", maxWidth: "720px", margin: "0 auto" }}>
+          {/* The "paper" */}
+          <div style={{ background: "#FFFFFF", borderRadius: "14px", boxShadow: "0 8px 30px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+            {/* Document header */}
+            <div style={{ padding: "2rem 1.75rem 1.25rem", borderBottom: "1px solid #E2E2EA" }}>
+              <p style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "1.75rem", fontWeight: 700, color: "#1A1A2E", margin: "0 0 0.75rem", lineHeight: 1.2 }}>{title}</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {effective && (
+                  <span style={{ fontSize: "0.72rem", color: "#6B6B7B", background: "#F4F4F7", border: "1px solid #E2E2EA", borderRadius: "999px", padding: "0.25rem 0.7rem" }}>
+                    Effective {effective}
+                  </span>
+                )}
+                {version && (
+                  <span style={{ fontSize: "0.72rem", color: "#6B6B7B", background: "#F4F4F7", border: "1px solid #E2E2EA", borderRadius: "999px", padding: "0.25rem 0.7rem" }}>
+                    Version {version}
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Document body */}
+            <div style={{ padding: "1.5rem 1.75rem 2rem" }}>
+              <ReactMarkdown components={mdComponents}>{body}</ReactMarkdown>
+            </div>
           </div>
+          <p style={{ textAlign: "center", color: "#607080", fontSize: "0.72rem", margin: "1rem 0 0" }}>
+            Huddle · huddlefamilies.com
+          </p>
         </div>
       </div>
     );
