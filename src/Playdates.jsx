@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import PlaydateRequest from "./PlaydateRequest";
 
-export default function Playdates({ session, onChanged }) {
+export default function Playdates({ session, onChanged, avatarUrl, onProfileClick }) {
   const [householdId, setHouseholdId] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +52,9 @@ export default function Playdates({ session, onChanged }) {
     return nm ? nm.charAt(0).toUpperCase() : "?";
   };
 
+  // Recompute a playdate's status from its invites and persist it.
+  // Rule: Confirmed = >=2 firm "yes". Pending = >=1 yes and >=2 parties still
+  // in play (could still reach 2 yes). Cancelled = can't reach 2.
   const recomputePlaydateStatus = async (playdateId) => {
     const { data: invites } = await supabase
       .from("playdate_invites")
@@ -77,6 +80,7 @@ export default function Playdates({ session, onChanged }) {
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
+  // Pet line for a playdate (🐕/🐈).
   const petLine = (pd, guest) => {
     const animals = [];
     if (pd.bringing_dog) animals.push("dog");
@@ -140,6 +144,7 @@ export default function Playdates({ session, onChanged }) {
     const hhId = hm.household_id;
     setHouseholdId(hhId);
 
+    // Load my plan (for the multi-invite premium gate).
     try {
       const { data: hh } = await supabase
         .from("households")
@@ -163,6 +168,7 @@ export default function Playdates({ session, onChanged }) {
         .from("playdate_invites")
         .select("*")
         .eq("playdate_id", pd.id);
+      // Hide the host's own row from the displayed roster (shown separately as host).
       const guestInvites = (invites || []).filter((inv) => inv.household_id !== hhId);
       const roster = [];
       for (const inv of guestInvites) {
@@ -201,6 +207,13 @@ export default function Playdates({ session, onChanged }) {
       all.push({ kind: "invited", playdate: pd, invite: inv, organizerLabel });
     }
 
+    // ---- SELF-HEAL: settle expired-but-unconfirmed playdates ----
+    // A playdate whose date has passed while still "pending" was never
+    // confirmed and never actively cancelled — it simply lapsed. Persist it
+    // as "cancelled" so the data doesn't accumulate stale "pending" rows that
+    // render as zombie cards. Display still distinguishes these as "Expired"
+    // via effectiveStatus() below. De-duplicate playdate IDs first (a playdate
+    // can appear as both a hosting row and an invited row in `all`).
     const nowMs = Date.now();
     const toSettle = [];
     const seenSettle = new Set();
@@ -216,6 +229,7 @@ export default function Playdates({ session, onChanged }) {
     if (toSettle.length > 0) {
       try {
         await supabase.from("playdates").update({ status: "cancelled" }).in("id", toSettle);
+        // Reflect locally so this render is already correct.
         const settleSet = new Set(toSettle);
         for (const it of all) {
           if (it.playdate && settleSet.has(it.playdate.id)) {
@@ -223,13 +237,15 @@ export default function Playdates({ session, onChanged }) {
           }
         }
       } catch (settleErr) {
-        // Best-effort.
+        // Best-effort — display layer (effectiveStatus) still handles it.
       }
     }
 
     setItems(all);
     setLoading(false);
   };
+
+  // Load people you can huddle with: classmates + connections. Deduped, excludes self/own household.
   const openPicker = async () => {
     setPicking(true);
     setPickSearch("");
@@ -333,6 +349,7 @@ export default function Playdates({ session, onChanged }) {
         .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
 
+      // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
       try {
         const { data: invRow } = await supabase
           .from("playdate_invites")
@@ -343,7 +360,7 @@ export default function Playdates({ session, onChanged }) {
           await recomputePlaydateStatus(invRow.playdate_id);
         }
       } catch (statusErr) {
-        // Best-effort.
+        // Best-effort — don't block the RSVP if recompute fails.
       }
 
       try {
@@ -403,6 +420,7 @@ export default function Playdates({ session, onChanged }) {
             }
           }
 
+          // Guest declined → email the HOST (they shouldn't have to check the app).
           if (rsvp === "no" && playdateId) {
             try {
               await supabase.functions.invoke("notify-host-decline", {
@@ -417,7 +435,7 @@ export default function Playdates({ session, onChanged }) {
           }
         }
       } catch (notifErr) {
-        // Best-effort.
+        // Best-effort — don't block the RSVP.
       }
 
       setMessage(rsvp === "yes" ? "You're going!" : rsvp === "maybe" ? "Marked as maybe" : "Can't make it");
@@ -430,10 +448,13 @@ export default function Playdates({ session, onChanged }) {
     setBusy(false);
   };
 
+  // Host nudges guests who haven't firmed up (rsvp = maybe or invited) on a pending playdate.
+  // Sends an in-app notification to each un-firmed guest's parents.
   const nudgeGuests = async (it) => {
     setBusy(true);
     try {
       const pd = it.playdate;
+      // Un-firmed guest households (maybe / invited) from the roster (host already excluded).
       const targetHouseholdIds = [...new Set(
         (it.roster || [])
           .filter((r) => r.rsvp === "maybe" || r.rsvp === "invited")
@@ -447,9 +468,11 @@ export default function Playdates({ session, onChanged }) {
         return;
       }
 
+      // Host label for the message.
       const hostLabel = await householdLabel(pd.organizer_household_id);
       const whenStr = fmtDate(pd.proposed_date);
 
+      // Parents of each un-firmed guest household.
       const { data: guestParents } = await supabase
         .from("household_members")
         .select("parent_id")
@@ -551,13 +574,20 @@ export default function Playdates({ session, onChanged }) {
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
   const isCancelled = (it) => it.playdate.status === "cancelled";
 
+  // Effective lifecycle status for display. A playdate whose date has passed
+  // while never reaching "confirmed" is "expired" — it lapsed, nobody actively
+  // cancelled it. This keeps the badge truthful even before the self-heal write
+  // in fetchData lands (or if it failed). Note: the self-heal persists these as
+  // "cancelled" in the DB, so isCancelled() routes them into the CANCELLED
+  // section; effectiveStatus only governs the BADGE text/color shown on the card.
   const effectiveStatus = (it) => {
     const pd = it.playdate;
     if (pd.status === "confirmed") return "confirmed";
     if (isPast(it) && pd.status !== "confirmed") return "expired";
-    return pd.status;
+    return pd.status; // "pending" | "cancelled"
   };
 
+  // Status badge driven by the lifecycle engine's status.
   const statusBadge = (status) => {
     if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
     if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
@@ -587,6 +617,7 @@ export default function Playdates({ session, onChanged }) {
     .filter((it) => isPast(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
+  // Everything that belongs in the collapsible "Past & archived" group.
   const archiveCount = past.length + cancelled.length + declined.length;
 
   const card = (dim) => ({
@@ -606,6 +637,7 @@ export default function Playdates({ session, onChanged }) {
     border: "1px solid #02C39A", background: "transparent", color: "#02C39A",
     fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
   };
+
   // ---- If creating a playdate, render the request form (reuses existing flow) ----
   if (requestingPlaydate) {
     return (
@@ -784,6 +816,7 @@ export default function Playdates({ session, onChanged }) {
 
     const sb = statusBadge(effectiveStatus(it));
     const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
+    // Host nudge: only on pending hosting cards with someone still un-firmed.
     const unfirmedCount = (it.roster || []).filter((r) => r.rsvp === "maybe" || r.rsvp === "invited").length;
     const showNudge = !dim && pd.status === "pending" && unfirmedCount > 0;
     return (
@@ -848,9 +881,24 @@ export default function Playdates({ session, onChanged }) {
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Playdates</h1>
-        {(needsAttention.length + upcoming.length) > 0 && (
-          <span style={{ color: "#607080", fontSize: "0.8rem" }}>{needsAttention.length + upcoming.length} upcoming</span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          {(needsAttention.length + upcoming.length) > 0 && (
+            <span style={{ color: "#607080", fontSize: "0.8rem" }}>{needsAttention.length + upcoming.length} upcoming</span>
+          )}
+          <button
+            onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
+            aria-label="Open your profile"
+            style={{
+              width: "38px", height: "38px", borderRadius: "50%", padding: 0,
+              border: "2px solid #02C39A", background: "#028090", cursor: "pointer",
+              overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center",
+              justifyContent: "center", color: "#FFFFFF", fontSize: "1rem", fontWeight: "600",
+            }}>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : "👤"}
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>

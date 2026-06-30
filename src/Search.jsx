@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
-export default function Search({ session }) {
+export default function Search({ session, avatarUrl, onProfileClick }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -11,6 +11,7 @@ export default function Search({ session }) {
   const [message, setMessage] = useState("");
   const [emailResult, setEmailResult] = useState(null); // cross-school match by email
   const [emailSearched, setEmailSearched] = useState(false);
+  const [myName, setMyName] = useState("");
 
   useEffect(() => {
     fetchMyData();
@@ -24,7 +25,33 @@ export default function Search({ session }) {
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
+  // Profile avatar button for the header (top-right). Taps through to ProfileScreen.
+  const profileAvatar = () => (
+    <button
+      onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
+      aria-label="Open your profile"
+      style={{
+        width: "38px", height: "38px", borderRadius: "50%", padding: 0,
+        border: "2px solid #02C39A", background: "#028090", cursor: "pointer",
+        overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center",
+        justifyContent: "center", color: "#FFFFFF", fontSize: "1rem", fontWeight: "600",
+      }}>
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        (myName && myName.charAt(0)) || "👤"
+      )}
+    </button>
+  );
+
   const fetchMyData = async () => {
+    const { data: me } = await supabase
+      .from("parents")
+      .select("name")
+      .eq("id", session.user.id)
+      .maybeSingle();
+    setMyName(me?.name || "");
+
     const { data: hm } = await supabase
       .from("household_members")
       .select("household_id")
@@ -61,7 +88,6 @@ export default function Search({ session }) {
       return;
     }
 
-    // If the query looks like an email, do a cross-school exact-email lookup instead.
     if (isEmail(q.trim())) {
       setResults([]);
       setLoading(true);
@@ -70,7 +96,6 @@ export default function Search({ session }) {
           body: { email: q.trim().toLowerCase() },
         });
         if (!error && data && data.found && data.hasProfile && data.parent) {
-          // Don't show yourself.
           if (data.parent.id !== session.user.id) {
             setEmailResult(data.parent);
           }
@@ -83,7 +108,6 @@ export default function Search({ session }) {
       return;
     }
 
-    // Otherwise: normal school-scoped NAME search (unchanged).
     setLoading(true);
 
     const { data: parents } = await supabase
@@ -170,7 +194,6 @@ export default function Search({ session }) {
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
 
-  // Renders the Connect / Pending / Accept / Connected control for any parent id.
   const connectionControl = (parentId, sameHousehold) => {
     if (sameHousehold) {
       return <span style={{ color: "#8AAEC8", fontSize: "0.8rem", flexShrink: 0 }}>In your household</span>;
@@ -217,7 +240,10 @@ export default function Search({ session }) {
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B" }}>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: "0 0 1rem" }}>Find Parents</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "1rem" }}>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Find Parents</h1>
+          {profileAvatar()}
+        </div>
         <input
           type="text"
           placeholder="Search by name, or enter an email..."
@@ -251,7 +277,6 @@ export default function Search({ session }) {
           <p style={{ color: "#607080", fontSize: "0.9rem", textAlign: "center", padding: "2rem" }}>Searching...</p>
         )}
 
-        {/* EMAIL LOOKUP RESULT (cross-school) */}
         {!loading && emailResult && (
           <>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>FOUND BY EMAIL</p>
@@ -268,7 +293,6 @@ export default function Search({ session }) {
           </>
         )}
 
-        {/* EMAIL SEARCHED, NO MATCH */}
         {!loading && emailSearched && !emailResult && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>📭</p>
@@ -279,7 +303,6 @@ export default function Search({ session }) {
           </div>
         )}
 
-        {/* NAME SEARCH — NO RESULTS */}
         {!loading && !emailSearched && query.length >= 2 && results.length === 0 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>🔍</p>
@@ -290,7 +313,6 @@ export default function Search({ session }) {
           </div>
         )}
 
-        {/* EMPTY STATE */}
         {!loading && query.length < 2 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>👋</p>
@@ -299,7 +321,6 @@ export default function Search({ session }) {
           </div>
         )}
 
-        {/* NAME SEARCH RESULTS */}
         {results.map((parent) => {
           const sameHousehold = myHouseholdId && parent.householdId === myHouseholdId;
           const classroomLabel = (parent.classrooms || []).map(c =>

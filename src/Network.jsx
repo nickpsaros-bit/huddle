@@ -4,7 +4,7 @@ import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
-export default function Network({ session }) {
+export default function Network({ session, avatarUrl, onProfileClick }) {
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -22,6 +22,25 @@ export default function Network({ session }) {
     if (parts.length === 1) return parts[0];
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
+
+  // Profile avatar button for the header (top-right). Taps through to ProfileScreen.
+  const profileAvatar = () => (
+    <button
+      onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
+      aria-label="Open your profile"
+      style={{
+        width: "38px", height: "38px", borderRadius: "50%", padding: 0,
+        border: "2px solid #02C39A", background: "#028090", cursor: "pointer",
+        overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center",
+        justifyContent: "center", color: "#FFFFFF", fontSize: "1rem", fontWeight: "600",
+      }}>
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        (myName && myName.charAt(0)) || "👤"
+      )}
+    </button>
+  );
 
   // Small inline pet badges for a household (🐕🐈🐴🐾). Returns null if none set.
   const petBadges = (hhId) => {
@@ -61,7 +80,6 @@ export default function Network({ session }) {
       .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
       .eq("status", "accepted");
 
-    // Each connection row → the OTHER person + the connection id (for per-parent removal).
     const connectedPeople = (data || []).map((conn) => {
       const isRequester = conn.requester_id === userId;
       return {
@@ -71,14 +89,8 @@ export default function Network({ session }) {
       };
     });
 
-    // Resolve each connected person's household, then GROUP BY household so two
-    // co-parents you're both connected to collapse into ONE card.
-    // householdsMap: { [householdId]: { householdId, classrooms, members: [...] } }
-    // members carry: { id, name, photo_url, connectionId|null }
-    //   connectionId set => you're connected to this parent (gets Huddle + Remove)
-    //   connectionId null => co-parent you're NOT connected to (shown for context)
     const householdsMap = {};
-    const loosePeople = []; // connected people with no household row (edge case)
+    const loosePeople = [];
 
     for (const c of connectedPeople) {
       const { data: hm } = await supabase
@@ -96,7 +108,6 @@ export default function Network({ session }) {
       if (!householdsMap[hhId]) {
         householdsMap[hhId] = { householdId: hhId, classrooms: [], members: [], _seen: new Set() };
       }
-      // Mark this specific parent as connected (carry their connectionId).
       householdsMap[hhId]._connectedById = householdsMap[hhId]._connectedById || {};
       householdsMap[hhId]._connectedById[c.person.id] = {
         connectionId: c.connectionId,
@@ -104,8 +115,6 @@ export default function Network({ session }) {
       };
     }
 
-    // For each household: load classrooms once + the FULL member list (so we can
-    // show both co-parents, flagging which ones you're connected to).
     const householdIds = Object.keys(householdsMap);
     for (const hhId of householdIds) {
       const { data: memberships } = await supabase
@@ -124,16 +133,15 @@ export default function Network({ session }) {
       for (const row of (allMembers || [])) {
         const p = row.parents;
         if (!p || !p.id) continue;
-        if (p.id === userId) continue; // never list myself
+        if (p.id === userId) continue;
         const link = connectedById[p.id];
         members.push({
           id: p.id,
           name: p.name,
           photo_url: p.photo_url,
-          connectionId: link ? link.connectionId : null, // null = not connected to me
+          connectionId: link ? link.connectionId : null,
         });
       }
-      // Connected parents first, then the rest; stable-ish by name.
       members.sort((a, b) => {
         if (!!a.connectionId !== !!b.connectionId) return a.connectionId ? -1 : 1;
         return (a.name || "").localeCompare(b.name || "");
@@ -145,7 +153,6 @@ export default function Network({ session }) {
       .map(({ _seen, _connectedById, ...rest }) => rest)
       .filter((h) => h.members.length > 0);
 
-    // Batch-fetch pet preferences for all connected households (one query).
     if (householdIds.length > 0) {
       const { data: prefs } = await supabase
         .from("household_preferences")
@@ -156,7 +163,6 @@ export default function Network({ session }) {
       setPetsByHousehold(map);
     }
 
-    // Append loose connected people (no household) as single-member pseudo-cards.
     for (const c of loosePeople) {
       grouped.push({
         householdId: `loose-${c.person.id}`,
@@ -174,13 +180,11 @@ export default function Network({ session }) {
     setLoading(false);
   };
 
-  // The actual removal work (runs after the user confirms in the modal).
   const doRemoveConnection = async (connectionId) => {
     await supabase.from("connections").delete().eq("id", connectionId);
     fetchConnections();
   };
 
-  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
   const removeConnection = (connectionId, personName) => {
     setConfirm({
       title: "Remove this connection?",
@@ -194,7 +198,6 @@ export default function Network({ session }) {
 
   const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
 
-  // If huddling, render the playdate request screen (self-contained, like Home does).
   if (requestingPlaydate) {
     return (
       <PlaydateRequest
@@ -214,11 +217,14 @@ export default function Network({ session }) {
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
-      <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B" }}>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Your Network</h1>
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "4px 0 0" }}>
-          Parents you've connected with outside your classrooms
-        </p>
+      <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Your Network</h1>
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "4px 0 0" }}>
+            Parents you've connected with outside your classrooms
+          </p>
+        </div>
+        {profileAvatar()}
       </div>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
@@ -239,7 +245,6 @@ export default function Network({ session }) {
             {households.map((hh) => (
               <div key={hh.householdId} style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" }}>
 
-                {/* Household classrooms (shown once, shared by everyone in the household) */}
                 {hh.classrooms.length > 0 && (
                   <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: "1rem" }}>
                     <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em", display: "flex", alignItems: "center" }}>
@@ -253,7 +258,6 @@ export default function Network({ session }) {
                   </div>
                 )}
 
-                {/* Each parent in the household — connected ones get a Huddle button */}
                 {hh.members.map((m, idx) => (
                   <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", paddingTop: idx > 0 ? "0.85rem" : 0, marginTop: idx > 0 ? "0.85rem" : 0, borderTop: idx > 0 ? "1px solid #2A4A6B" : "none" }}>
                     <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
@@ -280,7 +284,6 @@ export default function Network({ session }) {
                   </div>
                 ))}
 
-                {/* Per-parent remove (each connection is its own row) */}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginTop: "0.85rem" }}>
                   {hh.members.filter((m) => m.connectionId).map((m) => (
                     <button key={m.id} onClick={() => removeConnection(m.connectionId, m.name)}
@@ -294,7 +297,6 @@ export default function Network({ session }) {
           </>
         )}
 
-        {/* Invite — placed below the list (actions follow content) */}
         {!loading && (
           <button onClick={() => setInviting(true)}
             style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
