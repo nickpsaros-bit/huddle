@@ -19,10 +19,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
-  const [scopedSchool, setScopedSchool] = useState(null); // { id, name } when adding within a school card; null = full picker
-  // Teacher/grade conflict step: when the typed teacher already exists at this
-  // school under different grade(s), we pause to ask "same teacher, or different
-  // person with the same name?" { school, schoolYear, existing: [{id,grade}], typedGrade }
+  const [scopedSchool, setScopedSchool] = useState(null);
   const [gradeConflict, setGradeConflict] = useState(null);
   const [newGrade, setNewGrade] = useState("");
   const [newTeacher, setNewTeacher] = useState("");
@@ -68,7 +65,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
 
-  // Relative time for the activity feed ("2h ago", "3d ago").
   const relTime = (iso) => {
     if (!iso) return "";
     const diff = Date.now() - new Date(iso).getTime();
@@ -82,7 +78,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
-  // Icon + accent for each activity (notification) type.
   const activityStyle = (type) => {
     switch (type) {
       case "playdate_invite": return { icon: "🎉", bg: "#13314F", color: "#8AAEC8" };
@@ -93,7 +88,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     }
   };
 
-  // Small inline pet badges for a household (🐕🐈🐴🐾). Returns null if none set.
   const petBadges = (hhId) => {
     const p = petsByHousehold[hhId];
     if (!p) return null;
@@ -159,7 +153,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     }
     setClassmates(classmatesMap);
 
-    // Batch-fetch pet preferences for ALL the households shown (one query).
     if (otherHouseholdIds.size > 0) {
       const { data: prefs } = await supabase
         .from("household_preferences")
@@ -170,12 +163,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       setPetsByHousehold(map);
     }
 
-    // ---- NEXT PLAYDATE (soonest upcoming I'm hosting or invited to & not declined) ----
+    // ---- NEXT PLAYDATE — excludes cancelled so Home agrees with the Playdates screen ----
     try {
       const nowIso = new Date().toISOString();
       const candidates = [];
 
- const { data: hosting } = await supabase
+      const { data: hosting } = await supabase
         .from("playdates")
         .select("*")
         .eq("organizer_household_id", hhId)
@@ -189,7 +182,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         .from("playdate_invites")
         .select("rsvp, playdates(*)")
         .eq("household_id", hhId);
- for (const inv of (myInvites || [])) {
+      for (const inv of (myInvites || [])) {
         const pd = inv.playdates;
         if (!pd) continue;
         if (pd.organizer_household_id === hhId) continue;
@@ -199,12 +192,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         candidates.push({ pd, role: "invited" });
       }
 
-   candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
+      candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
       setStatUpcoming(candidates.length);
       if (candidates.length > 0) {
         const top = candidates[0];
         let withLabel = { ...top.pd, _role: top.role, _otherLabel: "" };
-        // Who's it with? (organizer if invited; first guest if hosting)
         if (top.role === "invited") {
           const { data: orgMembers } = await supabase
             .from("household_members")
@@ -235,8 +227,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       setNextPlaydate(null);
     }
 
-    // ---- RECENT ACTIVITY (last 5 notifications) ----
- // ---- STAT TILES: connections count ----
     try {
       const { data: conns } = await supabase
         .from("connections")
@@ -251,17 +241,13 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setLoading(false);
   };
 
-  // Load the teachers already at a given school (for the teacher autocomplete).
   const loadTeachersForSchool = async (schoolId) => {
     const { data } = await supabase.from("classrooms").select("teacher_name").eq("school_id", schoolId).limit(50);
     const unique = [...new Set((data || []).map(c => c.teacher_name).filter(Boolean))];
     setNewTeacherResults(unique);
   };
 
-  // Open the modal SCOPED to an existing school (from inside that school's card).
-  // School is locked; only grade + teacher are entered. Teachers pre-suggested.
   const openAddClassroomToSchool = async (school) => {
-    // school: { id, name }
     setScopedSchool({ id: school.id, name: school.name });
     setNewGrade("");
     setNewTeacher("");
@@ -277,7 +263,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     await loadTeachersForSchool(school.id);
   };
 
-  // Open the modal UNSCOPED (full school picker) — "Add a different school".
   const openAddDifferentSchool = () => {
     setScopedSchool(null);
     setNewGrade("");
@@ -323,11 +308,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     await loadTeachersForSchool(school.id);
   };
 
-  // Normalize a teacher name for matching only (trim, collapse spaces, lowercase).
-  // Display always uses the original casing.
   const normTeacher = (s) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
 
-  // Tiny edit-distance (Levenshtein) for near-match detection.
   const editDistance = (a, b) => {
     a = a || ""; b = b || "";
     const m = a.length, n = b.length;
@@ -344,16 +326,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return dp[m][n];
   };
 
-  // Is the typed name an EXACT (normalized) match to an existing teacher? Returns
-  // the canonical existing name (original casing) if so, else null.
   const exactTeacherMatch = (() => {
     const typed = normTeacher(newTeacher);
     if (!typed) return null;
     return newTeacherResults.find((t) => normTeacher(t) === typed) || null;
   })();
 
-  // The closest existing teacher that is NOT an exact match but is "near" — a
-  // likely typo or title variant (one contains the other, or small edit distance).
   const nearTeacherMatch = (() => {
     const typed = normTeacher(newTeacher);
     if (!typed || exactTeacherMatch) return null;
@@ -364,8 +342,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       if (!cand) continue;
       const contains = cand.includes(typed) || typed.includes(cand);
       const dist = editDistance(typed, cand);
-      // Treat as near if one contains the other, or the edit distance is small
-      // relative to length (catches "hopkin" vs "hopkins", "mrs hopkins" vs "hopkins").
       const threshold = Math.max(2, Math.floor(Math.min(typed.length, cand.length) * 0.34));
       if (contains || dist <= threshold) {
         if (dist < bestScore) { bestScore = dist; best = t; }
@@ -374,12 +350,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return best;
   })();
 
-  // True only when the typed name matches nothing at all (brand-new teacher).
   const isBrandNewTeacher = newTeacher.trim().length > 0 && !exactTeacherMatch && !nearTeacherMatch;
 
-  // Does the actual classroom find-or-create + membership insert, given a
-  // resolved school + the exact classroom id to join (or null to create at
-  // gradeIdx). Used by both the normal save and the conflict-resolution buttons.
   const commitClassroom = async (school, schoolYear, joinClassroomId, gradeIdx, teacherName) => {
     let classroom = null;
     if (joinClassroomId) {
@@ -411,7 +383,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     try {
       let school;
       if (scopedSchool) {
-        // Locked to the card's school — never create a new school here.
         school = { id: scopedSchool.id, name: scopedSchool.name };
       } else if (newSelectedSchool) {
         school = newSelectedSchool;
@@ -427,11 +398,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const schoolYear = `${currentYear}-${currentYear + 1}`;
       const gradeIdx = grades.indexOf(newGrade);
 
-      // Fetch this school+year's classrooms and find any under the SAME teacher
-      // (case-insensitive trim). A classroom is keyed by teacher AND grade, so:
-      //  - exact teacher+grade match → join it silently (true duplicate).
-      //  - teacher matches but grade differs → PAUSE and ask: same teacher in a
-      //    new grade, or a different person with the same name? (We can't know.)
       const typedNorm = newTeacher.trim().replace(/\s+/g, " ").toLowerCase();
       const { data: schoolClassrooms } = await supabase.from("classrooms")
         .select("id, teacher_name, grade, school_year")
@@ -444,14 +410,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
       const exact = sameTeacher.find((c) => c.grade === gradeIdx);
       if (exact) {
-        // Exact teacher + grade already exists → join silently.
         await commitClassroom(school, schoolYear, exact.id, gradeIdx, newTeacher);
         setSavingMembership(false);
         return;
       }
 
       if (sameTeacher.length > 0) {
-        // Teacher exists here but under different grade(s) → ask the user.
         setGradeConflict({
           school,
           schoolYear,
@@ -466,13 +430,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         return;
       }
 
-      // No teacher match at all → create fresh.
       await commitClassroom(school, schoolYear, null, gradeIdx, newTeacher);
     } catch (err) { setMembershipError(err.message); }
     setSavingMembership(false);
   };
 
-  // The actual classroom removal (runs after the user confirms in the modal).
   const doLeaveClassroom = async (membershipRow) => {
     setHouseholdBusy(true);
     setDrillMessage("");
@@ -485,19 +447,18 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       setSelectedClassroom(null);
       fetchData();
     } catch (err) {
-      setDrillMessage("Couldn't remove the classroom: " + err.message);
+      setDrillMessage("Couldn't leave the classroom: " + err.message);
     }
     setHouseholdBusy(false);
   };
 
-  // Opens the in-app confirm modal (replaces window.confirm, which fails on mobile).
   const leaveClassroom = (membershipRow) => {
     const label = `${membershipRow.classrooms?.teacher_name} · ${getGradeLabel(membershipRow.classrooms?.grade)}`;
     setConfirm({
-      title: "Remove this classroom?",
-      body: `This removes your household from ${label}. You can add it back anytime.`,
-      confirmLabel: "Remove",
-      cancelLabel: "Keep",
+      title: "Leave this classroom?",
+      body: `You'll leave ${label} and stop seeing the families in it. You can rejoin anytime.`,
+      confirmLabel: "Leave",
+      cancelLabel: "Stay",
       tone: "danger",
       onConfirm: () => doLeaveClassroom(membershipRow),
     });
@@ -551,7 +512,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   }
 
   if (showProfile) return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
- if (requestingPlaydate) {
+  if (requestingPlaydate) {
     return (
       <PlaydateRequest session={session} recipient={requestingPlaydate}
         onBack={() => setRequestingPlaydate(null)}
@@ -562,7 +523,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     );
   }
 
-  // Teal-accented Home header (Home's signature look — distinct from other tabs).
   const headerBar = (
     <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #02C39A" }}>
       <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0, letterSpacing: "-0.02em" }}>Huddle</h1>
@@ -589,9 +549,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     </div>
   );
 
-  // Shared add-classroom modal (used in both views). When scopedSchool is set,
-  // the school is LOCKED (read-only header, no picker, no school creation);
-  // when null, the full school search/create picker is shown.
   const addClassroomModal = addingClassroom && (
     <div style={overlay}>
       <div style={modalBox}>
@@ -616,7 +573,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
             {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
 
-            {/* Join one of the existing grades for this teacher */}
             {gradeConflict.existing.map((e) => (
               <button key={e.id} disabled={savingMembership}
                 onClick={async () => {
@@ -630,7 +586,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
               </button>
             ))}
 
-            {/* Add the new grade anyway (multi-grade teacher OR different person, same name) */}
             <button disabled={savingMembership}
               onClick={async () => {
                 setSavingMembership(true); setMembershipError("");
@@ -653,7 +608,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           {scopedSchool ? "Add a classroom" : "Add a school or classroom"}
         </h2>
 
-        {/* School: read-only header when scoped, full picker when not */}
         {scopedSchool ? (
           <div style={{ marginBottom: "1rem" }}>
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School</label>
@@ -719,8 +673,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           )}
         </div>
 
-        {/* Near-match: offer the close existing teacher as a tap-to-use chip,
-            while still allowing the typed name to be added as new. */}
         {nearTeacherMatch && (
           <div style={{ background: "#13314F", border: "1px solid #2A4A6B", borderRadius: "8px", padding: "0.6rem 0.75rem", marginBottom: "1rem" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.5rem", lineHeight: "1.4" }}>
@@ -733,7 +685,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           </div>
         )}
 
-        {/* Brand-new teacher (matches nothing): neutral confirmation, not a warning. */}
         {isBrandNewTeacher && (
           <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
             New teacher — “{newTeacher.trim()}” will be added{scopedSchool ? ` to ${scopedSchool.name}` : ""}.
@@ -754,7 +705,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     </div>
   );
 
-  // ---- DRILL-IN VIEW: a single classroom's families + actions ----
   if (selectedClassroom) {
     const m = selectedClassroom;
     const cards = familyCardsFor(m);
@@ -823,7 +773,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
           <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
             style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
-            Remove this classroom
+            Leave this classroom
           </button>
         </div>
 
@@ -836,14 +786,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     );
   }
 
-  // ---- MAIN VIEW: dashboard (greeting → next playdate → activity → schools) ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
       {headerBar}
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Greeting */}
         <div style={{ marginBottom: "1.25rem" }}>
           <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 2px" }}>{todayLabel()}</p>
           <h2 style={{ color: "#FFFFFF", fontSize: "1.4rem", fontWeight: "600", margin: 0, letterSpacing: "-0.02em" }}>
@@ -851,7 +799,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           </h2>
         </div>
 
-        {/* Next playdate hero */}
         {nextPlaydate ? (
           <div onClick={() => typeof onGoToPlaydates === "function" && onGoToPlaydates()}
             style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "14px", padding: "1.1rem 1.25rem", marginBottom: "1.5rem", cursor: "pointer" }}>
@@ -873,7 +820,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           </div>
         )}
 
-       {/* Stat tiles */}
         {(() => {
           const familiesAtSchool = new Set(
             Object.values(classmates).flatMap((g) =>
@@ -899,7 +845,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           );
         })()}
 
-        {/* Your schools */}
         {memberships.length > 0 && (
           <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>YOUR SCHOOLS</p>
         )}
