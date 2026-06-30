@@ -35,6 +35,7 @@ export default function Profile({ session, onComplete }) {
           .eq("parent_id", session.user.id)
           .maybeSingle();
         if (!cancelled && hm) {
+          // Already set up — skip signup entirely.
           onComplete();
           return;
         }
@@ -105,6 +106,8 @@ export default function Profile({ session, onComplete }) {
     setError("");
     try {
       // DUPLICATE GUARD: re-check for an existing household right before creating one.
+      // If the user already has a household (e.g. double-submit, or they got here
+      // via a stale state), do NOT create a second one — just enter the app.
       const { data: existingHh } = await supabase
         .from("household_members")
         .select("household_id")
@@ -115,97 +118,33 @@ export default function Profile({ session, onComplete }) {
         return;
       }
 
-      // School: existing or new
-      let school;
-      if (selectedSchool) {
-        school = selectedSchool;
-      } else {
-        const code = schoolSearch.toUpperCase().replace(/\s+/g, "").slice(0, 10) + Date.now().toString().slice(-4);
-        const { data: newSchool, error: schoolErr } = await supabase.from("schools")
-          .insert({ name: schoolSearch, activation_code: code })
-          .select().single();
-        if (schoolErr) throw schoolErr;
-        school = newSchool;
-      }
-
       const currentYear = new Date().getFullYear();
       const schoolYear = `${currentYear}-${currentYear + 1}`;
 
-      // Classroom: existing or new.
-      // IMPORTANT: match on teacher + GRADE + year to mirror the unique constraint
-      // (classrooms_unique_teacher_grade_year). One teacher can have multiple grades
-      // (e.g. "Ms Christy" in both K and 6th), so a teacher-only lookup is ambiguous
-      // and would miss the right row, then collide on insert.
-      let classroom;
-      const { data: existing } = await supabase.from("classrooms").select()
-        .eq("school_id", school.id)
-        .eq("teacher_name", teacher)
-        .eq("grade", grades.indexOf(grade))
-        .eq("school_year", schoolYear)
-        .maybeSingle();
-      if (existing) {
-        classroom = existing;
-      } else {
-        const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
-          .insert({ school_id: school.id, teacher_name: teacher, grade: grades.indexOf(grade), school_year: schoolYear })
-          .select().single();
-        if (classroomErr) {
-          // Safety net: if a duplicate slips through (race condition), fetch + join
-          // the existing row instead of failing signup.
-          if ((classroomErr.message || "").toLowerCase().includes("duplicate")) {
-            const { data: found } = await supabase.from("classrooms").select()
-              .eq("school_id", school.id)
-              .eq("teacher_name", teacher)
-              .eq("grade", grades.indexOf(grade))
-              .eq("school_year", schoolYear)
-              .maybeSingle();
-            if (found) {
-              classroom = found;
-            } else {
-              throw classroomErr;
-            }
-          } else {
-            throw classroomErr;
-          }
-        } else {
-          classroom = newClassroom;
-        }
-      }
-
-      // Create own household
-      const { data: household, error: hhErr } = await supabase
-        .from("households")
-        .insert({})
-        .select()
-        .single();
-      if (hhErr) throw hhErr;
-
-      const { error: memberErr } = await supabase
-        .from("household_members")
-        .insert({
-          household_id: household.id,
-          parent_id: session.user.id,
-          role: "primary",
-        });
-      if (memberErr) throw memberErr;
-
-      const { error: cmErr } = await supabase.from("classroom_members").insert({
-        household_id: household.id,
-        classroom_id: classroom.id,
-        school_year: schoolYear,
+      // ATOMIC SIGNUP: one server-side transaction does the whole chain —
+      // find-or-create school + classroom, create household, add primary member,
+      // add classroom membership, write welcome notification. All-or-nothing, so
+      // a half-failed signup can't leave orphan rows (critical once RLS is on).
+      // The function find-or-creates the classroom on teacher+grade+year using the
+      // same normalization as the unique index, so casing/spacing won't duplicate.
+      //
+      // Pass either an existing school id, or a name to create a new school.
+      const { error: rpcErr } = await supabase.rpc("signup_atomic", {
+        p_school_id: selectedSchool ? selectedSchool.id : null,
+        p_school_name: selectedSchool ? null : schoolSearch.trim(),
+        p_teacher_name: teacher,
+        p_grade: grades.indexOf(grade),
+        p_school_year: schoolYear,
       });
-      if (cmErr && !cmErr.message.includes("duplicate")) throw cmErr;
 
-      // Welcome notification (non-blocking — a failed insert shouldn't stop signup).
-      try {
-        await supabase.from("notifications").insert({
-          recipient_id: session.user.id,
-          type: "welcome",
-          title: "Welcome to Huddle! 👋",
-          body: "Huddle helps you connect with other parents in your kid's classroom. A few tips to get started: add all your classrooms so you see every family, tap \"Huddle →\" next to a parent to set up a playdate, and check this bell for playdate invites and updates. Your privacy is protected — other parents only ever see your first name and last initial, never your full name, email, or phone.",
-        });
-      } catch (notifErr) {
-        // Ignore — welcome note is best-effort.
+      if (rpcErr) {
+        // The function raises 'User already has a household' if a household exists.
+        // Treat that as "already done" rather than an error — just enter the app.
+        if ((rpcErr.message || "").toLowerCase().includes("already has a household")) {
+          onComplete();
+          return;
+        }
+        throw rpcErr;
       }
 
       onComplete();
@@ -222,7 +161,8 @@ export default function Profile({ session, onComplete }) {
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  // While we check whether this user already has an account, show a neutral loader.
+  // While we check whether this user already has an account, show a neutral loader
+  // (prevents a flash of the signup form for existing users).
   if (checkingExisting) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
