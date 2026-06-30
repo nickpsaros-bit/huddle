@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
-import ProfileScreen from "./ProfileScreen";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -15,7 +14,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [statConnections, setStatConnections] = useState(0);
   const [statUpcoming, setStatUpcoming] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [showProfile, setShowProfile] = useState(false);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
   const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
@@ -511,7 +509,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     );
   }
 
-  if (showProfile) return <ProfileScreen session={session} onBack={() => setShowProfile(false)} />;
   if (requestingPlaydate) {
     return (
       <PlaydateRequest session={session} recipient={requestingPlaydate}
@@ -537,10 +534,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           )}
         </button>
         {parent?.photo_url ? (
-          <img src={parent.photo_url} alt="Profile" onClick={() => setShowProfile(true)}
+          <img src={parent.photo_url} alt="Profile" onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
             style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
         ) : (
-          <div onClick={() => setShowProfile(true)}
+          <div onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
             style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", border: "2px solid #02C39A" }}>
             {parent?.name?.charAt(0) || "?"}
           </div>
