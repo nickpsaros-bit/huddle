@@ -175,10 +175,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const nowIso = new Date().toISOString();
       const candidates = [];
 
-      const { data: hosting } = await supabase
+ const { data: hosting } = await supabase
         .from("playdates")
         .select("*")
         .eq("organizer_household_id", hhId)
+        .neq("status", "cancelled")
         .gte("proposed_date", nowIso);
       for (const pd of (hosting || [])) {
         candidates.push({ pd, role: "hosting" });
@@ -188,10 +189,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         .from("playdate_invites")
         .select("rsvp, playdates(*)")
         .eq("household_id", hhId);
-      for (const inv of (myInvites || [])) {
+ for (const inv of (myInvites || [])) {
         const pd = inv.playdates;
         if (!pd) continue;
         if (pd.organizer_household_id === hhId) continue;
+        if (pd.status === "cancelled") continue;
         if (inv.rsvp === "no") continue;
         if (new Date(pd.proposed_date).toISOString() < nowIso) continue;
         candidates.push({ pd, role: "invited" });
