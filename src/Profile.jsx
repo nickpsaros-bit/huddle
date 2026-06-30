@@ -35,7 +35,6 @@ export default function Profile({ session, onComplete }) {
           .eq("parent_id", session.user.id)
           .maybeSingle();
         if (!cancelled && hm) {
-          // Already set up — skip signup entirely.
           onComplete();
           return;
         }
@@ -106,8 +105,6 @@ export default function Profile({ session, onComplete }) {
     setError("");
     try {
       // DUPLICATE GUARD: re-check for an existing household right before creating one.
-      // If the user already has a household (e.g. double-submit, or they got here
-      // via a stale state), do NOT create a second one — just enter the app.
       const { data: existingHh } = await supabase
         .from("household_members")
         .select("household_id")
@@ -134,11 +131,16 @@ export default function Profile({ session, onComplete }) {
       const currentYear = new Date().getFullYear();
       const schoolYear = `${currentYear}-${currentYear + 1}`;
 
-      // Classroom: existing or new
+      // Classroom: existing or new.
+      // IMPORTANT: match on teacher + GRADE + year to mirror the unique constraint
+      // (classrooms_unique_teacher_grade_year). One teacher can have multiple grades
+      // (e.g. "Ms Christy" in both K and 6th), so a teacher-only lookup is ambiguous
+      // and would miss the right row, then collide on insert.
       let classroom;
       const { data: existing } = await supabase.from("classrooms").select()
         .eq("school_id", school.id)
         .eq("teacher_name", teacher)
+        .eq("grade", grades.indexOf(grade))
         .eq("school_year", schoolYear)
         .maybeSingle();
       if (existing) {
@@ -147,8 +149,27 @@ export default function Profile({ session, onComplete }) {
         const { data: newClassroom, error: classroomErr } = await supabase.from("classrooms")
           .insert({ school_id: school.id, teacher_name: teacher, grade: grades.indexOf(grade), school_year: schoolYear })
           .select().single();
-        if (classroomErr) throw classroomErr;
-        classroom = newClassroom;
+        if (classroomErr) {
+          // Safety net: if a duplicate slips through (race condition), fetch + join
+          // the existing row instead of failing signup.
+          if ((classroomErr.message || "").toLowerCase().includes("duplicate")) {
+            const { data: found } = await supabase.from("classrooms").select()
+              .eq("school_id", school.id)
+              .eq("teacher_name", teacher)
+              .eq("grade", grades.indexOf(grade))
+              .eq("school_year", schoolYear)
+              .maybeSingle();
+            if (found) {
+              classroom = found;
+            } else {
+              throw classroomErr;
+            }
+          } else {
+            throw classroomErr;
+          }
+        } else {
+          classroom = newClassroom;
+        }
       }
 
       // Create own household
@@ -201,8 +222,7 @@ export default function Profile({ session, onComplete }) {
     fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box"
   };
 
-  // While we check whether this user already has an account, show a neutral loader
-  // (prevents a flash of the signup form for existing users).
+  // While we check whether this user already has an account, show a neutral loader.
   if (checkingExisting) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
