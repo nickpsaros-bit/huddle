@@ -25,6 +25,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
   const [playdateHalo, setPlaydateHalo] = useState(null);
@@ -116,7 +118,10 @@ export default function App() {
   };
 
   const checkProfile = async (userId) => {
-const checkProfile = async (userId) => {
+    // Fetch the user's avatar for the top-right profile button (best-effort).
+    supabase.from("parents").select("photo_url").eq("id", userId).maybeSingle()
+      .then(({ data }) => { if (data) setMyAvatarUrl(data.photo_url || null); });
+
     // 1) Read the parents row. CRITICAL: distinguish a FAILED read (error) from a
     //    genuinely-absent profile. A failed read must NOT dump an existing user
     //    into the signup flow (that's what happened during the RLS incident).
@@ -127,14 +132,11 @@ const checkProfile = async (userId) => {
       .maybeSingle();
 
     if (parentErr) {
-      // Read failed (RLS, network, transient). Do NOT conclude "new user."
-      // Leave hasProfile unchanged and retry shortly.
       console.warn("checkProfile: parents read failed, will retry:", parentErr.message);
       setTimeout(() => checkProfile(userId), 1500);
       return;
     }
 
-    // Query succeeded and there's truly no profile row → genuinely new user.
     if (!parentData || !parentData.name) {
       setHasProfile(false);
       return;
@@ -169,26 +171,6 @@ const checkProfile = async (userId) => {
       setTimeout(() => checkProfile(userId), 1500);
       return;
     }
-
-    setHasProfile(memberships && memberships.length > 0);
-  };
-
-    const { data: hm } = await supabase
-      .from("household_members")
-      .select("household_id")
-      .eq("parent_id", userId)
-      .single();
-
-    if (!hm) {
-      setHasProfile(false);
-      return;
-    }
-
-    const { data: memberships } = await supabase
-      .from("classroom_members")
-      .select("id")
-      .eq("household_id", hm.household_id)
-      .limit(1);
 
     setHasProfile(memberships && memberships.length > 0);
   };
@@ -315,13 +297,7 @@ const checkProfile = async (userId) => {
 
     const nowMs = Date.now();
 
-    // ---- Playdate badge: count invites still awaiting MY reply ----
     let unrepliedCount = 0;
-
-    // ---- Playdate halo: reflect the SOONEST upcoming playdate's status ----
-    // (confirmed = teal/green, pending = amber, none = no halo).
-    // Gather all my upcoming playdates (hosting OR invited and not declined),
-    // pick the soonest, and use its lifecycle status.
     const upcoming = []; // { date, status }
 
     const { data: myInv } = await supabase
@@ -332,10 +308,10 @@ const checkProfile = async (userId) => {
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.organizer_household_id === myHh.household_id) continue; // hosting handled below
+      if (pd.organizer_household_id === myHh.household_id) continue;
       if (new Date(pd.proposed_date).getTime() < nowMs) continue;
       if (inv.rsvp === "invited") unrepliedCount++;
-      if (inv.rsvp === "no") continue; // declined → not "my" upcoming playdate
+      if (inv.rsvp === "no") continue;
       upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
@@ -351,7 +327,6 @@ const checkProfile = async (userId) => {
 
     setPlaydateBadge(unrepliedCount);
 
-    // Pick the soonest upcoming playdate that isn't cancelled.
     const live = upcoming
       .filter((u) => u.status !== "cancelled")
       .sort((a, b) => a.date - b.date);
@@ -408,17 +383,19 @@ const checkProfile = async (userId) => {
     return <Settings session={session} onBack={() => setShowSettings(false)} />;
   }
 
+  if (showProfile) {
+    return <ProfileScreen session={session} onBack={() => { setShowProfile(false); fetchCounts(session.user.id); }} onOpenSettings={() => { setShowProfile(false); setShowSettings(true); }} />;
+  }
+
   let screen;
   if (activeTab === "home") {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   } else if (activeTab === "search") {
-    screen = <Search session={session} />;
+    screen = <Search session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
   } else if (activeTab === "network") {
-    screen = <Network session={session} />;
+    screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
   } else if (activeTab === "playdates") {
-    screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} />;
-  } else if (activeTab === "profile") {
-    screen = <ProfileScreen session={session} onBack={() => setActiveTab("home")} onOpenSettings={() => setShowSettings(true)} />;
+    screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
   } else {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} />;
   }
