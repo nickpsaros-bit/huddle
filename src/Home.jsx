@@ -36,6 +36,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [upcomingBirthdays, setUpcomingBirthdays] = useState([]);
   const [wishedIds, setWishedIds] = useState({}); // birthday.id -> true after wishing
   const [wishBusy, setWishBusy] = useState(null);
+  const [statBirthdaysMonth, setStatBirthdaysMonth] = useState(0);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -218,6 +219,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         }
         upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
         setUpcomingBirthdays(upcoming);
+
+        // "This month" count — all visible households' birthdays in the current month.
+        const curMonth = now.getMonth() + 1;
+        const monthCount = (bdayRows || []).filter((b) => b.month === curMonth).length;
+        setStatBirthdaysMonth(monthCount);
       }
     } catch (e) {
       // Birthdays are a nice-to-have; never block the feed.
@@ -949,9 +955,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Connections", value: statConnections, go: onGoToNetwork },
             { label: "Families at your school", value: familiesAtSchool, go: null },
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
+            { label: "Birthdays this month", value: statBirthdaysMonth, go: null },
           ];
           return (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
               {tiles.map((t) => (
                 <div key={t.label}
                   onClick={() => t.go && t.go()}
