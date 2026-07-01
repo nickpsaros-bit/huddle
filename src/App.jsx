@@ -177,79 +177,15 @@ export default function App() {
 
   const consumeInvite = async (userId, userEmail) => {
     try {
-      let invite = null;
-
-      if (userEmail) {
-        const { data: byEmail } = await supabase
-          .from("invites")
-          .select("*")
-          .eq("invited_email", userEmail.toLowerCase())
-          .eq("status", "pending")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (byEmail) invite = byEmail;
-      }
-
-      if (!invite) {
-        const token = localStorage.getItem(INVITE_KEY);
-        if (token) {
-          const { data: byToken } = await supabase
-            .from("invites")
-            .select("*")
-            .eq("token", token)
-            .maybeSingle();
-          if (byToken) invite = byToken;
-        }
-      }
-
-      if (!invite || invite.status !== "pending" || new Date(invite.expires_at).getTime() < Date.now()) {
-        localStorage.removeItem(INVITE_KEY);
-        localStorage.removeItem(INVITE_EMAIL_KEY);
-        setInviteToken(null);
-        return;
-      }
-
-      if (invite.inviter_id === userId) {
-        localStorage.removeItem(INVITE_KEY);
-        localStorage.removeItem(INVITE_EMAIL_KEY);
-        setInviteToken(null);
-        return;
-      }
-
-      const { data: existing } = await supabase
-        .from("connections")
-        .select("id")
-        .or(`and(requester_id.eq.${invite.inviter_id},recipient_id.eq.${userId}),and(requester_id.eq.${userId},recipient_id.eq.${invite.inviter_id})`);
-
-      if (!existing || existing.length === 0) {
-        await supabase.from("connections").insert({
-          requester_id: invite.inviter_id,
-          recipient_id: userId,
-          status: "accepted",
-        });
-
-        try {
-          const { data: me } = await supabase.from("parents").select("name").eq("id", userId).single();
-          const nm = me?.name ? me.name.trim().split(/\s+/) : ["A parent"];
-          const label = nm.length === 1 ? nm[0] : `${nm[0]} ${nm[nm.length - 1].charAt(0)}.`;
-          await supabase.from("notifications").insert({
-            recipient_id: invite.inviter_id,
-            type: "invite_accepted",
-            title: "Your invite was accepted 🎉",
-            body: `${label} joined Huddle from your invite. You're now connected!`,
-          });
-        } catch (e) { /* best-effort */ }
-      }
-
-      await supabase.from("invites")
-        .update({ status: "accepted", accepted_by: userId, accepted_at: new Date().toISOString() })
-        .eq("id", invite.id);
-
-      localStorage.removeItem(INVITE_KEY);
-      localStorage.removeItem(INVITE_EMAIL_KEY);
-      setInviteToken(null);
+      // Atomic redemption via SECURITY DEFINER RPC: looks up the invite by the
+      // stored token (falls back to the user's email inside the function),
+      // validates, creates the inviter<->me connection, notifies the inviter,
+      // marks the invite accepted. Clients no longer touch the invites table.
+      const token = localStorage.getItem(INVITE_KEY) || "";
+      await supabase.rpc("redeem_invite", { p_token: token });
     } catch (err) {
+      // Best-effort — a failed redemption shouldn't block entering the app.
+    } finally {
       localStorage.removeItem(INVITE_KEY);
       localStorage.removeItem(INVITE_EMAIL_KEY);
       setInviteToken(null);
