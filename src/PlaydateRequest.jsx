@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 
-export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent }) {
+export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent, eventType = "playdate" }) {
+  const isBirthday = eventType === "birthday";
+
   // Normalize to a list: supports single `recipient` (Home/Network) or `recipients` array (multi-select picker).
   const recipientList = (recipients && recipients.length > 0)
     ? recipients
@@ -14,6 +16,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   const [locationName, setLocationName] = useState("");
   const [locationAddress, setLocationAddress] = useState("");
   const [note, setNote] = useState("");
+  const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null);
@@ -204,7 +207,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   };
 
   // The actual send (runs directly, or after the user OKs the pet heads-up).
-  // Creates ONE playdate, then ONE invite row per recipient (+ notification each).
+  // Creates ONE event (playdate or birthday), then ONE invite row per recipient (+ notification each).
   const sendRequest = async () => {
     setLoading(true);
     setError("");
@@ -251,6 +254,8 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           status: "pending",
           bringing_dog: bringingDog,
           bringing_cat: bringingCat,
+          event_type: eventType,
+          title: isBirthday ? (title.trim() || null) : null,
         })
         .select()
         .single();
@@ -300,9 +305,11 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
 
         const rows = (theirMembers || []).map((m) => ({
           recipient_id: m.parent_id,
-          type: "playdate_invite",
-          title: "New playdate invite 🎉",
-          body: `${inviterLabel} invited you to a playdate. Open the Playdates tab to RSVP.`,
+          type: isBirthday ? "birthday_invite" : "playdate_invite",
+          title: isBirthday ? "You're invited to a birthday! 🎂" : "New playdate invite 🎉",
+          body: isBirthday
+            ? `${inviterLabel} invited you to a birthday celebration. Open the Playdates tab to RSVP.`
+            : `${inviterLabel} invited you to a playdate. Open the Playdates tab to RSVP.`,
         }));
         if (rows.length > 0) {
           await supabase.from("notifications").insert(rows);
@@ -378,6 +385,10 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     </button>
   );
 
+  // Theme accent: birthday = purple, playdate = teal.
+  const accent = isBirthday ? "#7C5CBF" : "#02C39A";
+  const accentBg = isBirthday ? "#2A1E3D" : "#0F3D2E";
+
   // Label for the recipient card / success screen.
   const recipientHeading = isMulti
     ? `${recipientList.length} families`
@@ -387,12 +398,12 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
         <div style={{ textAlign: "center", maxWidth: "340px" }}>
-          <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>🎉</div>
-          <h2 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
+          <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>{isBirthday ? "🎂" : "🎉"}</div>
+          <h2 style={{ color: accent, fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
             {isMulti
-              ? `${recipientList.length} families will get your playdate invite. You'll be notified when they reply.`
-              : `${shortName(recipientList[0]?.name)}'s family will get your playdate invite. You'll be notified when they reply.`}
+              ? `${recipientList.length} families will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`
+              : `${shortName(recipientList[0]?.name)}'s family will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`}
           </p>
           <button onClick={() => onSent()}
             style={{ padding: "0.75rem 1.5rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
@@ -410,8 +421,8 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Request a Playdate</h1>
+        <button onClick={onBack} style={{ background: "transparent", border: "none", color: accent, fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{isBirthday ? "🎂 Birthday Invite" : "Request a Playdate"}</h1>
         <div style={{ width: "60px" }} />
       </div>
 
@@ -435,9 +446,26 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           )}
           <div>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>{recipientHeading}</p>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{isMulti ? "Sending one playdate invite to everyone" : "Sending a playdate invite"}</p>
+            <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{isMulti ? `Sending one ${isBirthday ? "birthday" : "playdate"} invite to everyone` : `Sending a ${isBirthday ? "birthday" : "playdate"} invite`}</p>
           </div>
         </div>
+
+        {isBirthday && (
+          <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>PARTY TITLE (optional)</p>
+            <input
+              type="text"
+              placeholder="e.g. Birthday party at the park!"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={60}
+              style={{ ...inputStyle, marginBottom: 0 }}
+            />
+            <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.5rem 0 0", lineHeight: "1.4" }}>
+              Add a friendly title for your celebration. Totally optional.
+            </p>
+          </div>
+        )}
 
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>DATE & TIME</p>
@@ -500,9 +528,9 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
                   onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
                   style={{
                     padding: "0.6rem", borderRadius: "8px", border: "1px solid",
-                    borderColor: selected ? "#02C39A" : "#2A4A6B",
-                    background: selected ? "#0F3D2E" : "transparent",
-                    color: selected ? "#02C39A" : "#8AAEC8",
+                    borderColor: selected ? accent : "#2A4A6B",
+                    background: selected ? accentBg : "transparent",
+                    color: selected ? accent : "#8AAEC8",
                     fontSize: "0.8rem", cursor: "pointer", textAlign: "left"
                   }}
                 >
@@ -547,7 +575,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
           <textarea
-            placeholder="e.g. Our kids seem to get along great!"
+            placeholder={isBirthday ? "e.g. Cake and games — hope you can make it!" : "e.g. Our kids seem to get along great!"}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
@@ -562,11 +590,13 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           disabled={loading}
           style={{
             width: "100%", padding: "0.85rem", borderRadius: "10px",
-            border: "none", background: loading ? "#028090" : "#02C39A",
+            border: "none", background: loading ? "#028090" : accent,
             color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
           }}
         >
-          {loading ? "Sending..." : isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →"}
+          {loading ? "Sending..." : isBirthday
+            ? (isMulti ? `Send birthday invite to ${recipientList.length} families →` : "Send birthday invite →")
+            : (isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →")}
         </button>
 
       </div>

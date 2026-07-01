@@ -15,6 +15,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [statUpcoming, setStatUpcoming] = useState(0);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  const [requestEventType, setRequestEventType] = useState("playdate");
   const [selectedClassroom, setSelectedClassroom] = useState(null);
   const [addingClassroom, setAddingClassroom] = useState(false);
   const [scopedSchool, setScopedSchool] = useState(null);
@@ -617,10 +618,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   if (requestingPlaydate) {
     return (
-      <PlaydateRequest session={session} recipient={requestingPlaydate}
-        onBack={() => setRequestingPlaydate(null)}
+      <PlaydateRequest session={session} recipient={requestingPlaydate} eventType={requestEventType}
+        onBack={() => { setRequestingPlaydate(null); setRequestEventType("playdate"); }}
         onSent={() => {
           setRequestingPlaydate(null);
+          setRequestEventType("playdate");
           if (typeof onPlaydateCreated === "function") onPlaydateCreated();
         }} />
     );
@@ -916,10 +918,17 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                     {shortName(card.parents?.name)}{petBadges(card.householdId)}
                   </p>
                 </div>
-                <button onClick={() => setRequestingPlaydate(card.parents)}
-                  style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-                  Huddle →
-                </button>
+                <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                  <button onClick={() => { setRequestEventType("birthday"); setRequestingPlaydate(card.parents); }}
+                    title="Send a birthday invite"
+                    style={{ background: "#2A1E3D", border: "1px solid #7C5CBF", color: "#C9A9FF", padding: "0.5rem 0.7rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                    🎂
+                  </button>
+                  <button onClick={() => { setRequestEventType("playdate"); setRequestingPlaydate(card.parents); }}
+                    style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                    Huddle →
+                  </button>
+                </div>
               </div>
             ))
           )}

@@ -113,7 +113,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       `DTSTAMP:${toIcs(new Date())}`,
       `DTSTART:${toIcs(start)}`,
       `DTEND:${toIcs(end)}`,
-      "SUMMARY:Playdate",
+      pd.event_type === "birthday" ? `SUMMARY:${esc(pd.title || "Birthday celebration")}` : "SUMMARY:Playdate",
       loc ? `LOCATION:${esc(loc)}` : "",
       pd.note ? `DESCRIPTION:${esc(pd.note)}` : "",
       "END:VEVENT",
@@ -769,13 +769,16 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: 0 }}>{it.organizerLabel} invited you</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: 0 }}>{it.organizerLabel} invited you{pd.event_type === "birthday" ? " to a birthday 🎂" : ""}</p>
             {!dim && needsReply ? (
               <span style={{ fontSize: "0.65rem", background: "#3D1F0A", color: "#F59E0B", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap", border: "1px solid #854F0B" }}>Needs reply</span>
             ) : (
               <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>{sb.text}</span>
             )}
           </div>
+          {pd.event_type === "birthday" && (
+            <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px" }}>🎂 {pd.title || "Birthday celebration"}</p>
+          )}
           <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}</p>
           <p style={metaRow}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           {petLine(pd, true)}
@@ -823,6 +826,9 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
           <div>
+            {pd.event_type === "birthday" && (
+              <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 2px" }}>🎂 {pd.title || "Birthday celebration"}</p>
+            )}
             <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
