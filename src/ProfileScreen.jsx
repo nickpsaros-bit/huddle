@@ -20,6 +20,13 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   });
   const [savingPrefs, setSavingPrefs] = useState(false);
 
+  // Birthdays (household attribute; month/day only, optional label).
+  const [birthdays, setBirthdays] = useState([]);
+  const [bdayMonth, setBdayMonth] = useState("");
+  const [bdayDay, setBdayDay] = useState("");
+  const [bdayLabel, setBdayLabel] = useState("");
+  const [bdayBusy, setBdayBusy] = useState(false);
+
   // ---- Link a household member (find a co-parent in your classrooms) ----
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkSearch, setLinkSearch] = useState("");
@@ -99,6 +106,15 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
       });
     }
 
+    // Load this household's birthdays (month/day only).
+    const { data: bdays } = await supabase
+      .from("household_birthdays")
+      .select("id, month, day, label")
+      .eq("household_id", hhId)
+      .order("month", { ascending: true })
+      .order("day", { ascending: true });
+    setBirthdays(bdays || []);
+
     // Any outgoing household-link request I've already sent that's still pending?
     const { data: outgoing } = await supabase
       .from("household_join_requests")
@@ -134,6 +150,50 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
       setMessage("Error: " + err.message);
     }
     setSavingPrefs(false);
+  };
+
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const addBirthday = async () => {
+    const m = parseInt(bdayMonth, 10);
+    const d = parseInt(bdayDay, 10);
+    if (!m || !d || m < 1 || m > 12 || d < 1 || d > 31) {
+      setMessage("Please pick a valid month and day.");
+      setTimeout(() => setMessage(""), 3000);
+      return;
+    }
+    if (!householdId) return;
+    setBdayBusy(true);
+    try {
+      const { error } = await supabase.from("household_birthdays").insert({
+        household_id: householdId,
+        month: m,
+        day: d,
+        label: bdayLabel.trim() || null,
+      });
+      if (error) throw error;
+      setBdayMonth(""); setBdayDay(""); setBdayLabel("");
+      setMessage("Birthday added 🎂");
+      fetchFamily();
+      setTimeout(() => setMessage(""), 2500);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setBdayBusy(false);
+  };
+
+  const deleteBirthday = async (id) => {
+    setBdayBusy(true);
+    try {
+      const { error } = await supabase.from("household_birthdays").delete().eq("id", id);
+      if (error) throw error;
+      setMessage("Birthday removed");
+      fetchFamily();
+      setTimeout(() => setMessage(""), 2500);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setBdayBusy(false);
   };
 
   // Open the link panel and load people in MY classrooms who are in a DIFFERENT
@@ -593,6 +653,59 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
           <button onClick={savePrefs} disabled={savingPrefs || !householdId}
             style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
             {savingPrefs ? "Saving..." : "Save pets & preferences"}
+          </button>
+        </div>
+
+        {/* BIRTHDAYS (household attribute — month/day only, optional label) */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>BIRTHDAYS</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Birthdays in your family 🎂</p>
+          <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
+            Add a birthday so families in your classrooms can celebrate together. We only store the month and day — never a name or age.
+          </p>
+
+          {birthdays.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              {birthdays.map((b) => (
+                <div key={b.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0.6rem 0.25rem", borderBottom: "1px solid #223B5A" }}>
+                  <span style={{ fontSize: "1.1rem" }}>🎂</span>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
+                      {MONTHS[b.month - 1]} {b.day}
+                      {b.label ? <span style={{ color: "#8AAEC8" }}> · {b.label}</span> : null}
+                    </p>
+                  </div>
+                  <button onClick={() => deleteBirthday(b.id)} disabled={bdayBusy}
+                    style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", fontSize: "0.75rem", padding: "0.35rem 0.7rem", borderRadius: "8px", cursor: "pointer", minHeight: "34px" }}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: "8px", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+            <select value={bdayMonth} onChange={(e) => setBdayMonth(e.target.value)}
+              style={{ flex: "1 1 120px", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: bdayMonth ? "#FFFFFF" : "#607080", fontSize: "0.9rem", cursor: "pointer" }}>
+              <option value="">Month</option>
+              {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+            <select value={bdayDay} onChange={(e) => setBdayDay(e.target.value)}
+              style={{ flex: "1 1 90px", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: bdayDay ? "#FFFFFF" : "#607080", fontSize: "0.9rem", cursor: "pointer" }}>
+              <option value="">Day</option>
+              {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <input type="text" placeholder="Optional — a nickname to tell birthdays apart (no full name needed)"
+            value={bdayLabel} onChange={(e) => setBdayLabel(e.target.value)} maxLength={30}
+            style={{ width: "100%", padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.85rem" }} />
+
+          <button onClick={addBirthday} disabled={bdayBusy || !householdId || !bdayMonth || !bdayDay}
+            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none",
+              background: (!bdayMonth || !bdayDay) ? "#1B3A5C" : "#02C39A",
+              color: (!bdayMonth || !bdayDay) ? "#607080" : "#0F2044",
+              fontSize: "0.95rem", fontWeight: "600", cursor: (!bdayMonth || !bdayDay) ? "not-allowed" : "pointer", minHeight: "44px" }}>
+            {bdayBusy ? "Saving..." : "Add birthday"}
           </button>
         </div>
 
