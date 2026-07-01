@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
+import Button from "./Button";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
@@ -738,28 +739,28 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
 
             {gradeConflict.existing.map((e) => (
-              <button key={e.id} disabled={savingMembership}
+              <Button key={e.id} fullWidth variant="secondary" disabled={savingMembership}
                 onClick={async () => {
                   setSavingMembership(true); setMembershipError("");
                   try { await commitClassroom(gradeConflict.school, gradeConflict.schoolYear, e.id, e.grade, gradeConflict.teacherName); }
                   catch (err) { setMembershipError(err.message); }
                   setSavingMembership(false);
                 }}
-                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.6rem", minHeight: "44px" }}>
+                style={{ border: "1px solid #02C39A", background: "#0F3D2E", color: "#02C39A", marginBottom: "0.6rem" }}>
                 Join {getGradeLabel(e.grade)} — same teacher, existing class
-              </button>
+              </Button>
             ))}
 
-            <button disabled={savingMembership}
+            <Button fullWidth variant="secondary" disabled={savingMembership}
               onClick={async () => {
                 setSavingMembership(true); setMembershipError("");
                 try { await commitClassroom(gradeConflict.school, gradeConflict.schoolYear, null, gradeConflict.gradeIdx, gradeConflict.teacherName); }
                 catch (err) { setMembershipError(err.message); }
                 setSavingMembership(false);
               }}
-              style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.6rem", minHeight: "44px" }}>
+              style={{ color: "#FFFFFF", marginBottom: "0.6rem" }}>
               Add {getGradeLabel(gradeConflict.gradeIdx)} anyway
-            </button>
+            </Button>
 
             <button onClick={() => setGradeConflict(null)} disabled={savingMembership}
               style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "none", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", minHeight: "44px" }}>
@@ -842,10 +843,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.5rem", lineHeight: "1.4" }}>
               Did you mean an existing teacher? Pick one to join the same class, or keep your spelling to add a new teacher.
             </p>
-            <button onClick={() => { setNewTeacher(nearTeacherMatch); setShowNewTeacherDropdown(false); }}
-              style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A", borderRadius: "8px", padding: "0.4rem 0.8rem", fontSize: "0.82rem", fontWeight: "600", cursor: "pointer", minHeight: "40px" }}>
+            <Button variant="secondary" size="sm" onClick={() => { setNewTeacher(nearTeacherMatch); setShowNewTeacherDropdown(false); }}
+              style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
               📚 Use "{nearTeacherMatch}"
-            </button>
+            </Button>
           </div>
         )}
 
@@ -857,11 +858,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
         {membershipError && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{membershipError}</p>}
         <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={closeAddClassroom} style={{ flex: 1, padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "1rem", cursor: "pointer" }}>Cancel</button>
-          <button onClick={saveNewClassroom} disabled={!newGrade || (!scopedSchool && !newSchoolSearch) || !newTeacher || savingMembership}
-            style={{ flex: 2, padding: "0.85rem", borderRadius: "10px", border: "none", background: (!newGrade || (!scopedSchool && !newSchoolSearch) || !newTeacher) ? "#2A4A6B" : "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer" }}>
+          <Button variant="secondary" onClick={closeAddClassroom} style={{ flex: 1 }}>Cancel</Button>
+          <Button variant="primary" onClick={saveNewClassroom} disabled={!newGrade || (!scopedSchool && !newSchoolSearch) || !newTeacher || savingMembership}
+            style={{ flex: 2 }}>
             {savingMembership ? "Saving..." : "Add classroom →"}
-          </button>
+          </Button>
         </div>
         </>
         )}
@@ -978,24 +979,23 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                  <button onClick={() => { setRequestEventType("birthday"); setRequestingPlaydate(card.parents); }}
-                    title="Send a birthday invite"
-                    style={{ background: "#2A1E3D", border: "1px solid #7C5CBF", color: "#C9A9FF", padding: "0.5rem 0.7rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                  <Button variant="accent" size="sm" title="Send a birthday invite"
+                    onClick={() => { setRequestEventType("birthday"); setRequestingPlaydate(card.parents); }}>
                     🎂
-                  </button>
-                  <button onClick={() => { setRequestEventType("playdate"); setRequestingPlaydate(card.parents); }}
-                    style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                  </Button>
+                  <Button variant="primary" size="sm"
+                    onClick={() => { setRequestEventType("playdate"); setRequestingPlaydate(card.parents); }}>
                     Huddle →
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))
           )}
 
-          <button onClick={() => setInviting(true)}
-            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginTop: "1rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <Button fullWidth onClick={() => setInviting(true)}
+            style={{ border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", borderRadius: "12px", marginTop: "1rem" }}>
             ➕ Invite a parent to Huddle
-          </button>
+          </Button>
 
           <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
             style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#607080", fontSize: "0.8rem", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
@@ -1159,18 +1159,17 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
               Add your school and classroom to find other families to huddle with.
             </p>
-            <button onClick={openAddDifferentSchool}
-              style={{ padding: "0.85rem 1.5rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+            <Button variant="primary" onClick={openAddDifferentSchool}>
               ➕ Add a classroom
-            </button>
+            </Button>
           </div>
         )}
 
         {memberships.length > 0 && (
-          <button onClick={openAddDifferentSchool}
-            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "#162D50", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <Button fullWidth variant="secondary" onClick={openAddDifferentSchool}
+            style={{ background: "#162D50", borderRadius: "12px", marginBottom: "0.75rem" }}>
             🏫 Add a different school
-          </button>
+          </Button>
         )}
 
         <div style={{ textAlign: "center", marginTop: "1.5rem" }}>
