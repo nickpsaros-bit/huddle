@@ -40,6 +40,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [statBirthdaysMonth, setStatBirthdaysMonth] = useState(0);
   const [monthBirthdays, setMonthBirthdays] = useState([]);
   const [showBirthdayList, setShowBirthdayList] = useState(false);
+  const [hasUpcomingBirthdayEvent, setHasUpcomingBirthdayEvent] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -268,6 +269,19 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         if (new Date(pd.proposed_date).toISOString() < nowIso) continue;
         candidates.push({ pd, role: "invited" });
       }
+
+      // Do I have an upcoming BIRTHDAY event I've accepted (RSVP yes) or am hosting?
+      let birthdayEvent = false;
+      for (const inv of (myInvites || [])) {
+        const pd = inv.playdates;
+        if (!pd) continue;
+        if (pd.event_type !== "birthday") continue;
+        if (pd.status === "cancelled") continue;
+        if (new Date(pd.proposed_date).toISOString() < nowIso) continue;
+        const hosting = pd.organizer_household_id === hhId;
+        if (hosting || inv.rsvp === "yes") { birthdayEvent = true; break; }
+      }
+      setHasUpcomingBirthdayEvent(birthdayEvent);
 
       candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
       setStatUpcoming(candidates.length);
@@ -1029,16 +1043,22 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Connections", value: statConnections, go: onGoToNetwork },
             { label: "Families at your school", value: familiesAtSchool, go: null },
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
-            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true) },
+            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent },
           ];
           return (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
               {tiles.map((t) => (
                 <div key={t.label}
                   onClick={() => t.go && t.go()}
-                  style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 0.5rem", textAlign: "center", cursor: t.go ? "pointer" : "default" }}>
+                  style={{
+                    background: t.highlight ? "#0F3D2E" : "#162D50",
+                    border: t.highlight ? "2px solid #02C39A" : "1px solid #2A4A6B",
+                    borderRadius: "12px", padding: "0.9rem 0.5rem", textAlign: "center",
+                    cursor: t.go ? "pointer" : "default",
+                    boxShadow: t.highlight ? "0 0 12px rgba(2, 195, 154, 0.35)" : "none",
+                  }}>
                   <p style={{ color: "#02C39A", fontSize: "1.6rem", fontWeight: "700", margin: "0 0 2px" }}>{t.value}</p>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.68rem", margin: 0, lineHeight: "1.25" }}>{t.label}</p>
+                  <p style={{ color: t.highlight ? "#02C39A" : "#8AAEC8", fontSize: "0.68rem", margin: 0, lineHeight: "1.25", fontWeight: t.highlight ? "600" : "400" }}>{t.label}</p>
                 </div>
               ))}
             </div>
