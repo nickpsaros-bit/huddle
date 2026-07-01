@@ -37,6 +37,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [wishedIds, setWishedIds] = useState({}); // birthday.id -> true after wishing
   const [wishBusy, setWishBusy] = useState(null);
   const [statBirthdaysMonth, setStatBirthdaysMonth] = useState(0);
+  const [monthBirthdays, setMonthBirthdays] = useState([]);
+  const [showBirthdayList, setShowBirthdayList] = useState(false);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -220,10 +222,18 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
         setUpcomingBirthdays(upcoming);
 
-        // "This month" count — all visible households' birthdays in the current month.
+        // "This month" — all visible households' birthdays in the current month.
         const curMonth = now.getMonth() + 1;
-        const monthCount = (bdayRows || []).filter((b) => b.month === curMonth).length;
-        setStatBirthdaysMonth(monthCount);
+        const monthList = (bdayRows || [])
+          .filter((b) => b.month === curMonth)
+          .map((b) => ({
+            ...b,
+            familyLabel: labelByHh[b.household_id] || (b.household_id === hhId ? "Your family" : "A family in your classroom"),
+            isMine: b.household_id === hhId,
+          }))
+          .sort((a, b) => a.day - b.day);
+        setStatBirthdaysMonth(monthList.length);
+        setMonthBirthdays(monthList);
       }
     } catch (e) {
       // Birthdays are a nice-to-have; never block the feed.
@@ -798,6 +808,61 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     </div>
   );
 
+  if (showBirthdayList) {
+    const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const now = new Date();
+    const monthName = MONTH_NAMES[now.getMonth()];
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => setShowBirthdayList(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Birthdays in {monthName}</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {monthBirthdays.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+              <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🎂</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No birthdays this month</p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>When families in your classrooms add birthdays, they'll show up here.</p>
+            </div>
+          ) : (
+            <>
+              <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
+                Families in your classrooms and connections with a birthday in {monthName}.
+              </p>
+              {monthBirthdays.map((b) => (
+                <div key={b.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "10px", background: "#2A1E3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "#C9A9FF" }}>{b.day}</span>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>
+                      {b.isMine ? "Your family" : b.familyLabel}
+                      {b.label ? <span style={{ color: "#C9A9FF" }}> · {b.label}</span> : null}
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{monthName} {b.day}</p>
+                  </div>
+                  {!b.isMine && (
+                    wishedIds[b.id] ? (
+                      <span style={{ color: "#02C39A", fontSize: "0.8rem", fontWeight: "600", flexShrink: 0 }}>Sent 🎉</span>
+                    ) : (
+                      <button onClick={() => wishHappyBirthday(b)} disabled={wishBusy === b.id}
+                        style={{ background: "#7C5CBF", border: "none", color: "#FFFFFF", fontSize: "0.8rem", fontWeight: "600", padding: "0.45rem 0.85rem", borderRadius: "8px", cursor: "pointer", minHeight: "36px", flexShrink: 0 }}>
+                        {wishBusy === b.id ? "..." : "Wish 🎂"}
+                      </button>
+                    )
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (selectedClassroom) {
     const m = selectedClassroom;
     const cards = familyCardsFor(m);
@@ -955,7 +1020,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Connections", value: statConnections, go: onGoToNetwork },
             { label: "Families at your school", value: familiesAtSchool, go: null },
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
-            { label: "Birthdays this month", value: statBirthdaysMonth, go: null },
+            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true) },
           ];
           return (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
