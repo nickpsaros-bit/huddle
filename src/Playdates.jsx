@@ -19,6 +19,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const [pickLoading, setPickLoading] = useState(false);
   const [pickSearch, setPickSearch] = useState("");
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);      // the playdate row being edited
+  const [editingRecipients, setEditingRecipients] = useState([]); // current guests as {id,name,photo_url}
   // Multi-select + premium gate
   const [selectedIds, setSelectedIds] = useState([]);
   const [myPlan, setMyPlan] = useState("free");
@@ -565,6 +567,35 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     setBusy(false);
   };
 
+  // Open the editor for a hosted event: load its current guest families, then
+  // render the form in edit mode pre-filled with details + guest list.
+  const openEdit = async (it) => {
+    const pd = it.playdate;
+    try {
+      const myHh = pd.organizer_household_id;
+      // Current guest invite rows (exclude host's own).
+      const { data: invRows } = await supabase
+        .from("playdate_invites")
+        .select("invited_parent_id, household_id")
+        .eq("playdate_id", pd.id)
+        .neq("household_id", myHh);
+
+      const parentIds = [...new Set((invRows || []).map((r) => r.invited_parent_id).filter(Boolean))];
+      let recipients = [];
+      if (parentIds.length > 0) {
+        const { data: parents } = await supabase
+          .from("parents")
+          .select("id, name, photo_url")
+          .in("id", parentIds);
+        recipients = parents || [];
+      }
+      setEditingRecipients(recipients);
+      setEditingEvent(pd);
+    } catch (err) {
+      setMessage("Couldn't open editor: " + err.message);
+    }
+  };
+
   const cancelPlaydate = (pd) => {
     setConfirm({
       title: "Cancel this playdate?",
@@ -660,6 +691,23 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   };
 
   // ---- If creating a playdate, render the request form (reuses existing flow) ----
+  if (editingEvent) {
+    return (
+      <PlaydateRequest
+        session={session}
+        editEvent={editingEvent}
+        recipients={editingRecipients}
+        onBack={() => { setEditingEvent(null); setEditingRecipients([]); }}
+        onSent={() => {
+          setEditingEvent(null);
+          setEditingRecipients([]);
+          fetchData();
+          if (typeof onChanged === "function") onChanged();
+        }}
+      />
+    );
+  }
+
   if (requestingPlaydate) {
     return (
       <PlaydateRequest
@@ -891,6 +939,11 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
               <Button variant="secondary" size="sm" onClick={() => addToCalendar(pd)}
                 style={{ color: "#02C39A", border: "1px solid #02C39A" }}>
                 📆 Add to calendar
+              </Button>
+            )}
+            {!dim && (
+              <Button variant="secondary" size="sm" onClick={() => openEdit(it)} disabled={busy}>
+                ✏️ Edit
               </Button>
             )}
             {!dim && (

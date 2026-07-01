@@ -2,8 +2,11 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 
-export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent, eventType = "playdate" }) {
-  const isBirthday = eventType === "birthday";
+export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent, eventType = "playdate", editEvent = null }) {
+  const isEditing = !!editEvent;
+  // In edit mode, the event's own type wins; otherwise use the passed eventType.
+  const effectiveType = isEditing ? (editEvent.event_type || "playdate") : eventType;
+  const isBirthday = effectiveType === "birthday";
 
   // Normalize to a list: supports single `recipient` (Home/Network) or `recipients` array (multi-select picker).
   const recipientList = (recipients && recipients.length > 0)
@@ -40,6 +43,24 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   ];
 
   const recipientIdsKey = recipientList.map((r) => r.id).join(",");
+
+  // Pre-fill the form when editing an existing event.
+  useEffect(() => {
+    if (!editEvent) return;
+    if (editEvent.proposed_date) {
+      const d = new Date(editEvent.proposed_date);
+      // Local yyyy-mm-dd and HH:mm for the inputs.
+      const pad = (x) => String(x).padStart(2, "0");
+      setDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      setTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    }
+    setLocationName(editEvent.location_name || "");
+    setLocationAddress(editEvent.location_address || "");
+    setNote(editEvent.note || "");
+    setTitle(editEvent.title || "");
+    setBringingDog(!!editEvent.bringing_dog);
+    setBringingCat(!!editEvent.bringing_cat);
+  }, [editEvent]);
 
  useEffect(() => {
     (async () => {
@@ -254,7 +275,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           status: "pending",
           bringing_dog: bringingDog,
           bringing_cat: bringingCat,
-          event_type: eventType,
+          event_type: effectiveType,
           title: isBirthday ? (title.trim() || null) : null,
         })
         .select()
@@ -331,12 +352,163 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   };
 
   // Button handler: validate, run the aggregated pet cross-check, then send.
+  // Save edits to an existing event: update details, diff the guest list
+  // (add new families, remove dropped ones), and notify appropriately.
+  const saveEdits = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const { data: myHm, error: myErr } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", session.user.id)
+        .single();
+      if (myErr) throw myErr;
+
+      const proposedDate = new Date(`${date}T${time}`).toISOString();
+
+      // Did the "when/where" meaningfully change? (drives whether we re-notify guests)
+      const detailsChanged =
+        proposedDate !== new Date(editEvent.proposed_date).toISOString() ||
+        (locationName || "") !== (editEvent.location_name || "") ||
+        (locationAddress || "") !== (editEvent.location_address || "");
+
+      // 1) Update the event row.
+      const { error: updErr } = await supabase
+        .from("playdates")
+        .update({
+          proposed_date: proposedDate,
+          location_name: locationName,
+          location_address: locationAddress,
+          note: note || null,
+          title: isBirthday ? (title.trim() || null) : null,
+          bringing_dog: bringingDog,
+          bringing_cat: bringingCat,
+        })
+        .eq("id", editEvent.id);
+      if (updErr) throw updErr;
+
+      // 2) Resolve the NEW recipient list -> their households.
+      const newTargets = [];
+      for (const r of recipientList) {
+        const { data: theirHm } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", r.id)
+          .single();
+        if (theirHm && theirHm.household_id !== myHm.household_id) {
+          newTargets.push({ parentId: r.id, householdId: theirHm.household_id });
+        }
+      }
+      const newHouseholdIds = new Set(newTargets.map((t) => t.householdId));
+
+      // 3) Current invite rows (excluding the host's own row).
+      const { data: existingInvites } = await supabase
+        .from("playdate_invites")
+        .select("id, household_id")
+        .eq("playdate_id", editEvent.id)
+        .neq("household_id", myHm.household_id);
+      const existingHouseholdIds = new Set((existingInvites || []).map((i) => i.household_id));
+
+      // 4) ADD: households in new list but not currently invited.
+      const toAdd = newTargets.filter((t) => !existingHouseholdIds.has(t.householdId));
+      if (toAdd.length > 0) {
+        const rows = toAdd.map((t) => ({
+          playdate_id: editEvent.id,
+          household_id: t.householdId,
+          invited_by_household_id: myHm.household_id,
+          invited_parent_id: t.parentId,
+          rsvp: "invited",
+        }));
+        await supabase.from("playdate_invites").insert(rows);
+      }
+
+      // 5) REMOVE: currently invited but not in the new list.
+      const removeRows = (existingInvites || []).filter((i) => !newHouseholdIds.has(i.household_id));
+      if (removeRows.length > 0) {
+        await supabase.from("playdate_invites")
+          .delete()
+          .in("id", removeRows.map((r) => r.id));
+      }
+
+      // ---- Notifications (best-effort) ----
+      try {
+        // Inviter label.
+        const { data: myMembers } = await supabase
+          .from("household_members").select("parents(name)").eq("household_id", myHm.household_id);
+        const inviterLabel = (myMembers || [])
+          .map((m) => m.parents?.name).filter(Boolean)
+          .map((n) => { const p = n.trim().split(/\s+/); return p.length === 1 ? p[0] : `${p[0]} ${p[p.length-1].charAt(0)}.`; })
+          .join(" & ") || "A family";
+        const kind = isBirthday ? "birthday" : "playdate";
+
+        // Newly added families: standard invite notification.
+        if (toAdd.length > 0) {
+          const { data: addMembers } = await supabase
+            .from("household_members").select("parent_id").in("household_id", toAdd.map((t) => t.householdId));
+          const rows = (addMembers || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: isBirthday ? "birthday_invite" : "playdate_invite",
+            title: isBirthday ? "You're invited to a birthday! 🎂" : "New playdate invite 🎉",
+            body: `${inviterLabel} invited you to a ${kind}. Open the Playdates tab to RSVP.`,
+          }));
+          if (rows.length > 0) await supabase.from("notifications").insert(rows);
+        }
+
+        // Removed families: gentle heads-up.
+        if (removeRows.length > 0) {
+          const { data: remMembers } = await supabase
+            .from("household_members").select("parent_id").in("household_id", removeRows.map((r) => r.household_id));
+          const rows = (remMembers || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "event_removed",
+            title: "Plans changed",
+            body: `${inviterLabel}'s ${kind} plans changed and it's no longer on your calendar.`,
+          }));
+          if (rows.length > 0) await supabase.from("notifications").insert(rows);
+        }
+
+        // Kept families: only notify if when/where changed.
+        if (detailsChanged) {
+          const keptIds = newTargets.filter((t) => existingHouseholdIds.has(t.householdId)).map((t) => t.householdId);
+          if (keptIds.length > 0) {
+            const { data: keptMembers } = await supabase
+              .from("household_members").select("parent_id").in("household_id", keptIds);
+            const rows = (keptMembers || []).map((m) => ({
+              recipient_id: m.parent_id,
+              type: "event_updated",
+              title: isBirthday ? "Birthday details updated 🎂" : "Playdate details updated",
+              body: `${inviterLabel} updated the ${kind} details. Open the Playdates tab to see what changed.`,
+            }));
+            if (rows.length > 0) await supabase.from("notifications").insert(rows);
+          }
+        }
+      } catch (notifErr) { /* best-effort */ }
+
+      setSent(true);
+      setTimeout(() => { onSent(); }, 1400);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
   const attemptSend = () => {
     if (!date || !time || !locationName) {
       setError("Please fill in date, time and location");
       return;
     }
     setError("");
+
+    // Edit mode: require at least one family, then save.
+    if (isEditing) {
+      if (recipientList.length === 0) {
+        setError("A birthday needs at least one family invited.");
+        return;
+      }
+      saveEdits();
+      return;
+    }
 
     const dogConflict = bringingDog && anyPreferNoDogs;
     const catConflict = bringingCat && anyPreferNoCats;
@@ -399,7 +571,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
         <div style={{ textAlign: "center", maxWidth: "340px" }}>
           <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>{isBirthday ? "🎂" : "🎉"}</div>
-          <h2 style={{ color: accent, fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>Invite sent!</h2>
+          <h2 style={{ color: accent, fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>{isEditing ? "Changes saved!" : "Invite sent!"}</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
             {isMulti
               ? `${recipientList.length} families will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`
@@ -422,7 +594,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
         <button onClick={onBack} style={{ background: "transparent", border: "none", color: accent, fontSize: "1rem", cursor: "pointer" }}>← Back</button>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{isBirthday ? "🎂 Birthday Invite" : "Request a Playdate"}</h1>
+        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{isEditing ? (isBirthday ? "🎂 Edit birthday" : "Edit playdate") : (isBirthday ? "🎂 Birthday Invite" : "Request a Playdate")}</h1>
         <div style={{ width: "60px" }} />
       </div>
 
@@ -594,9 +766,11 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
           }}
         >
-          {loading ? "Sending..." : isBirthday
-            ? (isMulti ? `Send birthday invite to ${recipientList.length} families →` : "Send birthday invite →")
-            : (isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →")}
+          {loading ? (isEditing ? "Saving..." : "Sending...") : isEditing
+            ? "Save changes"
+            : isBirthday
+              ? (isMulti ? `Send birthday invite to ${recipientList.length} families →` : "Send birthday invite →")
+              : (isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →")}
         </button>
 
       </div>
