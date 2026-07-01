@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
+import Button from "./Button";
 import PlaydateRequest from "./PlaydateRequest";
 
 export default function Playdates({ session, onChanged, avatarUrl, onProfileClick }) {
@@ -815,16 +816,20 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           )}
 
           {dim && isDeclined(it) && (
-            <button onClick={() => respond(it.invite.id, "yes")} disabled={busy}
-              style={{ width: "100%", marginTop: "0.85rem", padding: "0.55rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.8rem", cursor: "pointer" }}>
-              Changed your mind? Tap to go
-            </button>
+            <div style={{ marginTop: "0.85rem" }}>
+              <Button variant="secondary" size="sm" onClick={() => respond(it.invite.id, "yes")} disabled={busy}>
+                Changed your mind? Tap to go
+              </Button>
+            </div>
           )}
 
           {showCal && (
-            <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
-              📆 Add to calendar
-            </button>
+            <div style={{ marginTop: "0.85rem" }}>
+              <Button variant="secondary" size="sm" onClick={() => addToCalendar(pd)}
+                style={{ color: "#02C39A", border: "1px solid #02C39A" }}>
+                📆 Add to calendar
+              </Button>
+            </div>
           )}
         </div>
       );
@@ -874,24 +879,26 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           ))}
         </div>
 
-        {showNudge && (
-          <button onClick={() => nudgeGuests(it)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px", border: "1px solid #854F0B", background: "transparent", color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
-            👋 Nudge {unfirmedCount === 1 ? "the family who hasn't replied" : `the ${unfirmedCount} who haven't replied`}
-          </button>
-        )}
-
-        {showCal && (
-          <button onClick={() => addToCalendar(pd)} style={calButtonStyle}>
-            📆 Add to calendar
-          </button>
-        )}
-
-        {!dim && (
-          <button onClick={() => cancelPlaydate(pd)} disabled={busy}
-            style={{ width: "100%", marginTop: "0.85rem", padding: "0.7rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", fontWeight: "500", cursor: "pointer", minHeight: "44px" }}>
-            Cancel playdate
-          </button>
+        {(showNudge || showCal || !dim) && (
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "0.85rem", alignItems: "center" }}>
+            {showNudge && (
+              <Button variant="accent" size="sm" onClick={() => nudgeGuests(it)} disabled={busy}
+                style={{ background: "#3D2A0A", color: "#F59E0B", border: "1px solid #854F0B" }}>
+                👋 Nudge {unfirmedCount === 1 ? "who hasn't replied" : `${unfirmedCount} who haven't`}
+              </Button>
+            )}
+            {showCal && (
+              <Button variant="secondary" size="sm" onClick={() => addToCalendar(pd)}
+                style={{ color: "#02C39A", border: "1px solid #02C39A" }}>
+                📆 Add to calendar
+              </Button>
+            )}
+            {!dim && (
+              <Button variant="ghost" size="sm" onClick={() => cancelPlaydate(pd)} disabled={busy}>
+                Cancel {pd.event_type === "birthday" ? "birthday" : "playdate"}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     );
