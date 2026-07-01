@@ -8,11 +8,18 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   const effectiveType = isEditing ? (editEvent.event_type || "playdate") : eventType;
   const isBirthday = effectiveType === "birthday";
 
-  // Normalize to a list: supports single `recipient` (Home/Network) or `recipients` array (multi-select picker).
-  const recipientList = (recipients && recipients.length > 0)
+  // Normalize the initial list: supports single `recipient` (Home/Network) or `recipients` array.
+  const initialRecipients = (recipients && recipients.length > 0)
     ? recipients
     : (recipient ? [recipient] : []);
+  // Stateful so edit mode can add/remove families right up until the party.
+  const [recipientList, setRecipientList] = useState(initialRecipients);
   const isMulti = recipientList.length > 1;
+
+  // Family picker (used in edit mode to add more invitees).
+  const [showFamilyPicker, setShowFamilyPicker] = useState(false);
+  const [pickerPeople, setPickerPeople] = useState([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -43,6 +50,66 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   ];
 
   const recipientIdsKey = recipientList.map((r) => r.id).join(",");
+
+  // Re-seed when a new set of recipients arrives (e.g., opening the editor).
+  useEffect(() => {
+    setRecipientList(initialRecipients);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ (recipients || []).map((r) => r.id).join(","), recipient?.id ]);
+
+  // Load families the host can invite (connections + classmates), minus already-invited.
+  const openFamilyPicker = async () => {
+    setShowFamilyPicker(true);
+    setPickerLoading(true);
+    try {
+      const uid = session.user.id;
+      const byId = {};
+      const { data: conns } = await supabase
+        .from("connections")
+        .select(`requester:parents!connections_requester_id_fkey(id, name, photo_url), recipient:parents!connections_recipient_id_fkey(id, name, photo_url), requester_id, recipient_id`)
+        .or(`requester_id.eq.${uid},recipient_id.eq.${uid}`)
+        .eq("status", "accepted");
+      for (const c of (conns || [])) {
+        const p = c.requester_id === uid ? c.recipient : c.requester;
+        if (p && p.id && p.id !== uid) byId[p.id] = p;
+      }
+      const { data: myHm } = await supabase
+        .from("household_members").select("household_id").eq("parent_id", uid).maybeSingle();
+      if (myHm) {
+        const { data: myCms } = await supabase
+          .from("classroom_members").select("classroom_id, school_year").eq("household_id", myHm.household_id);
+        for (const cm of (myCms || [])) {
+          const { data: mates } = await supabase
+            .from("classroom_members")
+            .select("households(household_members(parents(id, name, photo_url)))")
+            .eq("classroom_id", cm.classroom_id).eq("school_year", cm.school_year)
+            .neq("household_id", myHm.household_id);
+          for (const row of (mates || [])) {
+            for (const mm of (row.households?.household_members || [])) {
+              const p = mm.parents;
+              if (p && p.id && p.id !== uid) byId[p.id] = p;
+            }
+          }
+        }
+      }
+      // Exclude already-invited.
+      const invitedIds = new Set(recipientList.map((r) => r.id));
+      const list = Object.values(byId).filter((p) => !invitedIds.has(p.id))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      setPickerPeople(list);
+    } catch (e) {
+      setError("Couldn't load families: " + e.message);
+    }
+    setPickerLoading(false);
+  };
+
+  const addRecipient = (p) => {
+    setRecipientList((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
+    setPickerPeople((prev) => prev.filter((x) => x.id !== p.id));
+  };
+  const removeRecipient = (id) => {
+    setRecipientList((prev) => prev.filter((x) => x.id !== id));
+  };
 
   // Pre-fill the form when editing an existing event.
   useEffect(() => {
@@ -589,6 +656,45 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   const showBringPets = myPets.has_dog || myPets.has_cat;
   const firstRecipient = recipientList[0];
 
+  // Family picker overlay (add more invitees).
+  if (showFamilyPicker) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "40px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => setShowFamilyPicker(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Add families</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+        <div style={{ padding: "1.5rem", maxWidth: "500px", margin: "0 auto" }}>
+          {pickerLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading families...</p>
+          ) : pickerPeople.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ fontSize: "2rem", margin: "0 0 0.75rem" }}>✅</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.4rem" }}>Everyone's already invited</p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>No more families to add right now.</p>
+            </div>
+          ) : (
+            pickerPeople.map((p) => (
+              <div key={p.id} onClick={() => addRecipient(p)}
+                style={{ display: "flex", alignItems: "center", gap: "12px", background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.85rem 1rem", marginBottom: "10px", cursor: "pointer" }}>
+                <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                  {p.photo_url ? <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (p.name?.charAt(0) || "?")}
+                </div>
+                <span style={{ flex: 1, color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500" }}>{shortName(p.name)}</span>
+                <span style={{ color: "#7C5CBF", fontSize: "0.85rem", fontWeight: "600" }}>+ Add</span>
+              </div>
+            ))
+          )}
+          <button onClick={() => setShowFamilyPicker(false)}
+            style={{ width: "100%", marginTop: "0.5rem", padding: "0.8rem", borderRadius: "999px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+            Done ({recipientList.length} invited)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
@@ -621,6 +727,35 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{isMulti ? `Sending one ${isBirthday ? "birthday" : "playdate"} invite to everyone` : `Sending a ${isBirthday ? "birthday" : "playdate"} invite`}</p>
           </div>
         </div>
+
+        {(isEditing || isBirthday) && (
+          <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0, letterSpacing: "0.05em" }}>WHO'S INVITED ({recipientList.length})</p>
+              <button onClick={openFamilyPicker}
+                style={{ background: "#2A1E3D", border: "1px solid #7C5CBF", color: "#C9A9FF", fontSize: "0.8rem", fontWeight: "600", padding: "0.4rem 0.85rem", borderRadius: "999px", cursor: "pointer" }}>
+                + Add families
+              </button>
+            </div>
+
+            {recipientList.length === 0 ? (
+              <p style={{ color: "#607080", fontSize: "0.82rem", margin: 0 }}>No families invited yet — tap “Add families”.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {recipientList.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "10px", background: "#0F2044", borderRadius: "10px", padding: "0.5rem 0.75rem" }}>
+                    <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                      {r.photo_url ? <img src={r.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (r.name?.charAt(0) || "?")}
+                    </div>
+                    <span style={{ flex: 1, color: "#FFFFFF", fontSize: "0.88rem" }}>{shortName(r.name)}</span>
+                    <button onClick={() => removeRecipient(r.id)}
+                      style={{ background: "transparent", border: "none", color: "#607080", fontSize: "1.1rem", cursor: "pointer", lineHeight: 1, padding: "0 4px" }} aria-label="Remove">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {isBirthday && (
           <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
