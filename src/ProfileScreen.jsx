@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
+import PlaydateRequest from "./PlaydateRequest";
 
 export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [parent, setParent] = useState(null);
@@ -26,6 +27,11 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [bdayDay, setBdayDay] = useState("");
   const [bdayLabel, setBdayLabel] = useState("");
   const [bdayBusy, setBdayBusy] = useState(false);
+  const [bdayInviteOpen, setBdayInviteOpen] = useState(false);   // family picker open
+  const [bdayPeople, setBdayPeople] = useState([]);               // families I can invite
+  const [bdayPeopleLoading, setBdayPeopleLoading] = useState(false);
+  const [bdaySelected, setBdaySelected] = useState({});           // parentId -> person
+  const [bdayLaunch, setBdayLaunch] = useState(null);             // array of recipients -> opens form
 
   // ---- Link a household member (find a co-parent in your classrooms) ----
   const [linkOpen, setLinkOpen] = useState(false);
@@ -180,6 +186,73 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
       setMessage("Error: " + err.message);
     }
     setBdayBusy(false);
+  };
+
+  // Open the birthday family picker and load families I can invite
+  // (accepted connections + parents sharing my classrooms).
+  const openBirthdayInvite = async () => {
+    setBdayInviteOpen(true);
+    setBdaySelected({});
+    setBdayPeopleLoading(true);
+    try {
+      const uid = session.user.id;
+      const peopleById = {};
+
+      // Connections (accepted).
+      const { data: conns } = await supabase
+        .from("connections")
+        .select(`requester:parents!connections_requester_id_fkey(id, name, photo_url), recipient:parents!connections_recipient_id_fkey(id, name, photo_url), requester_id, recipient_id`)
+        .or(`requester_id.eq.${uid},recipient_id.eq.${uid}`)
+        .eq("status", "accepted");
+      for (const c of (conns || [])) {
+        const p = c.requester_id === uid ? c.recipient : c.requester;
+        if (p && p.id && p.id !== uid) peopleById[p.id] = p;
+      }
+
+      // Classmates: parents sharing my classrooms.
+      if (householdId) {
+        const { data: myCms } = await supabase
+          .from("classroom_members")
+          .select("classroom_id, school_year")
+          .eq("household_id", householdId);
+        for (const cm of (myCms || [])) {
+          const { data: mates } = await supabase
+            .from("classroom_members")
+            .select("households(household_members(parents(id, name, photo_url)))")
+            .eq("classroom_id", cm.classroom_id)
+            .eq("school_year", cm.school_year)
+            .neq("household_id", householdId);
+          for (const row of (mates || [])) {
+            const members = row.households?.household_members || [];
+            for (const mm of members) {
+              const p = mm.parents;
+              if (p && p.id && p.id !== uid) peopleById[p.id] = p;
+            }
+          }
+        }
+      }
+
+      setBdayPeople(Object.values(peopleById).sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+    } catch (err) {
+      setMessage("Couldn't load families: " + err.message);
+    }
+    setBdayPeopleLoading(false);
+  };
+
+  const toggleBdaySelect = (person) => {
+    setBdaySelected((prev) => {
+      const next = { ...prev };
+      if (next[person.id]) delete next[person.id];
+      else next[person.id] = person;
+      return next;
+    });
+  };
+
+  const continueToBirthdayForm = () => {
+    const recipients = Object.values(bdaySelected);
+    if (recipients.length === 0) return;
+    setBdayInviteOpen(false);
+    setBdayLaunch(recipients);
   };
 
   const deleteBirthday = async (id) => {
@@ -417,6 +490,74 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
         <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Loading...</p>
+      </div>
+    );
+  }
+
+  // Birthday invite form (multi-family) launched from the picker.
+  if (bdayLaunch) {
+    return (
+      <PlaydateRequest
+        session={session}
+        recipients={bdayLaunch}
+        eventType="birthday"
+        onBack={() => setBdayLaunch(null)}
+        onSent={() => { setBdayLaunch(null); setMessage("Birthday invite sent 🎂"); setTimeout(() => setMessage(""), 3000); }}
+      />
+    );
+  }
+
+  // Birthday family picker (multi-select).
+  if (bdayInviteOpen) {
+    const selectedCount = Object.keys(bdaySelected).length;
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "90px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => setBdayInviteOpen(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Invite families</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
+            Choose the families you'd like to invite to the birthday. You can pick as many as you like.
+          </p>
+
+          {bdayPeopleLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading families...</p>
+          ) : bdayPeople.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ fontSize: "2rem", margin: "0 0 0.75rem" }}>👋</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.4rem" }}>No families to invite yet</p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>Connect with families or join a classroom, then you can invite them.</p>
+            </div>
+          ) : (
+            bdayPeople.map((p) => {
+              const on = !!bdaySelected[p.id];
+              return (
+                <div key={p.id} onClick={() => toggleBdaySelect(p)}
+                  style={{ display: "flex", alignItems: "center", gap: "12px", background: on ? "#2A1E3D" : "#162D50", border: on ? "1px solid #7C5CBF" : "1px solid #2A4A6B", borderRadius: "12px", padding: "0.85rem 1rem", marginBottom: "10px", cursor: "pointer" }}>
+                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                    {p.photo_url ? <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (p.name?.charAt(0) || "?")}
+                  </div>
+                  <p style={{ flex: 1, color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{shortName(p.name)}</p>
+                  <div style={{ width: "24px", height: "24px", borderRadius: "6px", border: on ? "none" : "1px solid #2A4A6B", background: on ? "#7C5CBF" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {on && <span style={{ color: "#FFFFFF", fontSize: "0.8rem", fontWeight: "700" }}>✓</span>}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {selectedCount > 0 && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "1rem 1.5rem", background: "#162D50", borderTop: "1px solid #2A4A6B" }}>
+            <button onClick={continueToBirthdayForm}
+              style={{ width: "100%", maxWidth: "600px", margin: "0 auto", display: "block", padding: "0.9rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", minHeight: "48px" }}>
+              Continue with {selectedCount} {selectedCount === 1 ? "family" : "families"} →
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -707,6 +848,17 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
               fontSize: "0.95rem", fontWeight: "600", cursor: (!bdayMonth || !bdayDay) ? "not-allowed" : "pointer", minHeight: "44px" }}>
             {bdayBusy ? "Saving..." : "Add birthday"}
           </button>
+
+          <div style={{ borderTop: "1px solid #2A4A6B", marginTop: "1.25rem", paddingTop: "1.25rem" }}>
+            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Throwing a party? 🎉</p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
+              Invite families from your classrooms and connections to a birthday celebration.
+            </p>
+            <button onClick={openBirthdayInvite} disabled={!householdId}
+              style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", minHeight: "44px" }}>
+              🎂 Invite families to a birthday
+            </button>
+          </div>
         </div>
 
       </div>
