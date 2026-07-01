@@ -33,6 +33,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [inviting, setInviting] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [drillMessage, setDrillMessage] = useState("");
+  const [upcomingBirthdays, setUpcomingBirthdays] = useState([]);
+  const [wishedIds, setWishedIds] = useState({}); // birthday.id -> true after wishing
+  const [wishBusy, setWishBusy] = useState(null);
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -159,6 +162,65 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const map = {};
       for (const row of (prefs || [])) map[row.household_id] = row;
       setPetsByHousehold(map);
+    }
+
+    // ---- BIRTHDAYS THIS WEEK (my household + classmate/connected households I can see) ----
+    try {
+      const bdayHouseholdIds = new Set([...otherHouseholdIds, hhId]);
+      if (bdayHouseholdIds.size > 0) {
+        const { data: bdayRows } = await supabase
+          .from("household_birthdays")
+          .select("id, household_id, month, day, label")
+          .in("household_id", [...bdayHouseholdIds]);
+
+        // Build a household -> family label map from the classmates data we already have.
+        const labelByHh = {};
+        for (const g of Object.values(classmatesMap)) {
+          for (const cm of (g?.rows || [])) {
+            const members = cm.households?.household_members || [];
+            const names = members
+              .map((mm) => mm.parents?.name)
+              .filter(Boolean)
+              .map((n) => {
+                const parts = n.trim().split(/\s+/);
+                return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+              });
+            if (cm.household_id && names.length > 0) {
+              labelByHh[cm.household_id] = names.join(" & ");
+            }
+          }
+        }
+        labelByHh[hhId] = "Your family";
+
+        // Days until a given month/day (0 = today, up to 7 ahead).
+        const now = new Date();
+        const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const daysUntil = (m, d) => {
+          for (let offset = 0; offset <= 7; offset++) {
+            const cand = new Date(todayMidnight);
+            cand.setDate(todayMidnight.getDate() + offset);
+            if (cand.getMonth() + 1 === m && cand.getDate() === d) return offset;
+          }
+          return -1;
+        };
+
+        const upcoming = [];
+        for (const b of (bdayRows || [])) {
+          const du = daysUntil(b.month, b.day);
+          if (du >= 0) {
+            upcoming.push({
+              ...b,
+              daysUntil: du,
+              familyLabel: labelByHh[b.household_id] || (b.household_id === hhId ? "Your family" : "A family in your classroom"),
+              isMine: b.household_id === hhId,
+            });
+          }
+        }
+        upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
+        setUpcomingBirthdays(upcoming);
+      }
+    } catch (e) {
+      // Birthdays are a nice-to-have; never block the feed.
     }
 
     // ---- NEXT PLAYDATE — excludes cancelled so Home agrees with the Playdates screen ----
@@ -349,6 +411,34 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   })();
 
   const isBrandNewTeacher = newTeacher.trim().length > 0 && !exactTeacherMatch && !nearTeacherMatch;
+
+  // One-tap warm action: notify a family that someone wished them a happy birthday.
+  const wishHappyBirthday = async (b) => {
+    if (b.isMine || wishBusy) return;
+    setWishBusy(b.id);
+    try {
+      // Who are the parents in that household? (best-effort — notify each.)
+      const { data: members } = await supabase
+        .from("household_members")
+        .select("parent_id")
+        .eq("household_id", b.household_id);
+
+      const myFirst = parent?.name ? parent.name.trim().split(/\s+/)[0] : "A family";
+      const rows = (members || []).map((m) => ({
+        recipient_id: m.parent_id,
+        type: "birthday_wish",
+        title: "Someone wished you a happy birthday 🎂",
+        body: `${myFirst}'s family sent your family birthday wishes!`,
+      }));
+      if (rows.length > 0) {
+        await supabase.from("notifications").insert(rows);
+      }
+      setWishedIds((prev) => ({ ...prev, [b.id]: true }));
+    } catch (e) {
+      // Best-effort.
+    }
+    setWishBusy(null);
+  };
 
   const commitClassroom = async (school, schoolYear, joinClassroomId, gradeIdx, teacherName) => {
     let classroom = null;
@@ -814,6 +904,38 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: 0 }}>
               📅 No playdates coming up — tap <span style={{ color: "#02C39A", fontWeight: "600" }}>Huddle →</span> next to a family below to set one up.
             </p>
+          </div>
+        )}
+
+        {upcomingBirthdays.length > 0 && (
+          <div style={{ background: "#2A1E3D", border: "1px solid #7C5CBF", borderRadius: "14px", padding: "1.1rem 1.25rem", marginBottom: "1.5rem" }}>
+            <p style={{ color: "#C9A9FF", fontSize: "0.7rem", letterSpacing: "0.08em", fontWeight: "600", margin: "0 0 10px" }}>
+              🎂 BIRTHDAYS THIS WEEK
+            </p>
+            {upcomingBirthdays.map((b) => {
+              const whenLabel = b.daysUntil === 0 ? "Today!" : b.daysUntil === 1 ? "Tomorrow" : `In ${b.daysUntil} days`;
+              return (
+                <div key={b.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0.5rem 0", borderTop: "1px solid #3D2E52" }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 1px" }}>
+                      {b.isMine ? "Your family" : b.familyLabel}
+                      {b.label ? <span style={{ color: "#C9A9FF" }}> · {b.label}</span> : null}
+                    </p>
+                    <p style={{ color: "#A88FD0", fontSize: "0.8rem", margin: 0 }}>{whenLabel}</p>
+                  </div>
+                  {!b.isMine && (
+                    wishedIds[b.id] ? (
+                      <span style={{ color: "#02C39A", fontSize: "0.8rem", fontWeight: "600" }}>Sent 🎉</span>
+                    ) : (
+                      <button onClick={() => wishHappyBirthday(b)} disabled={wishBusy === b.id}
+                        style={{ background: "#7C5CBF", border: "none", color: "#FFFFFF", fontSize: "0.8rem", fontWeight: "600", padding: "0.45rem 0.85rem", borderRadius: "8px", cursor: "pointer", minHeight: "36px", flexShrink: 0 }}>
+                        {wishBusy === b.id ? "..." : "Wish 🎂"}
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
