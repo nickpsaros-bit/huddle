@@ -599,11 +599,20 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   };
 
   // Status badge driven by the lifecycle engine's status.
+  // RSVP button style: neutral until selected, then the chosen color.
+  const rsvpBtnStyle = (active, activeBg, activeTxt) => ({
+    flex: 1, padding: "0.7rem", borderRadius: "10px", border: "none",
+    background: active ? activeBg : "#1B3A5C",
+    color: active ? activeTxt : "#8AAEC8",
+    fontSize: "0.85rem", fontWeight: active ? "700" : "500",
+    cursor: "pointer", transition: "all 0.15s ease",
+  });
+
   const statusBadge = (status) => {
-    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
+    if (status === "confirmed") return { text: "✓ Confirmed", bg: "#0F3D2E", color: "#02C39A" };
     if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
     if (status === "expired") return { text: "Expired", bg: "#13233F", color: "#8AAEC8" };
-    return { text: "Pending", bg: "#3D1F0A", color: "#F59E0B" };
+    return null; // "pending" shows no badge — keep the card clean.
   };
 
   const cancelled = items
@@ -774,18 +783,11 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const renderCard = (it, dim) => {
     const pd = it.playdate;
     if (it.kind === "invited") {
-      const needsReply = it.invite.rsvp === "invited";
       const showCal = !dim && it.invite.rsvp === "yes";
-      const sb = statusBadge(effectiveStatus(it));
       return (
         <div key={`inv-${it.invite.id}`} style={card(dim)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+          <div style={{ marginBottom: "10px" }}>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: 0 }}>{it.organizerLabel} invited you{pd.event_type === "birthday" ? " to a birthday 🎂" : ""}</p>
-            {!dim && needsReply ? (
-              <span style={{ fontSize: "0.65rem", background: "#3D1F0A", color: "#F59E0B", padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap", border: "1px solid #854F0B" }}>Needs reply</span>
-            ) : (
-              <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>{sb.text}</span>
-            )}
           </div>
           {pd.event_type === "birthday" && (
             <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px" }}>🎂 {pd.title || "Birthday celebration"}</p>
@@ -798,15 +800,15 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           {!dim && (
             <div style={{ display: "flex", gap: "8px", marginTop: "1rem" }}>
               <button onClick={() => respond(it.invite.id, "yes")} disabled={busy}
-                style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "none", background: it.invite.rsvp === "yes" ? "#02C39A" : "#0F3D2E", color: it.invite.rsvp === "yes" ? "#0F2044" : "#02C39A", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                style={rsvpBtnStyle(it.invite.rsvp === "yes", "#02C39A", "#0F2044")}>
                 Going
               </button>
               <button onClick={() => respond(it.invite.id, "maybe")} disabled={busy}
-                style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #854F0B", background: it.invite.rsvp === "maybe" ? "#854F0B" : "transparent", color: "#F59E0B", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                style={rsvpBtnStyle(it.invite.rsvp === "maybe", "#F59E0B", "#0F2044")}>
                 Maybe
               </button>
               <button onClick={() => respond(it.invite.id, "no")} disabled={busy}
-                style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#F87171", fontSize: "0.85rem", cursor: "pointer" }}>
+                style={rsvpBtnStyle(it.invite.rsvp === "no", "#F87171", "#0F2044")}>
                 Can't go
               </button>
             </div>
@@ -843,9 +845,11 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
-          <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-            {sb.text}
-          </span>
+          {sb && (
+            <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
+              {sb.text}
+            </span>
+          )}
         </div>
 
         {petLine(pd, false)}
