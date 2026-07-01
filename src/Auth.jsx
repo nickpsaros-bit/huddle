@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import Button from "./Button";
 
 const INVITE_KEY = "huddle_pending_invite_token";
 const INVITE_EMAIL_KEY = "huddle_invite_email";
@@ -141,10 +142,10 @@ export default function Auth({ onAuth }) {
         style={inputStyle}
       />
       {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
-      <button onClick={sendLink} disabled={loading || !email}
-        style={{ ...primaryBtn, background: loading ? "#028090" : "#02C39A", cursor: loading ? "not-allowed" : "pointer" }}>
+      <Button fullWidth variant="primary" onClick={sendLink} disabled={loading || !email}
+        style={{ background: loading ? "#028090" : "#02C39A" }}>
         {loading ? "Sending..." : ctaLabel}
-      </button>
+      </Button>
     </>
   );
 
@@ -171,12 +172,12 @@ export default function Auth({ onAuth }) {
             <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.75rem", textAlign: "center", lineHeight: "1.5" }}>
               The easiest way for school parents to set up playdates. Join your classroom community in a couple of minutes.
             </p>
-            <button onClick={() => { setError(""); setMode("signup"); }} style={{ ...primaryBtn, marginBottom: "0.85rem" }}>
+            <Button fullWidth variant="primary" onClick={() => { setError(""); setMode("signup"); }} style={{ marginBottom: "0.85rem" }}>
               Get started →
-            </button>
-            <button onClick={() => { setError(""); setMode("signin"); }} style={ghostBtn}>
+            </Button>
+            <Button fullWidth variant="ghost" onClick={() => { setError(""); setMode("signin"); }}>
               I already have an account
-            </button>
+            </Button>
           </>
         )}
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "./supabase";
+import Button from "./Button";
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from "./legal";
 
 export default function Settings({ session, onBack }) {
@@ -342,10 +343,10 @@ export default function Settings({ session, onBack }) {
             <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
               Turn on Face ID for this device to sign back in with a tap — no email link needed next time.
             </p>
-            <button onClick={addPasskey} disabled={passkeyBusy}
-              style={{ padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", minHeight: "44px" }}>
+            <Button variant="secondary" onClick={addPasskey} disabled={passkeyBusy}
+              style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
               {passkeyBusy ? "Setting up..." : "Set up Face ID on this device"}
-            </button>
+            </Button>
             {passkeyMsg && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "0.6rem 0 0" }}>{passkeyMsg}</p>}
           </div>
           {passkeys.map((pk) => (
@@ -454,14 +455,13 @@ export default function Settings({ session, onBack }) {
                 onChange={(e) => setBugScreen(e.target.value)}
                 style={{ width: "100%", padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.85rem" }} />
               <div style={{ display: "flex", gap: "8px" }}>
-                <button onClick={() => { setBugOpen(false); setBugText(""); setBugScreen(""); }}
-                  style={{ flex: 1, padding: "0.75rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", cursor: "pointer", minHeight: "44px" }}>
+                <Button variant="secondary" onClick={() => { setBugOpen(false); setBugText(""); setBugScreen(""); }} style={{ flex: 1 }}>
                   Cancel
-                </button>
-                <button onClick={submitBug} disabled={!bugText.trim() || bugBusy}
-                  style={{ flex: 2, padding: "0.75rem", borderRadius: "10px", border: "none", background: bugText.trim() ? "#02C39A" : "#2A4A6B", color: "#0F2044", fontSize: "0.9rem", fontWeight: "600", cursor: bugText.trim() ? "pointer" : "default", minHeight: "44px" }}>
+                </Button>
+                <Button variant="primary" onClick={submitBug} disabled={!bugText.trim() || bugBusy}
+                  style={{ flex: 2, background: bugText.trim() ? "#02C39A" : "#2A4A6B" }}>
                   {bugBusy ? "Sending..." : "Send report"}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -519,10 +519,9 @@ export default function Settings({ session, onBack }) {
           </div>
         </div>
 
-        <button onClick={signOut}
-          style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #F87171", background: "transparent", color: "#F87171", fontSize: "1rem", cursor: "pointer" }}>
+        <Button fullWidth variant="secondary" onClick={signOut}>
           Sign out
-        </button>
+        </Button>
       </div>
     </div>
   );
