@@ -13,6 +13,11 @@ export default function Settings({ session, onBack }) {
   const [discoverable, setDiscoverable] = useState(true);
   const [discoverBusy, setDiscoverBusy] = useState(false);
 
+  // Notification preferences.
+  const [notifyInApp, setNotifyInApp] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifBusy, setNotifBusy] = useState(false);
+
   // ---- Passkeys / Face ID ----
   const [passkeys, setPasskeys] = useState([]);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
@@ -38,11 +43,13 @@ export default function Settings({ session, onBack }) {
   const fetchParent = async () => {
     const { data } = await supabase
       .from("parents")
-      .select("id, name, is_admin, created_at, discoverable")
+      .select("id, name, is_admin, created_at, discoverable, notify_in_app, notify_email")
       .eq("id", session.user.id)
       .single();
     setParent(data);
     if (data && typeof data.discoverable === "boolean") setDiscoverable(data.discoverable);
+    if (data && typeof data.notify_in_app === "boolean") setNotifyInApp(data.notify_in_app);
+    if (data && typeof data.notify_email === "boolean") setNotifyEmail(data.notify_email);
   };
 
   const toggleDiscoverable = async () => {
@@ -61,6 +68,23 @@ export default function Settings({ session, onBack }) {
       setTimeout(() => setMessage(""), 3000);
     }
     setDiscoverBusy(false);
+  };
+
+  const updateNotifyPref = async (field, next, setter, prev) => {
+    setter(next); // optimistic
+    setNotifBusy(true);
+    try {
+      const { error } = await supabase
+        .from("parents")
+        .update({ [field]: next })
+        .eq("id", session.user.id);
+      if (error) throw error;
+    } catch (e) {
+      setter(prev); // revert
+      setMessage("Couldn't update that setting. Try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
+    setNotifBusy(false);
   };
 
   const fetchConsents = async () => {
@@ -352,6 +376,38 @@ export default function Settings({ session, onBack }) {
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
               {parent?.created_at ? new Date(parent.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—"}
             </p>
+          </div>
+        </div>
+
+        {/* NOTIFICATIONS */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", padding: "1.25rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.35rem" }}>In-app notifications</p>
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0, lineHeight: "1.5" }}>
+                Show the notification bell for connection requests, playdate and birthday RSVPs, and reminders. When off, you won't see bell alerts inside the app.
+              </p>
+            </div>
+            <button onClick={() => updateNotifyPref("notify_in_app", !notifyInApp, setNotifyInApp, notifyInApp)} disabled={notifBusy} aria-label="Toggle in-app notifications"
+              style={{ flexShrink: 0, width: "52px", height: "32px", borderRadius: "16px", border: "none", cursor: notifBusy ? "default" : "pointer", background: notifyInApp ? "#02C39A" : "#2A4A6B", position: "relative", transition: "background 0.2s", padding: 0, marginTop: "2px" }}>
+              <span style={{ position: "absolute", top: "3px", left: notifyInApp ? "23px" : "3px", width: "26px", height: "26px", borderRadius: "50%", background: "#FFFFFF", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+            </button>
+          </div>
+
+          <div style={{ height: "1px", background: "#2A4A6B", margin: "1.1rem 0" }} />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.35rem" }}>Email notifications</p>
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0, lineHeight: "1.5" }}>
+                Get emails for RSVPs and event updates, including calendar (.ics) invites you can add to your calendar. When off, Huddle won't email you or send calendar invites.
+              </p>
+            </div>
+            <button onClick={() => updateNotifyPref("notify_email", !notifyEmail, setNotifyEmail, notifyEmail)} disabled={notifBusy} aria-label="Toggle email notifications"
+              style={{ flexShrink: 0, width: "52px", height: "32px", borderRadius: "16px", border: "none", cursor: notifBusy ? "default" : "pointer", background: notifyEmail ? "#02C39A" : "#2A4A6B", position: "relative", transition: "background 0.2s", padding: 0, marginTop: "2px" }}>
+              <span style={{ position: "absolute", top: "3px", left: notifyEmail ? "23px" : "3px", width: "26px", height: "26px", borderRadius: "50%", background: "#FFFFFF", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+            </button>
           </div>
         </div>
 

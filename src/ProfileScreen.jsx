@@ -569,7 +569,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Profile</h1>
         <button onClick={onOpenSettings} aria-label="Settings"
-          style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "1.3rem", width: "60px", textAlign: "right", padding: 0 }}>
+          style={{ background: "#0F3D2E", border: "1.5px solid #02C39A", cursor: "pointer", fontSize: "1.15rem", width: "40px", height: "40px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}>
           ⚙️
         </button>
       </div>

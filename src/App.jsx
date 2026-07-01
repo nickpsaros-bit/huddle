@@ -194,6 +194,17 @@ export default function App() {
 
   // Bell = pending requests + unread notifications. Playdate badge + halo.
   const fetchCounts = async (userId) => {
+    // Respect the in-app notification preference: if off, the bell stays empty.
+    const { data: prefRow } = await supabase
+      .from("parents")
+      .select("notify_in_app")
+      .eq("id", userId)
+      .maybeSingle();
+    const inAppOn = !prefRow || prefRow.notify_in_app !== false;
+    if (!inAppOn) {
+      setNotificationCount(0);
+    }
+
     const { data: myHh } = await supabase
       .from("household_members")
       .select("household_id")
@@ -223,7 +234,7 @@ export default function App() {
       .eq("read", false);
     bell += unreadNotifs ? unreadNotifs.length : 0;
 
-    setNotificationCount(bell);
+    setNotificationCount(inAppOn ? bell : 0);
 
     if (!myHh) {
       setPlaydateBadge(0);
