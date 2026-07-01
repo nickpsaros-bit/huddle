@@ -41,6 +41,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [monthBirthdays, setMonthBirthdays] = useState([]);
   const [showBirthdayList, setShowBirthdayList] = useState(false);
   const [hasUpcomingBirthdayEvent, setHasUpcomingBirthdayEvent] = useState(false);
+  const [birthdayEventTag, setBirthdayEventTag] = useState("");  // "🎂 Hosting" | "🎂 Going"
 
   const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
 
@@ -292,6 +293,8 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
       // Do I have an upcoming BIRTHDAY event I've accepted (RSVP yes) or am hosting?
       let birthdayEvent = false;
+      let amHosting = false;
+      let amGoing = false;
       for (const inv of (myInvites || [])) {
         const pd = inv.playdates;
         if (!pd) continue;
@@ -299,9 +302,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         if (pd.status === "cancelled") continue;
         if (new Date(pd.proposed_date).toISOString() < nowIso) continue;
         const hosting = pd.organizer_household_id === hhId;
-        if (hosting || inv.rsvp === "yes") { birthdayEvent = true; break; }
+        if (hosting) { amHosting = true; birthdayEvent = true; }
+        else if (inv.rsvp === "yes") { amGoing = true; birthdayEvent = true; }
       }
       setHasUpcomingBirthdayEvent(birthdayEvent);
+      setBirthdayEventTag(amHosting ? "🎂 Hosting" : amGoing ? "🎂 Going" : "");
 
       candidates.sort((a, b) => new Date(a.pd.proposed_date) - new Date(b.pd.proposed_date));
       setStatUpcoming(candidates.length);
@@ -1076,7 +1081,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Connections", value: statConnections, go: onGoToNetwork },
             { label: "Families at your school", value: familiesAtSchool, go: null },
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
-            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent },
+            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent, tag: birthdayEventTag },
           ];
           return (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
@@ -1092,6 +1097,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                   }}>
                   <p style={{ color: "#02C39A", fontSize: "1.6rem", fontWeight: "700", margin: "0 0 2px" }}>{t.value}</p>
                   <p style={{ color: t.highlight ? "#02C39A" : "#8AAEC8", fontSize: "0.68rem", margin: 0, lineHeight: "1.25", fontWeight: t.highlight ? "600" : "400" }}>{t.label}</p>
+                  {t.highlight && t.tag ? (
+                    <span style={{ display: "inline-block", marginTop: "5px", background: "#02C39A", color: "#0F2044", fontSize: "0.6rem", fontWeight: "700", padding: "2px 8px", borderRadius: "999px", letterSpacing: "0.02em" }}>{t.tag}</span>
+                  ) : null}
                 </div>
               ))}
             </div>
