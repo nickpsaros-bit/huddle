@@ -245,18 +245,25 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           }
         } catch (e) { /* best-effort */ }
 
-        // "This month" — all visible households' birthdays in the current month.
-        const curMonth = now.getMonth() + 1;
-        const monthList = (bdayRows || [])
-          .filter((b) => b.month === curMonth)
+        // Rolling 45-day window — visible households' birthdays coming up.
+        const WINDOW_DAYS = 45;
+        const daysUntilBirthday = (m, d) => {
+          const t = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          let next = new Date(now.getFullYear(), m - 1, d);
+          if (next < t) next = new Date(now.getFullYear() + 1, m - 1, d); // wrap to next year
+          return Math.round((next - t) / 86400000);
+        };
+        const upcomingList = (bdayRows || [])
           .map((b) => ({
             ...b,
+            _daysUntil: daysUntilBirthday(b.month, b.day),
             familyLabel: labelByHh[b.household_id] || (b.household_id === hhId ? "Your family" : "A family in your classroom"),
             isMine: b.household_id === hhId,
           }))
-          .sort((a, b) => a.day - b.day);
-        setStatBirthdaysMonth(monthList.length);
-        setMonthBirthdays(monthList);
+          .filter((b) => b._daysUntil >= 0 && b._daysUntil <= WINDOW_DAYS)
+          .sort((a, b) => a._daysUntil - b._daysUntil);
+        setStatBirthdaysMonth(upcomingList.length);
+        setMonthBirthdays(upcomingList);
       }
     } catch (e) {
       // Birthdays are a nice-to-have; never block the feed.
@@ -870,7 +877,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
           <button onClick={() => setShowBirthdayList(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
-          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Birthdays in {monthName}</h1>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Birthdays coming up</h1>
           <div style={{ width: "60px" }} />
         </div>
 
@@ -878,13 +885,13 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           {monthBirthdays.length === 0 ? (
             <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
               <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🎂</p>
-              <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No birthdays this month</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No birthdays coming up</p>
               <p style={{ color: "#607080", fontSize: "0.85rem" }}>When families in your classrooms add birthdays, they'll show up here.</p>
             </div>
           ) : (
             <>
               <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
-                Families in your classrooms and connections with a birthday in {monthName}.
+                Families in your classrooms and connections with a birthday in the next 45 days.
               </p>
               {monthBirthdays.map((b) => (
                 <div key={b.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -1081,7 +1088,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Connections", value: statConnections, go: onGoToNetwork },
             { label: "Families at your school", value: familiesAtSchool, go: null },
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
-            { label: "Birthdays this month", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent, tag: birthdayEventTag },
+            { label: "Birthdays coming up", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent, tag: birthdayEventTag },
           ];
           return (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
