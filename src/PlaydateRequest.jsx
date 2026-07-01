@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
+import Button from "./Button";
 
 export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent, eventType = "playdate", editEvent = null }) {
   const isEditing = !!editEvent;
@@ -644,10 +645,9 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
               ? `${recipientList.length} families will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`
               : `${shortName(recipientList[0]?.name)}'s family will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`}
           </p>
-          <button onClick={() => onSent()}
-            style={{ padding: "0.75rem 1.5rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
+          <Button variant="secondary" onClick={() => onSent()}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -686,10 +686,10 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
               </div>
             ))
           )}
-          <button onClick={() => setShowFamilyPicker(false)}
-            style={{ width: "100%", marginTop: "0.5rem", padding: "0.8rem", borderRadius: "999px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer" }}>
+          <Button fullWidth onClick={() => setShowFamilyPicker(false)}
+            style={{ background: "#7C5CBF", color: "#FFFFFF", marginTop: "0.5rem" }}>
             Done ({recipientList.length} invited)
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -732,10 +732,9 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
               <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0, letterSpacing: "0.05em" }}>WHO'S INVITED ({recipientList.length})</p>
-              <button onClick={openFamilyPicker}
-                style={{ background: "#2A1E3D", border: "1px solid #7C5CBF", color: "#C9A9FF", fontSize: "0.8rem", fontWeight: "600", padding: "0.4rem 0.85rem", borderRadius: "999px", cursor: "pointer" }}>
+              <Button variant="accent" size="sm" onClick={openFamilyPicker}>
                 + Add families
-              </button>
+              </Button>
             </div>
 
             {recipientList.length === 0 ? (
@@ -892,21 +891,18 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
 
         {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem" }}>{error}</p>}
 
-        <button
+        <Button
+          fullWidth
           onClick={attemptSend}
           disabled={loading}
-          style={{
-            width: "100%", padding: "0.85rem", borderRadius: "10px",
-            border: "none", background: loading ? "#028090" : accent,
-            color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer"
-          }}
+          style={{ background: loading ? "#028090" : accent, color: "#0F2044" }}
         >
           {loading ? (isEditing ? "Saving..." : "Sending...") : isEditing
             ? "Save changes"
             : isBirthday
               ? (isMulti ? `Send birthday invite to ${recipientList.length} families →` : "Send birthday invite →")
               : (isMulti ? `Send to ${recipientList.length} families →` : "Send playdate invite →")}
-        </button>
+        </Button>
 
       </div>
 

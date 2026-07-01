@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import PlaydateRequest from "./PlaydateRequest";
+import Button from "./Button";
 
 export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [parent, setParent] = useState(null);
@@ -552,10 +553,10 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
 
         {selectedCount > 0 && (
           <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "1rem 1.5rem", background: "#162D50", borderTop: "1px solid #2A4A6B" }}>
-            <button onClick={continueToBirthdayForm}
-              style={{ width: "100%", maxWidth: "600px", margin: "0 auto", display: "block", padding: "0.9rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", minHeight: "48px" }}>
+            <Button fullWidth onClick={continueToBirthdayForm}
+              style={{ maxWidth: "600px", margin: "0 auto", background: "#7C5CBF", color: "#FFFFFF" }}>
               Continue with {selectedCount} {selectedCount === 1 ? "family" : "families"} →
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -601,23 +602,21 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
               <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)}
                 style={{ width: "100%", padding: "0.6rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", textAlign: "center", boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-                <button onClick={() => { setEditing(false); setNewName(parent?.name || ""); }}
-                  style={{ flex: 1, padding: "0.5rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer" }}>
+                <Button variant="secondary" size="sm" onClick={() => { setEditing(false); setNewName(parent?.name || ""); }} style={{ flex: 1 }}>
                   Cancel
-                </button>
-                <button onClick={saveName}
-                  style={{ flex: 2, padding: "0.5rem", borderRadius: "8px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer" }}>
+                </Button>
+                <Button variant="primary" size="sm" onClick={saveName} style={{ flex: 2 }}>
                   Save
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <p style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: 0 }}>{parent?.name}</p>
-              <button onClick={() => setEditing(true)}
-                style={{ background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.25rem 0.5rem", borderRadius: "6px", fontSize: "0.7rem", cursor: "pointer" }}>
+              <Button variant="secondary" size="sm" onClick={() => setEditing(true)}
+                style={{ padding: "0.25rem 0.7rem", fontSize: "0.7rem", minHeight: "0" }}>
                 Edit
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -701,24 +700,22 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", lineHeight: "1.4" }}>
               You've asked to join another household. It's waiting on their approval.
             </p>
-            <button onClick={cancelRequest}
-              style={{ width: "100%", padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", minHeight: "44px" }}>
+            <Button fullWidth variant="secondary" onClick={cancelRequest}>
               Cancel request
-            </button>
+            </Button>
           </div>
         ) : !linkOpen ? (
-          <button onClick={openLink}
-            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#02C39A", fontSize: "0.9rem", fontWeight: "500", cursor: "pointer", marginBottom: "1rem", minHeight: "44px" }}>
+          <Button fullWidth variant="secondary" onClick={openLink}
+            style={{ color: "#02C39A", marginBottom: "1rem" }}>
             ＋ Find a household member
-          </button>
+          </Button>
         ) : (
           <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
               <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>Link a co-parent</p>
-              <button onClick={() => setLinkOpen(false)}
-                style={{ background: "transparent", border: "none", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer" }}>
+              <Button variant="ghost" size="sm" onClick={() => setLinkOpen(false)}>
                 Close
-              </button>
+              </Button>
             </div>
             <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
               Find another parent in your classrooms to merge into your household. They'll need to approve the request.
@@ -791,10 +788,10 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             </div>
           </div>
 
-          <button onClick={savePrefs} disabled={savingPrefs || !householdId}
-            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", minHeight: "44px" }}>
+          <Button fullWidth variant="primary" onClick={savePrefs} disabled={savingPrefs || !householdId}
+            style={{ marginTop: "1.5rem" }}>
             {savingPrefs ? "Saving..." : "Save pets & preferences"}
-          </button>
+          </Button>
         </div>
 
         {/* BIRTHDAYS (household attribute — month/day only, optional label) */}
@@ -841,23 +838,20 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             value={bdayLabel} onChange={(e) => setBdayLabel(e.target.value)} maxLength={30}
             style={{ width: "100%", padding: "0.7rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.85rem" }} />
 
-          <button onClick={addBirthday} disabled={bdayBusy || !householdId || !bdayMonth || !bdayDay}
-            style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none",
-              background: (!bdayMonth || !bdayDay) ? "#1B3A5C" : "#02C39A",
-              color: (!bdayMonth || !bdayDay) ? "#607080" : "#0F2044",
-              fontSize: "0.95rem", fontWeight: "600", cursor: (!bdayMonth || !bdayDay) ? "not-allowed" : "pointer", minHeight: "44px" }}>
+          <Button fullWidth variant="primary" onClick={addBirthday} disabled={bdayBusy || !householdId || !bdayMonth || !bdayDay}
+            style={{ background: (!bdayMonth || !bdayDay) ? "#1B3A5C" : "#02C39A", color: (!bdayMonth || !bdayDay) ? "#607080" : "#0F2044" }}>
             {bdayBusy ? "Saving..." : "Add birthday"}
-          </button>
+          </Button>
 
           <div style={{ borderTop: "1px solid #2A4A6B", marginTop: "1.25rem", paddingTop: "1.25rem" }}>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Throwing a party? 🎉</p>
             <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
               Invite families from your classrooms and connections to a birthday celebration.
             </p>
-            <button onClick={openBirthdayInvite} disabled={!householdId}
-              style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", minHeight: "44px" }}>
+            <Button fullWidth onClick={openBirthdayInvite} disabled={!householdId}
+              style={{ background: "#7C5CBF", color: "#FFFFFF" }}>
               🎂 Invite families to a birthday
-            </button>
+            </Button>
           </div>
         </div>
 
