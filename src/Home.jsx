@@ -224,6 +224,26 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
         setUpcomingBirthdays(upcoming);
 
+        // Load which birthdays I've ALREADY wished this year, so "Sent 🎉" persists
+        // across refreshes and sessions.
+        try {
+          const curYear = now.getFullYear();
+          const allBdayIds = (bdayRows || []).map((b) => b.id);
+          if (allBdayIds.length > 0) {
+            const { data: myWishes } = await supabase
+              .from("birthday_wishes")
+              .select("birthday_id")
+              .eq("wisher_id", session.user.id)
+              .eq("year", curYear)
+              .in("birthday_id", allBdayIds);
+            if (myWishes && myWishes.length > 0) {
+              const wished = {};
+              for (const w of myWishes) wished[w.birthday_id] = true;
+              setWishedIds((prev) => ({ ...prev, ...wished }));
+            }
+          }
+        } catch (e) { /* best-effort */ }
+
         // "This month" — all visible households' birthdays in the current month.
         const curMonth = now.getMonth() + 1;
         const monthList = (bdayRows || [])
@@ -464,6 +484,19 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       if (rows.length > 0) {
         await supabase.from("notifications").insert(rows);
       }
+
+      // Persist the wish so "Sent 🎉" sticks across refreshes/sessions.
+      try {
+        await supabase.from("birthday_wishes").insert({
+          birthday_id: b.id,
+          wisher_id: session.user.id,
+          target_household_id: b.household_id,
+          year: new Date().getFullYear(),
+        });
+      } catch (persistErr) {
+        // If it's a duplicate (already wished), that's fine — treat as sent.
+      }
+
       setWishedIds((prev) => ({ ...prev, [b.id]: true }));
     } catch (e) {
       // Best-effort.
