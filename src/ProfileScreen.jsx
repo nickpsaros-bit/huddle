@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import ConfirmModal from "./ConfirmModal";
 
 export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [parent, setParent] = useState(null);
@@ -11,6 +12,8 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [memberships, setMemberships] = useState([]);
   const [householdMembers, setHouseholdMembers] = useState([]);
   const [householdId, setHouseholdId] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
  const [prefs, setPrefs] = useState({
     has_dog: false, has_cat: false, has_horse: false, has_other: false, other_label: "",
     prefer_no_dogs: false, prefer_no_cats: false,
@@ -247,6 +250,53 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
     }
   };
 
+  // Remove a member (or leave the household). Calls the atomic RPC, which:
+  // gives the removed person a fresh solo household with their classrooms copied,
+  // and enforces the rules server-side (leave-self always ok; primary removes
+  // co-parents; primary can't be removed by a co-parent).
+  const doRemoveMember = async (targetParentId) => {
+    setRemoveBusy(true);
+    setMessage("");
+    try {
+      const { error } = await supabase.rpc("remove_household_member", {
+        p_target_parent: targetParentId,
+      });
+      if (error) throw error;
+      const leftSelf = targetParentId === session.user.id;
+      setMessage(leftSelf ? "You've left the household." : "Member removed.");
+      // Reload household data (if I left, my household changed entirely).
+      fetchProfile();
+      fetchFamily();
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+    setRemoveBusy(false);
+  };
+
+  // Opens the iOS-safe confirm modal for leaving or removing.
+  const confirmRemove = (m, isMe) => {
+    if (isMe) {
+      setConfirm({
+        title: "Leave this household?",
+        body: "You'll get your own household and keep your classrooms. You can link up again later.",
+        confirmLabel: "Leave",
+        cancelLabel: "Stay",
+        tone: "danger",
+        onConfirm: () => doRemoveMember(session.user.id),
+      });
+    } else {
+      setConfirm({
+        title: `Remove ${shortName(m.parents?.name)}?`,
+        body: `${shortName(m.parents?.name)} will get their own household and keep their classrooms. They won't be part of your household anymore.`,
+        confirmLabel: "Remove",
+        cancelLabel: "Keep",
+        tone: "danger",
+        onConfirm: () => doRemoveMember(m.parent_id),
+      });
+    }
+  };
+
   const uploadPhoto = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -408,6 +458,13 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
           ) : (
             householdMembers.map((m, idx) => {
               const isMe = m.parent_id === session.user.id;
+              const myRow = householdMembers.find((x) => x.parent_id === session.user.id);
+              const iAmPrimary = myRow?.role === "primary";
+              const others = householdMembers.length > 1;
+              // Show a control when: this row is me AND I'm not alone (Leave),
+              // OR this row is a co-parent AND I'm the primary (Remove).
+              const canLeave = isMe && others;
+              const canRemove = !isMe && iAmPrimary && m.role !== "primary";
               return (
                 <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.85rem 1rem", borderBottom: idx < householdMembers.length - 1 ? "1px solid #2A4A6B" : "none" }}>
                   <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
@@ -422,6 +479,14 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
                     </p>
                     <p style={{ color: "#607080", fontSize: "0.75rem", margin: 0 }}>{m.role === "primary" ? "Primary parent" : "Co-parent"}</p>
                   </div>
+                  {(canLeave || canRemove) && (
+                    <button
+                      onClick={() => confirmRemove(m, isMe)}
+                      disabled={removeBusy}
+                      style={{ marginLeft: "auto", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", fontSize: "0.75rem", padding: "0.35rem 0.7rem", borderRadius: "8px", cursor: "pointer", flexShrink: 0, minHeight: "36px" }}>
+                      {isMe ? "Leave" : "Remove"}
+                    </button>
+                  )}
                 </div>
               );
             })
@@ -532,6 +597,8 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         </div>
 
       </div>
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
