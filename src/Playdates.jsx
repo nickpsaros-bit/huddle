@@ -104,18 +104,29 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     const esc = (s) => (s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
     const loc = [pd.location_name, pd.location_address].filter(Boolean).join(", ");
 
+    const isBday = pd.event_type === "birthday";
+
+    // Birthday and playdate produce clearly different calendar entries.
+    const icsSummary = isBday
+      ? `SUMMARY:🎂 ${esc(pd.title || "Birthday celebration")}`
+      : "SUMMARY:🧸 Playdate";
+    const icsDescription = isBday
+      ? `DESCRIPTION:${esc(pd.note ? pd.note + " — " : "")}A birthday celebration organized through Huddle.`
+      : (pd.note ? `DESCRIPTION:${esc(pd.note)}` : `DESCRIPTION:A playdate organized through Huddle.`);
+
     const lines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Huddle//Playdate//EN",
+      "PRODID:-//Huddle//Events//EN",
       "BEGIN:VEVENT",
       `UID:huddle-${pd.id}@huddlefamilies.com`,
       `DTSTAMP:${toIcs(new Date())}`,
       `DTSTART:${toIcs(start)}`,
       `DTEND:${toIcs(end)}`,
-      pd.event_type === "birthday" ? `SUMMARY:${esc(pd.title || "Birthday celebration")}` : "SUMMARY:Playdate",
+      icsSummary,
       loc ? `LOCATION:${esc(loc)}` : "",
-      pd.note ? `DESCRIPTION:${esc(pd.note)}` : "",
+      icsDescription,
+      isBday ? "CATEGORIES:Birthday" : "CATEGORIES:Playdate",
       "END:VEVENT",
       "END:VCALENDAR",
     ].filter(Boolean);
@@ -124,7 +135,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "playdate.ics";
+    a.download = isBday ? "birthday-invite.ics" : "playdate.ics";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
