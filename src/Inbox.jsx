@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import Button from "./Button";
 
 export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
@@ -216,12 +217,12 @@ export default function Inbox({ session, onBack }) {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <button onClick={() => declineJoin(req)} style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", cursor: "pointer" }}>
+                      <Button variant="secondary" onClick={() => declineJoin(req)} style={{ flex: 1 }}>
                         Decline
-                      </button>
-                      <button onClick={() => approveJoin(req)} style={{ flex: 2, padding: "0.6rem", borderRadius: "8px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
+                      </Button>
+                      <Button variant="primary" onClick={() => approveJoin(req)} style={{ flex: 2 }}>
                         Approve
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -247,12 +248,12 @@ export default function Inbox({ session, onBack }) {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <button onClick={() => decline(req.id)} style={{ flex: 1, padding: "0.6rem", borderRadius: "8px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", cursor: "pointer" }}>
+                      <Button variant="secondary" onClick={() => decline(req.id)} style={{ flex: 1 }}>
                         Decline
-                      </button>
-                      <button onClick={() => accept(req.id)} style={{ flex: 2, padding: "0.6rem", borderRadius: "8px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer" }}>
+                      </Button>
+                      <Button variant="primary" onClick={() => accept(req.id)} style={{ flex: 2 }}>
                         Accept
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -276,10 +277,11 @@ export default function Inbox({ session, onBack }) {
                       </div>
                     </div>
                     {n.read && (
-                      <button onClick={() => markUnread(n.id)}
-                        style={{ marginTop: "0.75rem", background: "transparent", border: "1px solid #2A4A6B", color: "#8AAEC8", padding: "0.35rem 0.7rem", borderRadius: "8px", fontSize: "0.75rem", cursor: "pointer" }}>
-                        Mark unread
-                      </button>
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <Button variant="secondary" size="sm" onClick={() => markUnread(n.id)}>
+                          Mark unread
+                        </Button>
+                      </div>
                     )}
                   </div>
                 ))}

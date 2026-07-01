@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import Button from "./Button";
 
 export default function Search({ session, avatarUrl, onProfileClick }) {
   const [query, setQuery] = useState("");
@@ -201,11 +202,9 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
     const conn = getConnectionStatus(parentId);
     if (!conn) {
       return (
-        <button
-          onClick={() => sendRequest(parentId)}
-          style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+        <Button variant="primary" size="sm" onClick={() => sendRequest(parentId)} style={{ flexShrink: 0 }}>
           Connect
-        </button>
+        </Button>
       );
     }
     if (conn.status === "pending" && conn.isRequester) {
@@ -213,11 +212,9 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
     }
     if (conn.status === "pending" && !conn.isRequester) {
       return (
-        <button
-          onClick={() => acceptRequest(parentId)}
-          style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+        <Button variant="primary" size="sm" onClick={() => acceptRequest(parentId)} style={{ flexShrink: 0 }}>
           Accept
-        </button>
+        </Button>
       );
     }
     if (conn.status === "accepted") {

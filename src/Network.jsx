@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
+import Button from "./Button";
 
 export default function Network({ session, avatarUrl, onProfileClick }) {
   const [households, setHouseholds] = useState([]);
@@ -276,10 +277,9 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
                       </p>
                     </div>
                     {m.connectionId && (
-                      <button onClick={() => setRequestingPlaydate({ id: m.id, name: m.name, photo_url: m.photo_url })}
-                        style={{ background: "#02C39A", border: "none", color: "#0F2044", padding: "0.5rem 1rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", flexShrink: 0 }}>
+                      <Button variant="primary" size="sm" onClick={() => setRequestingPlaydate({ id: m.id, name: m.name, photo_url: m.photo_url })} style={{ flexShrink: 0 }}>
                         Huddle →
-                      </button>
+                      </Button>
                     )}
                   </div>
                 ))}
@@ -298,10 +298,10 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
         )}
 
         {!loading && (
-          <button onClick={() => setInviting(true)}
-            style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <Button fullWidth onClick={() => setInviting(true)}
+            style={{ border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", borderRadius: "12px", marginTop: "1.5rem" }}>
             ➕ Invite a parent to Huddle
-          </button>
+          </Button>
         )}
       </div>
 
