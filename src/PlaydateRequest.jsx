@@ -597,6 +597,12 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
       setError("Please fill in date, time and location");
       return;
     }
+    // Reject a start that's already in the past (covers "today but earlier time").
+    const startsAt = new Date(`${date}T${time}`);
+    if (isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
+      setError("Please pick a date and time in the future.");
+      return;
+    }
     if (recurrence !== "none" && !recurrenceEnd) {
       setError("Please pick an end date for the repeating playdate.");
       return;
