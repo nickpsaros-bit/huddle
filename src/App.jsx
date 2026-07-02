@@ -12,6 +12,8 @@ import Inbox from "./Inbox";
 import Network from "./Network";
 import Playdates from "./Playdates";
 import InviteLanding from "./InviteLanding";
+import RolloverPrompt from "./RolloverPrompt";
+import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
 const INVITE_KEY = "huddle_pending_invite_token";
@@ -35,6 +37,10 @@ export default function App() {
   const [inviteToken, setInviteToken] = useState(null);
   const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
   const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
+
+  // Rollover: null = not evaluated / not due; object = prompt data to show.
+  const [rolloverData, setRolloverData] = useState(null);
+  const [rolloverSnoozed, setRolloverSnoozed] = useState(false); // "don't know yet" for this session
 
   useEffect(() => {
     const path = window.location.pathname || "";
@@ -102,6 +108,7 @@ export default function App() {
   useEffect(() => {
     if (session && hasProfile) {
       consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
+      checkRollover(session.user.id);
     }
   }, [session, hasProfile]);
 
@@ -173,6 +180,56 @@ export default function App() {
     }
 
     setHasProfile(memberships && memberships.length > 0);
+  };
+
+  // Decide whether to show the rollover prompt: fetch this household's current
+  // classroom memberships + their schools' start months, and check whether we're
+  // in rollover season and this parent hasn't rolled over for the current year.
+  const checkRollover = async (userId) => {
+    try {
+      const { data: hm } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", userId)
+        .maybeSingle();
+      if (!hm) return;
+
+      const { data: memberships } = await supabase
+        .from("classroom_members")
+        .select("id, school_year, classrooms(id, teacher_name, grade, school_id, school_year, schools(id, name, school_start_month))")
+        .eq("household_id", hm.household_id);
+      if (!memberships || memberships.length === 0) return;
+
+      // Earliest school start month across this household's classrooms governs timing.
+      const startMonths = memberships
+        .map((m) => m.classrooms?.schools?.school_start_month)
+        .filter((n) => typeof n === "number");
+      const startMonth = earliestStartMonth(startMonths);
+
+      // Only consider LAST-year memberships for rollover (don't re-prompt on rows
+      // already at the current year).
+      const curYear = currentSchoolYear(startMonth);
+      const staleMemberships = memberships.filter((m) => m.school_year !== curYear);
+      if (staleMemberships.length === 0) return; // already all current
+
+      // Read the parent's rolled_over_year.
+      const { data: prow } = await supabase
+        .from("parents")
+        .select("rolled_over_year")
+        .eq("id", userId)
+        .maybeSingle();
+      const rolledOverYear = prow?.rolled_over_year || null;
+
+      if (shouldPromptRollover(rolledOverYear, startMonth)) {
+        setRolloverData({
+          householdId: hm.household_id,
+          currentYear: curYear,
+          memberships: staleMemberships,
+        });
+      }
+    } catch (e) {
+      // Rollover prompt is best-effort; never block the app.
+    }
   };
 
   const consumeInvite = async (userId, userEmail) => {
@@ -320,6 +377,19 @@ export default function App() {
 
   if (!hasProfile) {
     return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
+  }
+
+  if (rolloverData && !rolloverSnoozed) {
+    return (
+      <RolloverPrompt
+        session={session}
+        householdId={rolloverData.householdId}
+        currentYear={rolloverData.currentYear}
+        memberships={rolloverData.memberships}
+        onDone={() => { setRolloverData(null); checkProfile(session.user.id); fetchCounts(session.user.id); }}
+        onRemindLater={() => setRolloverSnoozed(true)}
+      />
+    );
   }
 
   if (showInbox) {
