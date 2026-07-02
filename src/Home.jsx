@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import Button from "./Button";
-import { currentSchoolYear } from "./schoolYear";
+import { currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
@@ -139,7 +139,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
     const { data: membershipData } = await supabase
       .from("classroom_members")
-      .select("*, classrooms(id, teacher_name, grade, school_year, schools(id, name))")
+      .select("*, classrooms(id, teacher_name, grade, school_year, schools(id, name, school_start_month))")
       .eq("household_id", hhId);
     setMemberships(membershipData || []);
 
@@ -646,7 +646,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   // Archive logic: hide last-year classrooms that have been rolled up (a
   // current-year membership exists at the same school, one grade higher).
   // Deferred last-year classrooms (no new-year replacement yet) stay visible.
-  const _curYear = currentSchoolYear(8);
+  const _startMonths = memberships
+    .map((m) => m.classrooms?.schools?.school_start_month)
+    .filter((n) => typeof n === "number");
+  const _startMonth = earliestStartMonth(_startMonths);
+  const _curYear = currentSchoolYear(_startMonth);
   const _currentYearMemberships = memberships.filter((m) => m.school_year === _curYear);
   const isSuperseded = (m) => {
     if (m.school_year === _curYear) return false;
