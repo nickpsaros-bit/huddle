@@ -209,8 +209,27 @@ export default function App() {
       // Only consider LAST-year memberships for rollover (don't re-prompt on rows
       // already at the current year).
       const curYear = currentSchoolYear(startMonth);
-      const staleMemberships = memberships.filter((m) => m.school_year !== curYear);
+      const currentMemberships = memberships.filter((m) => m.school_year === curYear);
+      let staleMemberships = memberships.filter((m) => m.school_year !== curYear);
       if (staleMemberships.length === 0) return; // already all current
+
+      // Exclude stale classrooms the parent has ALREADY rolled up: if there's a
+      // current-year membership at the same school + one grade higher, treat this
+      // stale row as resolved (they moved that class up) and don't re-prompt it.
+      // This lets a partial rollover ("don't know yet" on one) re-prompt ONLY the
+      // still-unresolved classrooms.
+      staleMemberships = staleMemberships.filter((m) => {
+        const c = m.classrooms || {};
+        const schoolId = c.schools?.id || c.school_id;
+        const nextGrade = (typeof c.grade === "number" ? c.grade : -99) + 1;
+        const alreadyRolled = currentMemberships.some((cm) => {
+          const cc = cm.classrooms || {};
+          const cSchoolId = cc.schools?.id || cc.school_id;
+          return cSchoolId === schoolId && cc.grade === nextGrade;
+        });
+        return !alreadyRolled;
+      });
+      if (staleMemberships.length === 0) return; // everything stale has been resolved
 
       // Read the parent's rolled_over_year.
       const { data: prow } = await supabase

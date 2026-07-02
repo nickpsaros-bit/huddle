@@ -1,29 +1,25 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
-import { currentSchoolYear } from "./schoolYear";
 import Button from "./Button";
 
 // Elementary grades (must match the app-wide grades arrays: TK–5th).
 const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
 
-// One-screen rollover prompt. Shows a household's CURRENT (last-year) classrooms,
+// One-screen rollover prompt. Shows a household's stale (last-year) classrooms,
 // each pre-filled with a next-grade guess (teacher blank/required). Per classroom
-// the parent picks: "moving up" (confirm/edit teacher+grade+school), "not returning",
-// or "don't know yet". Submits once. On submit: creates/joins the new-year
-// classroom rows for the confirmed ones, and sets parents.rolled_over_year.
+// the parent picks ONE of: "Moving up" (confirm grade+teacher), "Not returning",
+// or "Don't know yet" (defer just this one). Submits once, handling the mix.
 //
-// Props:
-//   session, householdId
-//   currentYear   — the school-year label we're rolling into (e.g. "2026-2027")
-//   memberships   — array of last-year classroom_members with classrooms(...) joined
-//   onDone()      — called after successful rollover (or "remind me: don't know yet")
-//   onRemindLater() — called when the parent chooses "I don't know my teacher yet"
+// On submit:
+//   - "up"      -> find-or-create the new-year classroom + join it.
+//   - "leaving" -> do nothing (last-year membership stays as history).
+//   - "unknown" -> do nothing, left stale -> re-prompts next login.
+//   - parents.rolled_over_year is set to currentYear ONLY IF zero classrooms
+//     were deferred ("unknown"). If any deferred, leave it null so the prompt
+//     returns next login for just those (App filters out already-resolved ones).
+//
+// Props: session, householdId, currentYear, memberships[], onDone(), onRemindLater()
 export default function RolloverPrompt({ session, householdId, currentYear, memberships, onDone, onRemindLater }) {
-  // Per-classroom state, keyed by the last-year membership id.
-  //   choice: "up" | "leaving" | null   (null until they pick)
-  //   grade:  index into GRADES (pre-filled next grade)
-  //   teacher: string (required for "up")
-  //   schoolId / schoolName (default: same school)
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -32,19 +28,18 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
     const seeded = (memberships || []).map((m) => {
       const c = m.classrooms || {};
       const lastGrade = typeof c.grade === "number" ? c.grade : 0;
-      // Next grade guess: +1, capped at the top of elementary (5th = index 6).
       const nextGrade = Math.min(lastGrade + 1, GRADES.length - 1);
-      const atTop = lastGrade >= GRADES.length - 1; // was 5th last year -> leaving elementary
+      const atTop = lastGrade >= GRADES.length - 1; // was 5th -> leaving elementary
       return {
         membershipId: m.id,
         lastClassroomId: c.id,
         lastLabel: `${c.teacher_name || "?"} · ${GRADES[lastGrade] || "?"}`,
         schoolId: c.schools?.id || c.school_id,
         schoolName: c.schools?.name || "your school",
-        choice: null,
+        choice: null, // "up" | "leaving" | "unknown"
         grade: nextGrade,
         teacher: "",
-        atTop, // 5th graders: default to "leaving" framing (moving to middle school)
+        atTop,
       };
     });
     setRows(seeded);
@@ -56,11 +51,11 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
   const allDecided = rows.length > 0 && rows.every((r) => r.choice !== null);
   const upRowsValid = rows.filter((r) => r.choice === "up").every((r) => r.teacher.trim().length > 0);
   const canSubmit = allDecided && upRowsValid && !busy;
+  const anyDeferred = rows.some((r) => r.choice === "unknown");
 
   // Find-or-create the new-year classroom and join it (mirrors Home.commitClassroom).
   const commitOne = async (row) => {
     const cleanTeacher = row.teacher.trim().replace(/\s+/g, " ");
-    // Look for an existing new-year classroom (same school, teacher, grade).
     const { data: existing } = await supabase
       .from("classrooms")
       .select("id, teacher_name, grade")
@@ -95,15 +90,18 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
     try {
       for (const row of rows) {
         if (row.choice === "up") await commitOne(row);
-        // "leaving" rows: do nothing — the household simply doesn't get a new-year
-        // membership for that classroom. Last-year membership stays as history.
+        // "leaving" and "unknown": no write. "unknown" stays stale -> re-prompts.
       }
-      // Mark this parent as rolled over for the current year.
-      const { error: pErr } = await supabase
-        .from("parents")
-        .update({ rolled_over_year: currentYear })
-        .eq("id", session.user.id);
-      if (pErr) throw pErr;
+      // Only mark fully rolled over if NOTHING was deferred. If any classroom is
+      // "don't know yet", leave rolled_over_year null so the prompt returns next
+      // login (App excludes the ones already resolved).
+      if (!anyDeferred) {
+        const { error: pErr } = await supabase
+          .from("parents")
+          .update({ rolled_over_year: currentYear })
+          .eq("id", session.user.id);
+        if (pErr) throw pErr;
+      }
       onDone();
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -111,14 +109,15 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
     }
   };
 
-  const choiceBtn = (active, label, onClick, activeBg = "#02C39A", activeColor = "#0F2044") => (
+  const choiceBtn = (active, label, onClick, activeBg, activeColor) => (
     <button
       onClick={onClick}
       style={{
-        flex: 1, padding: "0.55rem", borderRadius: "10px", border: "none",
+        flex: 1, padding: "0.55rem 0.4rem", borderRadius: "10px", border: "none",
         background: active ? activeBg : "#1B3A5C",
         color: active ? activeColor : "#8AAEC8",
-        fontSize: "0.82rem", fontWeight: active ? "700" : "500", cursor: "pointer",
+        fontSize: "0.8rem", fontWeight: active ? "700" : "500", cursor: "pointer",
+        lineHeight: "1.2",
       }}
     >
       {label}
@@ -147,9 +146,10 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
                 🏫 {r.schoolName} · {r.lastLabel}
               </p>
 
-              <div style={{ display: "flex", gap: "8px", marginBottom: r.choice === "up" ? "1rem" : 0 }}>
-                {choiceBtn(r.choice === "up", "Moving up", () => setRow(r.membershipId, { choice: "up" }))}
-                {choiceBtn(r.choice === "leaving", r.atTop ? "Moving to middle school" : "Not returning", () => setRow(r.membershipId, { choice: "leaving" }), "#7C5CBF", "#FFFFFF")}
+              <div style={{ display: "flex", gap: "6px", marginBottom: r.choice === "up" ? "1rem" : (r.choice ? "0.85rem" : 0) }}>
+                {choiceBtn(r.choice === "up", "Moving up", () => setRow(r.membershipId, { choice: "up" }), "#02C39A", "#0F2044")}
+                {choiceBtn(r.choice === "leaving", r.atTop ? "Middle school" : "Not returning", () => setRow(r.membershipId, { choice: "leaving" }), "#7C5CBF", "#FFFFFF")}
+                {choiceBtn(r.choice === "unknown", "Don't know yet", () => setRow(r.membershipId, { choice: "unknown" }), "#1B3A5C", "#FFFFFF")}
               </div>
 
               {r.choice === "up" && (
@@ -180,10 +180,16 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
               )}
 
               {r.choice === "leaving" && (
-                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0.85rem 0 0", lineHeight: "1.5" }}>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, lineHeight: "1.5" }}>
                   {r.atTop
                     ? "Congrats on finishing elementary! We'll keep your existing connections in your Network."
                     : "No problem — we'll keep your existing connections in your Network."}
+                </p>
+              )}
+
+              {r.choice === "unknown" && (
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, lineHeight: "1.5" }}>
+                  No problem — we'll ask again next time you open Huddle. This classroom stays as-is for now.
                 </p>
               )}
             </div>
@@ -193,16 +199,13 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
         {error && <p style={{ color: "#F87171", fontSize: "0.85rem", margin: "0 0 1rem" }}>{error}</p>}
 
         <div style={{ marginTop: "0.5rem" }}>
-          <Button fullWidth variant="primary" onClick={submit} disabled={!canSubmit}
-            style={{ marginBottom: "0.75rem" }}>
-            {busy ? "Saving..." : "Confirm my classrooms"}
+          <Button fullWidth variant="primary" onClick={submit} disabled={!canSubmit}>
+            {busy ? "Saving..." : anyDeferred ? "Save what I know" : "Confirm my classrooms"}
           </Button>
-
-          <Button fullWidth variant="ghost" onClick={onRemindLater} disabled={busy}>
-            I don't know my teacher yet — remind me later
-          </Button>
-          <p style={{ color: "#607080", fontSize: "0.72rem", textAlign: "center", margin: "0.6rem 0 0", lineHeight: "1.4" }}>
-            No rush. Everything keeps working as usual, and we'll ask again next time you open Huddle.
+          <p style={{ color: "#607080", fontSize: "0.72rem", textAlign: "center", margin: "0.7rem 0 0", lineHeight: "1.4" }}>
+            {anyDeferred
+              ? "We'll ask again about the classrooms you're not sure of yet. Everything keeps working in the meantime."
+              : "Pick an option for each classroom to continue."}
           </p>
         </div>
       </div>
