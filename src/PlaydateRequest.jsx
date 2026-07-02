@@ -372,6 +372,12 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
       if (pdErr) throw pdErr;
       createdPlaydateId = playdate.id;
 
+      // Email the host their own calendar invite immediately, so the event
+      // blocks their calendar right away (independent of RSVPs). Fire-and-forget.
+      supabase.functions.invoke("send-host-calendar", {
+        body: { playdate_id: playdate.id },
+      }).catch(() => {});
+
    // One invite row per recipient, PLUS the host's own row (rsvp='yes')
       // so "who's going" is one clean count and the host counts toward confirmation.
       const inviteRows = targets.map((t) => ({
