@@ -17,6 +17,7 @@ export default function Settings({ session, onBack }) {
   // Notification preferences.
   const [notifyInApp, setNotifyInApp] = useState(true);
   const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifyCreationCal, setNotifyCreationCal] = useState(true);
   const [notifBusy, setNotifBusy] = useState(false);
 
   // ---- Passkeys / Face ID ----
@@ -44,13 +45,14 @@ export default function Settings({ session, onBack }) {
   const fetchParent = async () => {
     const { data } = await supabase
       .from("parents")
-      .select("id, name, is_admin, created_at, discoverable, notify_in_app, notify_email")
+      .select("id, name, is_admin, created_at, discoverable, notify_in_app, notify_email, notify_creation_calendar")
       .eq("id", session.user.id)
       .single();
     setParent(data);
     if (data && typeof data.discoverable === "boolean") setDiscoverable(data.discoverable);
     if (data && typeof data.notify_in_app === "boolean") setNotifyInApp(data.notify_in_app);
     if (data && typeof data.notify_email === "boolean") setNotifyEmail(data.notify_email);
+    if (data && typeof data.notify_creation_calendar === "boolean") setNotifyCreationCal(data.notify_creation_calendar);
   };
 
   const toggleDiscoverable = async () => {
@@ -408,6 +410,19 @@ export default function Settings({ session, onBack }) {
             <button onClick={() => updateNotifyPref("notify_email", !notifyEmail, setNotifyEmail, notifyEmail)} disabled={notifBusy} aria-label="Toggle email notifications"
               style={{ flexShrink: 0, width: "52px", height: "32px", borderRadius: "16px", border: "none", cursor: notifBusy ? "default" : "pointer", background: notifyEmail ? "#02C39A" : "#2A4A6B", position: "relative", transition: "background 0.2s", padding: 0, marginTop: "2px" }}>
               <span style={{ position: "absolute", top: "3px", left: notifyEmail ? "23px" : "3px", width: "26px", height: "26px", borderRadius: "50%", background: "#FFFFFF", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+            </button>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginTop: "1.25rem", paddingTop: "1.25rem", borderTop: "1px solid #2A4A6B" }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.35rem" }}>Calendar invite when I create an event</p>
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0, lineHeight: "1.5" }}>
+                Email me a calendar invite when I set up a playdate or birthday, so it blocks my calendar right away. Turn off if you'd rather not get one each time you create an event.
+              </p>
+            </div>
+            <button onClick={() => updateNotifyPref("notify_creation_calendar", !notifyCreationCal, setNotifyCreationCal, notifyCreationCal)} disabled={notifBusy} aria-label="Toggle creation calendar email"
+              style={{ flexShrink: 0, width: "52px", height: "32px", borderRadius: "16px", border: "none", cursor: notifBusy ? "default" : "pointer", background: notifyCreationCal ? "#02C39A" : "#2A4A6B", position: "relative", transition: "background 0.2s", padding: 0, marginTop: "2px" }}>
+              <span style={{ position: "absolute", top: "3px", left: notifyCreationCal ? "23px" : "3px", width: "26px", height: "26px", borderRadius: "50%", background: "#FFFFFF", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
             </button>
           </div>
         </div>
