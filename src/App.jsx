@@ -426,13 +426,7 @@ export default function App() {
   }
 
   if (showJourney) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", color: "#FFFFFF", fontFamily: "system-ui, sans-serif", padding: "2rem", boxSizing: "border-box" }}>
-        <p style={{ fontSize: "1.5rem", fontWeight: "700" }}>Journey test screen ✅</p>
-        <p style={{ color: "#8AAEC8" }}>If you can see this, the button and navigation work — the bug is inside Journey.jsx.</p>
-        <button onClick={() => setShowJourney(false)} style={{ marginTop: "1rem", padding: "0.75rem 1.5rem", borderRadius: "999px", border: "none", background: "#02C39A", color: "#0F2044", fontWeight: "600", cursor: "pointer" }}>Back</button>
-      </div>
-    );
+    return <Journey session={session} onBack={() => setShowJourney(false)} />;
   }
 
   let screen;
