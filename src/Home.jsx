@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import Button from "./Button";
+import { currentSchoolYear } from "./schoolYear";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -642,7 +643,23 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return cards;
   };
 
-  const membershipsBySchool = memberships.reduce((acc, m) => {
+  // Archive logic: hide last-year classrooms that have been rolled up (a
+  // current-year membership exists at the same school, one grade higher).
+  // Deferred last-year classrooms (no new-year replacement yet) stay visible.
+  const _curYear = currentSchoolYear(8);
+  const _currentYearMemberships = memberships.filter((m) => m.school_year === _curYear);
+  const isSuperseded = (m) => {
+    if (m.school_year === _curYear) return false;
+    const schoolId = m.classrooms?.schools?.id;
+    const nextGrade = (typeof m.classrooms?.grade === "number" ? m.classrooms.grade : -99) + 1;
+    return _currentYearMemberships.some(
+      (cm) => cm.classrooms?.schools?.id === schoolId && cm.classrooms?.grade === nextGrade
+    );
+  };
+  const visibleMemberships = memberships.filter((m) => !isSuperseded(m));
+  const archivedCount = memberships.length - visibleMemberships.length;
+
+  const membershipsBySchool = visibleMemberships.reduce((acc, m) => {
     const schoolName = m.classrooms?.schools?.name || "Unknown School";
     const schoolId = m.classrooms?.schools?.id || null;
     const schoolKey = schoolName.toLowerCase().replace(/\s+/g, "-");
@@ -1162,6 +1179,13 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             <Button variant="primary" onClick={openAddDifferentSchool}>
               ➕ Add a classroom
             </Button>
+          </div>
+        )}
+
+        {memberships.length > 0 && (
+          <div onClick={() => { if (typeof onOpenJourney === "function") onOpenJourney(); }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", padding: "0.85rem", borderRadius: "12px", border: "1px solid #22355A", background: "#132840", color: "#B8CCE0", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem" }}>
+            🌱 Your Huddle journey{archivedCount > 0 ? ` · ${archivedCount} past ${archivedCount === 1 ? "classroom" : "classrooms"}` : ""}
           </div>
         )}
 
