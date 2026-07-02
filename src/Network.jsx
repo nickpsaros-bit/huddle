@@ -218,11 +218,11 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
-      <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+      <div style={{ background: "#162D50", padding: "1.1rem 1.5rem", borderBottom: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
         <div style={{ minWidth: 0 }}>
-          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Your Network</h1>
-          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "4px 0 0" }}>
-            Parents you've connected with outside your classrooms
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.35rem", fontWeight: "700", margin: 0, letterSpacing: "-0.01em" }}>Your Network</h1>
+          <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "3px 0 0" }}>
+            Parents you've connected with across classrooms
           </p>
         </div>
         {profileAvatar()}
@@ -244,52 +244,51 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
               {connectedCount} {connectedCount === 1 ? "CONNECTION" : "CONNECTIONS"}
             </p>
             {households.map((hh) => (
-              <div key={hh.householdId} style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "12px", border: "1px solid #2A4A6B" }}>
+              <div key={hh.householdId} style={{ marginBottom: "1.5rem" }}>
 
                 {hh.classrooms.length > 0 && (
-                  <div style={{ background: "#0F2A45", borderRadius: "10px", padding: "0.75rem 1rem", border: "1px solid #2A4A6B", marginBottom: "1rem" }}>
-                    <p style={{ color: "#8AAEC8", fontSize: "0.7rem", margin: "0 0 0.5rem", letterSpacing: "0.05em", display: "flex", alignItems: "center" }}>
-                      CLASSROOMS{petBadges(hh.householdId)}
-                    </p>
+                  <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", padding: "0 4px 8px" }}>
+                    <span style={{ fontSize: "0.9rem" }}>🏫</span>
                     {hh.classrooms.map((c, idx) => (
-                      <p key={idx} style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: idx > 0 ? "4px 0 0" : 0 }}>
-                        🏫 {c.classrooms?.schools?.name} · {c.classrooms?.teacher_name} · {grades[c.classrooms?.grade] || "?"}
-                      </p>
+                      <span key={idx} style={{ color: idx === 0 ? "#B8CCE0" : "#607080", fontSize: "0.82rem" }}>
+                        {idx > 0 && <span style={{ color: "#3A4D68", margin: "0 2px" }}>·</span>}
+                        {c.classrooms?.teacher_name}, {grades[c.classrooms?.grade] || "?"}
+                      </span>
                     ))}
+                    {petBadges(hh.householdId)}
                   </div>
                 )}
 
-                {hh.members.map((m, idx) => (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", paddingTop: idx > 0 ? "0.85rem" : 0, marginTop: idx > 0 ? "0.85rem" : 0, borderTop: idx > 0 ? "1px solid #2A4A6B" : "none" }}>
-                    <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
-                      {m.photo_url ? (
-                        <img src={m.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        m.name?.charAt(0) || "?"
+                <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #22355A", overflow: "hidden" }}>
+                  {hh.members.map((m, idx) => (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.85rem 1rem", borderTop: idx > 0 ? "1px solid #22355A" : "none" }}>
+                      <div style={{ width: "46px", height: "46px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.1rem", fontWeight: "600", color: "#FFFFFF", overflow: "hidden", flexShrink: 0 }}>
+                        {m.photo_url ? (
+                          <img src={m.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          m.name?.charAt(0) || "?"
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: 0 }}>
+                          {shortName(m.name)}
+                        </p>
+                        {!m.connectionId && (
+                          <p style={{ color: "#607080", fontSize: "0.78rem", margin: "2px 0 0" }}>Co-parent</p>
+                        )}
+                        {m.connectionId && (
+                          <button onClick={() => removeConnection(m.connectionId, m.name)}
+                            style={{ background: "transparent", border: "none", color: "#4A5D78", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0", marginTop: "1px" }}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      {m.connectionId && (
+                        <Button variant="primary" size="sm" onClick={() => setRequestingPlaydate({ id: m.id, name: m.name, photo_url: m.photo_url })} style={{ flexShrink: 0 }}>
+                          Huddle →
+                        </Button>
                       )}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "500", margin: "0 0 2px" }}>
-                        {shortName(m.name)}
-                      </p>
-                      <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>
-                        {m.connectionId ? "In your network" : "Co-parent"}
-                      </p>
-                    </div>
-                    {m.connectionId && (
-                      <Button variant="primary" size="sm" onClick={() => setRequestingPlaydate({ id: m.id, name: m.name, photo_url: m.photo_url })} style={{ flexShrink: 0 }}>
-                        Huddle →
-                      </Button>
-                    )}
-                  </div>
-                ))}
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginTop: "0.85rem" }}>
-                  {hh.members.filter((m) => m.connectionId).map((m) => (
-                    <button key={m.id} onClick={() => removeConnection(m.connectionId, m.name)}
-                      style={{ background: "transparent", border: "none", color: "#607080", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0" }}>
-                      Remove {shortName(m.name)}
-                    </button>
                   ))}
                 </div>
               </div>
