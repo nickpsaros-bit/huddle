@@ -3,6 +3,23 @@ import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
 
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function recurrenceLabel(recurrence, date, endDate) {
+  if (recurrence === "none") return "";
+  const endStr = endDate
+    ? new Date(endDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })
+    : "the end date";
+  if (recurrence === "daily") return `Every day until ${endStr}.`;
+  if (recurrence === "weekday") return `Every weekday (Mon–Fri) until ${endStr}.`;
+  if (recurrence === "monthly") return `Monthly until ${endStr}.`;
+  if (recurrence === "weekly") {
+    const dow = date ? WEEKDAYS[new Date(date + "T00:00:00").getDay()] : "week";
+    return date ? `Every ${dow} until ${endStr}.` : `Weekly until ${endStr}.`;
+  }
+  return "";
+}
+
 export default function PlaydateRequest({ session, recipient, recipients, onBack, onSent, eventType = "playdate", editEvent = null }) {
   const isEditing = !!editEvent;
   // In edit mode, the event's own type wins; otherwise use the passed eventType.
@@ -24,6 +41,8 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [recurrence, setRecurrence] = useState("none"); // none|daily|weekly|weekday|monthly
+  const [recurrenceEnd, setRecurrenceEnd] = useState("");
   const [locationName, setLocationName] = useState("");
   const [locationAddress, setLocationAddress] = useState("");
   const [note, setNote] = useState("");
@@ -345,6 +364,8 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           bringing_cat: bringingCat,
           event_type: effectiveType,
           title: isBirthday ? (title.trim() || null) : null,
+          recurrence: recurrence,
+          recurrence_end: recurrence !== "none" ? (recurrenceEnd || null) : null,
         })
         .select()
         .single();
@@ -564,6 +585,14 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   const attemptSend = () => {
     if (!date || !time || !locationName) {
       setError("Please fill in date, time and location");
+      return;
+    }
+    if (recurrence !== "none" && !recurrenceEnd) {
+      setError("Please pick an end date for the repeating playdate.");
+      return;
+    }
+    if (recurrence !== "none" && recurrenceEnd && date && recurrenceEnd < date) {
+      setError("The repeat end date can't be before the start date.");
       return;
     }
     setError("");
@@ -821,6 +850,35 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
               <option key={slot.value} value={slot.value}>{slot.label}</option>
             ))}
           </select>
+
+          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", margin: "1rem 0 0.4rem" }}>Repeats</label>
+          <select
+            value={recurrence}
+            onChange={(e) => { setRecurrence(e.target.value); if (e.target.value === "none") setRecurrenceEnd(""); }}
+            style={{ ...inputStyle, appearance: "auto", cursor: "pointer", marginBottom: recurrence === "none" ? 0 : "0.85rem" }}
+          >
+            <option value="none">Just once</option>
+            <option value="daily">Every day</option>
+            <option value="weekday">Every weekday (Mon–Fri)</option>
+            <option value="weekly">Weekly (same day each week)</option>
+            <option value="monthly">Monthly</option>
+          </select>
+
+          {recurrence !== "none" && (
+            <>
+              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Repeat until</label>
+              <input
+                type="date"
+                value={recurrenceEnd}
+                onChange={(e) => setRecurrenceEnd(e.target.value)}
+                min={date || new Date().toISOString().split("T")[0]}
+                style={inputStyle}
+              />
+              <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.5rem 0 0", lineHeight: "1.4" }}>
+                {recurrenceLabel(recurrence, date, recurrenceEnd)}
+              </p>
+            </>
+          )}
         </div>
 
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>

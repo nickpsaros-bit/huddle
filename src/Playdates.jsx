@@ -107,6 +107,21 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     const esc = (s) => (s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
     const loc = [pd.location_name, pd.location_address].filter(Boolean).join(", ");
 
+    // Build an RRULE line for recurring playdates (empty string if one-time).
+    // UNTIL must be a UTC timestamp; use end-of-day on the recurrence_end date.
+    const buildRrule = () => {
+      const rec = pd.recurrence || "none";
+      if (rec === "none" || !pd.recurrence_end) return "";
+      const until = new Date(pd.recurrence_end + "T23:59:59Z");
+      const untilStr = toIcs(until);
+      if (rec === "daily") return `RRULE:FREQ=DAILY;UNTIL=${untilStr}`;
+      if (rec === "weekly") return `RRULE:FREQ=WEEKLY;UNTIL=${untilStr}`;
+      if (rec === "monthly") return `RRULE:FREQ=MONTHLY;UNTIL=${untilStr}`;
+      if (rec === "weekday") return `RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;UNTIL=${untilStr}`;
+      return "";
+    };
+    const rrule = buildRrule();
+
     const isBday = pd.event_type === "birthday";
 
     // Birthday and playdate produce clearly different calendar entries.
@@ -126,6 +141,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       `DTSTAMP:${toIcs(new Date())}`,
       `DTSTART:${toIcs(start)}`,
       `DTEND:${toIcs(end)}`,
+      rrule,
       icsSummary,
       loc ? `LOCATION:${esc(loc)}` : "",
       icsDescription,
