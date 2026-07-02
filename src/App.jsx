@@ -13,6 +13,7 @@ import Network from "./Network";
 import Playdates from "./Playdates";
 import InviteLanding from "./InviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
+import Journey from "./Journey";
 import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
@@ -28,6 +29,7 @@ export default function App() {
   const [showInbox, setShowInbox] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showJourney, setShowJourney] = useState(false);
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
@@ -423,9 +425,19 @@ export default function App() {
     return <ProfileScreen session={session} onBack={() => { setShowProfile(false); fetchCounts(session.user.id); }} onOpenSettings={() => { setShowProfile(false); setShowSettings(true); }} />;
   }
 
+  if (showJourney) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", color: "#FFFFFF", fontFamily: "system-ui, sans-serif", padding: "2rem", boxSizing: "border-box" }}>
+        <p style={{ fontSize: "1.5rem", fontWeight: "700" }}>Journey test screen ✅</p>
+        <p style={{ color: "#8AAEC8" }}>If you can see this, the button and navigation work — the bug is inside Journey.jsx.</p>
+        <button onClick={() => setShowJourney(false)} style={{ marginTop: "1rem", padding: "0.75rem 1.5rem", borderRadius: "999px", border: "none", background: "#02C39A", color: "#0F2044", fontWeight: "600", cursor: "pointer" }}>Back</button>
+      </div>
+    );
+  }
+
   let screen;
   if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} />;
   } else if (activeTab === "search") {
     screen = <Search session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
   } else if (activeTab === "network") {
