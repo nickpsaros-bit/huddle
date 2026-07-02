@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
-import { currentSchoolYear } from "./schoolYear";
+import { currentSchoolYear, earliestStartMonth } from "./schoolYear";
 
 const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -30,6 +30,7 @@ export default function Journey({ session, onBack }) {
   const [loading, setLoading] = useState(true);
   const [householdId, setHouseholdId] = useState(null);
   const [years, setYears] = useState([]); // [{ year, classrooms:[], events:[] }]
+  const [startMonthState, setStartMonthState] = useState(8);
 
   useEffect(() => {
     (async () => {
@@ -47,8 +48,13 @@ export default function Journey({ session, onBack }) {
         // 1) Classroom memberships across all years (the backbone).
         const { data: memberships } = await supabase
           .from("classroom_members")
-          .select("id, school_year, classrooms(id, teacher_name, grade, schools(id, name))")
+          .select("id, school_year, classrooms(id, teacher_name, grade, schools(id, name, school_start_month))")
           .eq("household_id", hhId);
+
+        const startMonths = (memberships || [])
+          .map((m) => m.classrooms?.schools?.school_start_month)
+          .filter((n) => typeof n === "number");
+        const startMonth = earliestStartMonth(startMonths);
 
         // Count classmates per membership (families huddled with that year).
         const classmateCounts = {};
@@ -128,14 +134,17 @@ export default function Journey({ session, onBack }) {
         // Place playdate/birthday events into the school-year bucket their date falls in.
         // We infer the year label from the event date using the app's boundary.
         for (const ev of playdateEvents) {
-          const label = currentSchoolYear(8, new Date(ev.date));
+          const label = currentSchoolYear(startMonth, new Date(ev.date));
           ensureYear(label).events.push(ev);
         }
 
-        // Recurring household birthday: add a generic marker to EACH year that has a classroom.
-        for (const yl of Object.keys(byYear)) {
+        // Recurring household birthday: show each ONCE (not repeated per year).
+        // Attach to the most recent year bucket so it appears near the top.
+        const yearLabelsSorted = Object.keys(byYear).sort((a, b) => yearNum(b) - yearNum(a));
+        const topYear = yearLabelsSorted[0];
+        if (topYear) {
           for (const hb of householdBdays) {
-            byYear[yl].events.push({
+            byYear[topYear].events.push({
               kind: "household_birthday",
               sortMonth: hb.month,
               label: `Birthday · ${hb.monthName}`,
@@ -154,6 +163,7 @@ export default function Journey({ session, onBack }) {
         }
 
         const ordered = Object.values(byYear).sort((a, b) => yearNum(b.year) - yearNum(a.year));
+        setStartMonthState(startMonth);
         setYears(ordered);
       } catch (e) {
         // Best-effort; show whatever assembled.
@@ -162,7 +172,7 @@ export default function Journey({ session, onBack }) {
     })();
   }, [session]);
 
-  const curYear = currentSchoolYear(8);
+  const curYear = currentSchoolYear(startMonthState);
   const earliestLabel = years.length > 0 ? years[years.length - 1].year : null;
 
   const dot = (bg, border, emoji) => (
