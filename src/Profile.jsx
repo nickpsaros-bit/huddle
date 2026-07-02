@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import { currentSchoolYear } from "./schoolYear";
 
 export default function Profile({ session, onComplete }) {
   const [step, setStep] = useState(1);
@@ -118,8 +119,7 @@ export default function Profile({ session, onComplete }) {
         return;
       }
 
-      const currentYear = new Date().getFullYear();
-      const schoolYear = `${currentYear}-${currentYear + 1}`;
+      const schoolYear = currentSchoolYear();
 
       // ATOMIC SIGNUP: one server-side transaction does the whole chain —
       // find-or-create school + classroom, create household, add primary member,

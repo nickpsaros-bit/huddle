@@ -560,8 +560,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         school = newSchool;
       }
 
-      const currentYear = new Date().getFullYear();
-      const schoolYear = `${currentYear}-${currentYear + 1}`;
+      const schoolYear = currentSchoolYear();
       const gradeIdx = grades.indexOf(newGrade);
 
       const typedNorm = newTeacher.trim().replace(/\s+/g, " ").toLowerCase();
