@@ -77,6 +77,20 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     return status;
   };
 
+  const recurrenceBadge = (pd) => {
+    const rec = pd.recurrence;
+    if (!rec || rec === "none") return null;
+    const label = rec === "daily" ? "Daily"
+      : rec === "weekly" ? "Weekly"
+      : rec === "weekday" ? "Weekdays"
+      : rec === "monthly" ? "Monthly" : "Repeats";
+    return (
+      <span style={{ display: "inline-block", fontSize: "0.7rem", fontWeight: "600", background: "#1B3A5C", color: "#7FD8C4", padding: "2px 8px", borderRadius: "999px", marginLeft: "8px", verticalAlign: "middle" }}>
+        🔁 {label}
+      </span>
+    );
+  };
+
   const fmtDate = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -857,7 +871,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           {pd.event_type === "birthday" && (
             <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px" }}>🎂 {pd.title || "Birthday celebration"}</p>
           )}
-          <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}</p>
+          <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
           <p style={metaRow}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           {petLine(pd, true)}
           {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{pd.note}"</p>}
@@ -911,7 +925,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             {pd.event_type === "birthday" && (
               <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 2px" }}>🎂 {pd.title || "Birthday celebration"}</p>
             )}
-            <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}</p>
+            <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
           {sb && (
