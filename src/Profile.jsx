@@ -20,7 +20,7 @@ export default function Profile({ session, onComplete }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const [showTeacherDropdown, setShowTeacherDropdown] = useState(false);
 
-  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
+  const grades = ["TK","Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade"];
 
   // GUARD: if this authenticated user ALREADY has a household, they already have
   // an account — do NOT let them run signup again (which would create a duplicate

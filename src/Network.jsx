@@ -197,7 +197,7 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
     });
   };
 
-  const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
+  const grades = ["TK","K","1st","2nd","3rd","4th","5th"];
 
   if (requestingPlaydate) {
     return (

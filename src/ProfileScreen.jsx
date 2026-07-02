@@ -42,7 +42,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [linkBusyId, setLinkBusyId] = useState(null);
   const [pendingRequest, setPendingRequest] = useState(null); // an outgoing join request I've already sent
 
-  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
+  const grades = ["TK","Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade"];
 
   useEffect(() => {
     fetchProfile();

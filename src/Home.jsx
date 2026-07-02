@@ -44,7 +44,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [hasUpcomingBirthdayEvent, setHasUpcomingBirthdayEvent] = useState(false);
   const [birthdayEventTag, setBirthdayEventTag] = useState("");  // "🎂 Hosting" | "🎂 Going"
 
-  const grades = ["Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade","6th Grade"];
+  const grades = ["TK","Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade"];
 
   useEffect(() => { fetchData(); }, []);
 
