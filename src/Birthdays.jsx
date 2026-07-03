@@ -29,6 +29,7 @@ export default function Birthdays({
   const [loading, setLoading] = useState(true);
   const [upcoming, setUpcoming] = useState([]);   // connections' birthdays, sorted soonest-first
   const [invites, setInvites] = useState([]);      // inbound birthday invites
+  const [hosting, setHosting] = useState([]);      // birthdays I'm hosting
   const [myHouseholdId, setMyHouseholdId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -138,6 +139,42 @@ export default function Birthdays({
       }
       bdayInvites.sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
       setInvites(bdayInvites);
+
+      // --- Section: birthdays I'm HOSTING ---
+      const { data: myHosted } = await supabase
+        .from("playdates")
+        .select("*")
+        .eq("organizer_household_id", hhId)
+        .eq("event_type", "birthday")
+        .gte("proposed_date", new Date(Date.now()).toISOString());
+
+      const hostedList = [];
+      for (const pd of (myHosted || [])) {
+        const { data: pdInvites } = await supabase
+          .from("playdate_invites")
+          .select("*")
+          .eq("playdate_id", pd.id);
+        const guests = (pdInvites || []).filter((inv) => inv.household_id !== hhId);
+        const roster = [];
+        for (const inv of guests) {
+          // lightweight household label (first parent's name)
+          let label = "A family";
+          const { data: gm } = await supabase
+            .from("household_members").select("parent_id").eq("household_id", inv.household_id).limit(1);
+          if (gm && gm[0]) {
+            const { data: gp } = await supabase.from("parents").select("name").eq("id", gm[0].parent_id).maybeSingle();
+            if (gp?.name) label = gp.name;
+          }
+          roster.push({ ...inv, label });
+        }
+        hostedList.push({
+          playdate: pd,
+          roster,
+          goingCount: roster.filter((r) => r.rsvp === "yes").length,
+        });
+      }
+      hostedList.sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
+      setHosting(hostedList);
     } catch (e) {
       // best-effort
     }
@@ -282,6 +319,43 @@ export default function Birthdays({
                         {invite.rsvp === "yes" ? "You're going 🎉" : "You declined"}
                       </p>
                     )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Section: birthdays you're hosting */}
+            {hosting.length > 0 && (
+              <div style={{ marginBottom: "2rem" }}>
+                <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>YOU'RE HOSTING</p>
+                {hosting.map(({ playdate, roster, goingCount }) => (
+                  <div key={playdate.id} style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "12px", padding: "1rem", marginBottom: "0.75rem" }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 4px" }}>
+                      🎂 {playdate.title || "Birthday celebration"}
+                    </p>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 2px" }}>{fmtInviteDate(playdate.proposed_date)}</p>
+                    {playdate.location_name && (
+                      <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 8px" }}>
+                        <Icon name="location_on" size={16} style={{ verticalAlign: "-3px", marginRight: 2 }} />{playdate.location_name}
+                      </p>
+                    )}
+                    <div style={{ borderTop: "1px solid #2A4A6B", marginTop: "8px", paddingTop: "8px" }}>
+                      <p style={{ color: "#607080", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.04em", margin: "0 0 6px" }}>
+                        GUEST LIST · {goingCount} going
+                      </p>
+                      {roster.length === 0 ? (
+                        <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>No guests invited yet.</p>
+                      ) : (
+                        roster.map((r) => (
+                          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" }}>
+                            <span style={{ color: "#B8CCE0", fontSize: "0.85rem" }}>{r.label}</span>
+                            <span style={{ color: r.rsvp === "yes" ? "#02C39A" : r.rsvp === "no" ? "#607080" : "#8AAEC8", fontSize: "0.78rem", fontWeight: "600" }}>
+                              {r.rsvp === "yes" ? "Going" : r.rsvp === "no" ? "Can't make it" : "Invited"}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
