@@ -586,6 +586,27 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
         }
       } catch (notifErr) { /* best-effort */ }
 
+      // ---- Emails + calendar (best-effort) ----
+      // NEW additions only get a fresh invite email + .ics.
+      // KEPT families get an UPDATED .ics only if when/where changed. (No spam.)
+      try {
+        if (toAdd.length > 0) {
+          await supabase.functions.invoke("send-playdate-invite", {
+            body: { playdate_id: editEvent.id, invite_household_ids: toAdd.map((t) => t.householdId) },
+          }).catch(() => {});
+        }
+        if (detailsChanged) {
+          const keptHouseholdIds = newTargets
+            .filter((t) => existingHouseholdIds.has(t.householdId))
+            .map((t) => t.householdId);
+          if (keptHouseholdIds.length > 0) {
+            await supabase.functions.invoke("send-playdate-invite", {
+              body: { playdate_id: editEvent.id, invite_household_ids: keptHouseholdIds, is_update: true },
+            }).catch(() => {});
+          }
+        }
+      } catch (emailErr) { /* best-effort */ }
+
       setEditSummary({
         added: toAdd.length,
         removed: removeRows.length,
