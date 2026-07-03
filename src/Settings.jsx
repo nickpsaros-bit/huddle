@@ -207,6 +207,45 @@ export default function Settings({ session, onBack }) {
     await loadAdminBugs();
   };
 
+  // ---- Admin: safety reports ----
+  const [adminReports, setAdminReports] = useState([]);
+  const loadAdminReports = async () => {
+    setAdminLoading(true);
+    try {
+      const { data } = await supabase
+        .from("safety_reports")
+        .select("id, category, details, also_blocked, status, created_at, reporter:reporter_parent_id(name), reported:reported_parent_id(name)")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      setAdminReports(data || []);
+    } catch (e) {
+      setAdminReports([]);
+    }
+    setAdminLoading(false);
+  };
+
+  const setReportStatus = async (id, status) => {
+    setAdminBusyId(id);
+    try {
+      await supabase.from("safety_reports").update({ status }).eq("id", id);
+      setAdminReports((list) => list.map((r) => (r.id === id ? { ...r, status } : r)));
+    } catch (e) { /* best-effort */ }
+    setAdminBusyId(null);
+  };
+
+  const openAdminReports = async () => {
+    setView("adminReports");
+    await loadAdminReports();
+  };
+
+  const REPORT_CAT_LABELS = {
+    harassment: "Harassment or bullying",
+    inappropriate: "Inappropriate behavior",
+    spam_scam: "Spam or scam",
+    child_safety: "Child safety concern",
+    other: "Other",
+  };
+
   const openBlocked = async () => {
     setView("blocked");
     setBlockedLoading(true);
@@ -388,6 +427,53 @@ export default function Settings({ session, onBack }) {
     );
   }
 
+  // ---- Admin: safety reports viewer ----
+  if (view === "adminReports") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("Safety Reports", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {adminLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : adminReports.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ margin: "0 0 0.75rem" }}><Icon name="shield" size={40} color="#3E5A7F" /></p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>No safety reports.</p>
+            </div>
+          ) : (
+            adminReports.map((r) => (
+              <div key={r.id} style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "1rem", marginBottom: "0.75rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", margin: 0 }}>
+                    {REPORT_CAT_LABELS[r.category] || r.category}
+                  </p>
+                  <span style={{ color: r.status === "new" ? "#E39A9A" : r.status === "actioned" ? "#02C39A" : "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", flexShrink: 0 }}>
+                    {(r.status || "new").toUpperCase()}
+                  </span>
+                </div>
+                <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "0 0 4px" }}>
+                  {r.reported?.name || "Someone"} reported by {r.reporter?.name || "someone"}{r.also_blocked ? " · also blocked" : ""}
+                </p>
+                {r.details && (
+                  <p style={{ color: "#B8CCE0", fontSize: "0.85rem", margin: "6px 0", fontStyle: "italic", lineHeight: "1.5" }}>"{r.details}"</p>
+                )}
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0 0 10px" }}>{new Date(r.created_at).toLocaleString()}</p>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {["reviewing", "actioned", "dismissed"].map((st) => (
+                    <button key={st} disabled={adminBusyId === r.id} onClick={() => setReportStatus(r.id, st)}
+                      style={{ padding: "0.4rem 0.75rem", borderRadius: "8px", border: `1px solid ${r.status === st ? "#02C39A" : "#2A4A6B"}`, background: r.status === st ? "#12352C" : "transparent", color: r.status === st ? "#02C39A" : "#8AAEC8", fontSize: "0.75rem", fontWeight: "600", cursor: "pointer" }}>
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ---- Main settings ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -552,10 +638,18 @@ export default function Settings({ session, onBack }) {
             <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>ADMIN</p>
             <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
               <div onClick={openAdminBugs}
-                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📋 Bug Reports</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review what users have reported</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+              <div onClick={openAdminReports}
+                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🛡️ Safety Reports</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review reports about people</p>
                 </div>
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>

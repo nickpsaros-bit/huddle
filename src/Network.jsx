@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
-import { blockParent, getHiddenParentIds } from "./blocks";
+import { blockParent, getHiddenParentIds, submitReport } from "./blocks";
 import Button from "./Button";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
@@ -16,6 +16,11 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
   const [myName, setMyName] = useState("");
   const [confirm, setConfirm] = useState(null);
   const [message, setMessage] = useState("");
+  const [reporting, setReporting] = useState(null); // { personId, personName }
+  const [reportCategory, setReportCategory] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportAlsoBlock, setReportAlsoBlock] = useState(true);
+  const [reportBusy, setReportBusy] = useState(false);
   const [petsByHousehold, setPetsByHousehold] = useState({});
 
   useEffect(() => { fetchConnections(); }, []);
@@ -226,6 +231,31 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
     }
   };
 
+  const openReport = (personId, personName) => {
+    setReportCategory("");
+    setReportDetails("");
+    setReportAlsoBlock(true);
+    setReporting({ personId, personName });
+  };
+
+  const submitReportNow = async () => {
+    if (!reportCategory || !reporting) return;
+    setReportBusy(true);
+    const res = await submitReport(session.user.id, reporting.personId, reportCategory, reportDetails, reportAlsoBlock);
+    setReportBusy(false);
+    if (res.ok) {
+      setReporting(null);
+      setMessage(reportAlsoBlock
+        ? `Report submitted and ${shortName(reporting.personName)} blocked. Thank you for keeping Huddle safe.`
+        : "Report submitted. Thank you for keeping Huddle safe.");
+      fetchConnections();
+      setTimeout(() => setMessage(""), 4000);
+    } else {
+      setMessage("Couldn't submit the report, please try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
   const grades = ["TK","K","1st","2nd","3rd","4th","5th"];
 
   if (requestingPlaydate) {
@@ -327,6 +357,10 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
                               style={{ background: "transparent", border: "none", color: "#7A3B3B", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
                               Block
                             </button>
+                            <button onClick={() => openReport(m.id, m.name)}
+                              style={{ background: "transparent", border: "none", color: "#7A3B3B", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
+                              Report
+                            </button>
                           </div>
                         )}
                       </div>
@@ -360,6 +394,63 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
       )}
 
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
+
+      {reporting && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.85)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "16px", padding: "1.5rem", maxWidth: "400px", width: "100%", maxHeight: "85vh", overflowY: "auto" }}>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: "0 0 0.35rem" }}>
+              Report {shortName(reporting.personName)}
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.82rem", lineHeight: "1.5", margin: "0 0 1.1rem" }}>
+              Reports are sent privately to the Huddle team for review. Your report is confidential.
+            </p>
+
+            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.05em", margin: "0 0 0.5rem" }}>WHAT'S THE CONCERN?</p>
+            {[
+              { key: "harassment", label: "Harassment or bullying" },
+              { key: "inappropriate", label: "Inappropriate behavior or messages" },
+              { key: "spam_scam", label: "Spam or scam" },
+              { key: "child_safety", label: "Concern about a child's safety" },
+              { key: "other", label: "Something else" },
+            ].map((opt) => (
+              <div key={opt.key} onClick={() => setReportCategory(opt.key)}
+                style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0.7rem 0.9rem", borderRadius: "10px", border: `1px solid ${reportCategory === opt.key ? "#02C39A" : "#2A4A6B"}`, background: reportCategory === opt.key ? "#12352C" : "transparent", marginBottom: "0.5rem", cursor: "pointer" }}>
+                <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: `2px solid ${reportCategory === opt.key ? "#02C39A" : "#4A5D78"}`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {reportCategory === opt.key && <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A" }} />}
+                </div>
+                <span style={{ color: "#FFFFFF", fontSize: "0.88rem" }}>{opt.label}</span>
+              </div>
+            ))}
+
+            <textarea
+              value={reportDetails}
+              onChange={(e) => setReportDetails(e.target.value)}
+              placeholder="Add any details that would help us (optional)"
+              rows={3}
+              style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.85rem", marginTop: "0.5rem", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}
+            />
+
+            <div onClick={() => setReportAlsoBlock(!reportAlsoBlock)}
+              style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0.7rem 0", cursor: "pointer" }}>
+              <div style={{ width: "20px", height: "20px", borderRadius: "6px", border: `2px solid ${reportAlsoBlock ? "#02C39A" : "#4A5D78"}`, background: reportAlsoBlock ? "#02C39A" : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {reportAlsoBlock && <Icon name="check" size={14} color="#0F2044" />}
+              </div>
+              <span style={{ color: "#FFFFFF", fontSize: "0.88rem" }}>Also block {shortName(reporting.personName)}</span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "1rem" }}>
+              <button disabled={!reportCategory || reportBusy} onClick={submitReportNow}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: (!reportCategory || reportBusy) ? "#28405F" : "#C0504D", color: "#FFFFFF", fontWeight: "700", cursor: (!reportCategory || reportBusy) ? "default" : "pointer", fontSize: "0.9rem" }}>
+                {reportBusy ? "Submitting..." : "Submit report"}
+              </button>
+              <button onClick={() => setReporting(null)}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontWeight: "600", cursor: "pointer", fontSize: "0.9rem" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

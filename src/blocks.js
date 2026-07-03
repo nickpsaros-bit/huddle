@@ -68,3 +68,23 @@ export async function getMyBlockedList(myParentId) {
     return [];
   }
 }
+
+// Submit a safety report about a parent. Optionally also block them.
+export async function submitReport(myParentId, reportedParentId, category, details, alsoBlock) {
+  try {
+    const { error } = await supabase.from("safety_reports").insert({
+      reporter_parent_id: myParentId,
+      reported_parent_id: reportedParentId,
+      category,
+      details: details?.trim() || null,
+      also_blocked: !!alsoBlock,
+    });
+    if (error) return { ok: false, error: error.message };
+    if (alsoBlock) {
+      await blockParent(myParentId, reportedParentId);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
