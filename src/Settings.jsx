@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { supabase } from "./supabase";
 import Button from "./Button";
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from "./legal";
+import Icon from "./Icon";
 
 export default function Settings({ session, onBack }) {
   const [parent, setParent] = useState(null);
@@ -212,7 +213,7 @@ export default function Settings({ session, onBack }) {
 
   const headerBar = (title, backTo) => (
     <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B", position: "sticky", top: 0, zIndex: 10 }}>
-      <button onClick={backTo} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+      <button onClick={backTo} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
       <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{title}</h1>
       <div style={{ width: "60px" }} />
     </div>
@@ -455,7 +456,7 @@ export default function Settings({ session, onBack }) {
                 <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🐞 Report a problem</p>
                 <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Found a bug or something off? Let us know.</p>
               </div>
-              <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+              <Icon name="chevron_right" size={22} color="#02C39A" />
             </div>
           ) : (
             <div style={{ padding: "1.25rem" }}>
@@ -493,7 +494,7 @@ export default function Settings({ session, onBack }) {
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📋 Bug Reports</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review what users have reported</p>
                 </div>
-                <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
             </div>
           </>
@@ -512,7 +513,7 @@ export default function Settings({ session, onBack }) {
                   : "Not yet agreed"}
               </p>
             </div>
-            <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+            <Icon name="chevron_right" size={22} color="#02C39A" />
           </div>
           <div onClick={() => setView("privacy")}
             style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -524,7 +525,7 @@ export default function Settings({ session, onBack }) {
                   : "Not yet agreed"}
               </p>
             </div>
-            <span style={{ color: "#02C39A", fontSize: "1.1rem" }}>→</span>
+            <Icon name="chevron_right" size={22} color="#02C39A" />
           </div>
           <div style={{ padding: "1rem 1.25rem" }}>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 4px" }}>Request data deletion</p>

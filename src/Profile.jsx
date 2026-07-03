@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import { currentSchoolYear } from "./schoolYear";
+import Icon from "./Icon";
 
 export default function Profile({ session, onComplete }) {
   const [step, setStep] = useState(1);
@@ -236,7 +237,7 @@ export default function Profile({ session, onComplete }) {
                   {schoolResults.map(school => (
                     <div key={school.id} onClick={() => selectSchool(school)}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      🏫 {school.name}
+                      <Icon name="school" size={18} color="#B8CCE0" style={{ verticalAlign: "-3px", marginRight: 4 }} />{school.name}
                     </div>
                   ))}
                   <div onClick={() => { setSelectedSchool(null); setShowSchoolDropdown(false); }}
@@ -249,7 +250,7 @@ export default function Profile({ session, onComplete }) {
 
             {selectedSchool && (
               <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {selectedSchool.name}</span>
+                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}><Icon name="check" size={16} color="#02C39A" style={{ verticalAlign: "-2px", marginRight: 2 }} />{selectedSchool.name}</span>
               </div>
             )}
 
@@ -266,7 +267,7 @@ export default function Profile({ session, onComplete }) {
                   {teacherResults.filter(t => t.toLowerCase().includes(teacher.toLowerCase())).map(t => (
                     <div key={t} onClick={() => { setTeacher(t); setShowTeacherDropdown(false); }}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      📚 {t}
+                      <Icon name="menu_book" size={18} color="#B8CCE0" style={{ verticalAlign: "-3px", marginRight: 4 }} />{t}
                     </div>
                   ))}
                   {teacherMismatch && (
@@ -282,7 +283,7 @@ export default function Profile({ session, onComplete }) {
             {teacherMismatch && (
               <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem", marginTop: "-0.5rem" }}>
                 <p style={{ color: "#F59E0B", fontSize: "0.8rem", margin: 0 }}>
-                  ⚠️ This teacher isn't in our system yet. Double-check spelling or select from the list above.
+                  <Icon name="warning" size={16} color="#F5A623" style={{ verticalAlign: "-3px", marginRight: 4 }} />This teacher isn't in our system yet. Double-check spelling or select from the list above.
                 </p>
               </div>
             )}

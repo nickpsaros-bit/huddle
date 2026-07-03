@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Button from "./Button";
+import Icon from "./Icon";
 
 export default function Search({ session, avatarUrl, onProfileClick }) {
   const [query, setQuery] = useState("");
@@ -193,7 +194,7 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const grades = ["K","1st","2nd","3rd","4th","5th","6th"];
+  const grades = ["TK","K","1st","2nd","3rd","4th","5th"];
 
   const connectionControl = (parentId, sameHousehold) => {
     if (sameHousehold) {
@@ -218,7 +219,7 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
       );
     }
     if (conn.status === "accepted") {
-      return <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}>✓ Connected</span>;
+      return <span style={{ color: "#02C39A", fontSize: "0.8rem", flexShrink: 0 }}><Icon name="check" size={16} color="#02C39A" style={{ verticalAlign: "-2px", marginRight: 2 }} />Connected</span>;
     }
     return null;
   };
@@ -292,7 +293,7 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
 
         {!loading && emailSearched && !emailResult && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
-            <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>📭</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="mail" size={40} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No one found with that email</p>
             <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
               Double-check the spelling, or invite them to Huddle from the Home tab.
@@ -302,7 +303,7 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
 
         {!loading && !emailSearched && query.length >= 2 && results.length === 0 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
-            <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>🔍</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="search" size={40} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No parents found</p>
             <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
               Only parents at your school show up by name. To connect with someone at another school, enter their exact email.
@@ -312,7 +313,7 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
 
         {!loading && query.length < 2 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
-            <p style={{ fontSize: "2rem", margin: "0 0 1rem" }}>👋</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="waving_hand" size={40} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>Find parents to connect with</p>
             <p style={{ color: "#607080", fontSize: "0.85rem" }}>Type a name, or an email address</p>
           </div>

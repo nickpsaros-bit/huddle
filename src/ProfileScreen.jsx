@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import PlaydateRequest from "./PlaydateRequest";
 import Button from "./Button";
+import Icon from "./Icon";
 
 export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [parent, setParent] = useState(null);
@@ -514,7 +515,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "90px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-          <button onClick={() => setBdayInviteOpen(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <button onClick={() => setBdayInviteOpen(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Invite families</h1>
           <div style={{ width: "60px" }} />
         </div>
@@ -528,7 +529,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading families...</p>
           ) : bdayPeople.length === 0 ? (
             <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-              <p style={{ fontSize: "2rem", margin: "0 0 0.75rem" }}>👋</p>
+              <p style={{ margin: "0 0 0.75rem" }}><Icon name="waving_hand" size={40} color="#3E5A7F" /></p>
               <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.4rem" }}>No families to invite yet</p>
               <p style={{ color: "#607080", fontSize: "0.85rem" }}>Connect with families or join a classroom, then you can invite them.</p>
             </div>
@@ -567,11 +568,11 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+        <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Profile</h1>
         <button onClick={onOpenSettings} aria-label="Settings"
           style={{ background: "#0F3D2E", border: "1.5px solid #02C39A", cursor: "pointer", fontSize: "1.15rem", width: "40px", height: "40px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}>
-          ⚙️
+          <Icon name="settings" size={22} color="#8AAEC8" />
         </button>
       </div>
 
@@ -632,12 +633,12 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             {Object.entries(bySchool).map(([schoolName, classes]) => (
               <div key={schoolName} style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.75rem", overflow: "hidden" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderBottom: "1px solid #2A4A6B" }}>
-                  <span style={{ fontSize: "1.1rem" }}>🏫</span>
+                  <Icon name="school" size={20} color="#B8CCE0" />
                   <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{schoolName}</p>
                 </div>
                 {classes.map((m, idx) => (
                   <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.75rem 1rem", borderBottom: idx < classes.length - 1 ? "1px solid #2A4A6B" : "none" }}>
-                    <span style={{ fontSize: "0.95rem" }}>📚</span>
+                    <Icon name="menu_book" size={18} color="#B8CCE0" />
                     <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>
                       {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
                     </p>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Button from "./Button";
+import Icon from "./Icon";
 
 const INVITE_KEY = "huddle_pending_invite_token";
 const INVITE_EMAIL_KEY = "huddle_invite_email";
@@ -173,7 +174,7 @@ export default function Auth({ onAuth }) {
               The easiest way for school parents to set up playdates. Join your classroom community in a couple of minutes.
             </p>
             <Button fullWidth variant="primary" onClick={() => { setError(""); setMode("signup"); }} style={{ marginBottom: "0.85rem" }}>
-              Get started →
+              Get started<Icon name="arrow_forward" size={18} style={{ verticalAlign: "-3px", marginLeft: 4 }} />
             </Button>
             <Button fullWidth variant="ghost" onClick={() => { setError(""); setMode("signin"); }}>
               I already have an account
@@ -190,7 +191,7 @@ export default function Auth({ onAuth }) {
             {renderAuthControls("Sign up with email →")}
             <button onClick={() => { setError(""); setMode("intro"); }}
               style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
-              ← Back
+              <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
             </button>
           </>
         )}
@@ -204,7 +205,7 @@ export default function Auth({ onAuth }) {
 
             {/* Fast path: passkey / Face ID. Sits above the rest as the 1-tap return. */}
             <button onClick={signInWithPasskey} disabled={passkeyLoading} style={passkeyBtn}>
-              <span style={{ fontSize: "1.1rem" }}>🔐</span>
+              <Icon name="lock" size={20} color="#B8CCE0" />
               {passkeyLoading ? "Waiting for Face ID..." : "Sign in with Face ID"}
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
@@ -216,7 +217,7 @@ export default function Auth({ onAuth }) {
             {renderAuthControls("Send magic link →")}
             <button onClick={() => { setError(""); setMode("intro"); }}
               style={{ ...ghostBtn, border: "none", color: "#607080", marginTop: "1rem", fontSize: "0.85rem" }}>
-              ← Back
+              <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
             </button>
           </>
         )}
@@ -224,7 +225,7 @@ export default function Auth({ onAuth }) {
         {sent && (
           <>
             <div style={{ textAlign: "center", padding: "1rem 0" }}>
-              <p style={{ fontSize: "3rem", margin: "0 0 1rem" }}>📬</p>
+              <p style={{ margin: "0 0 1rem" }}><Icon name="mail" size={52} color="#3E5A7F" /></p>
               <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.75rem" }}>Check your email</h2>
               <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem", lineHeight: "1.6" }}>
                 We sent a magic link to <strong style={{ color: "#FFFFFF" }}>{email}</strong>.
@@ -235,7 +236,7 @@ export default function Auth({ onAuth }) {
               </p>
             </div>
             <button onClick={() => { setSent(false); setEmail(""); setMode("intro"); }} style={{ ...ghostBtn, marginTop: "1.5rem" }}>
-              ← Start over
+              <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Start over
             </button>
           </>
         )}

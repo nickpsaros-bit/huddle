@@ -5,6 +5,7 @@ import Button from "./Button";
 import { currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
+import Icon from "./Icon";
 
 export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney }) {
   const [parent, setParent] = useState(null);
@@ -714,7 +715,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         <button onClick={onBellClick}
           style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
-          🔔
+          <Icon name="notifications" size={22} color="#8AAEC8" />
           {notificationCount > 0 && (
             <span style={{ position: "absolute", top: 0, right: 0, background: "#E05A5A", color: "#FFFFFF", fontSize: "0.6rem", fontWeight: "700", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {notificationCount}
@@ -784,7 +785,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
             <button onClick={() => setGradeConflict(null)} disabled={savingMembership}
               style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "none", background: "transparent", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", minHeight: "44px" }}>
-              ← Back
+              <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
             </button>
           </>
         ) : (
@@ -797,7 +798,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           <div style={{ marginBottom: "1rem" }}>
             <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>School</label>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", borderRadius: "10px", background: "#1A3A5C", border: "1px solid #2A4A6B" }}>
-              <span style={{ fontSize: "1.05rem" }}>🏫</span>
+              <Icon name="school" size={20} color="#B8CCE0" />
               <span style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500" }}>{scopedSchool.name}</span>
             </div>
           </div>
@@ -813,7 +814,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                   {newSchoolResults.map(school => (
                     <div key={school.id} onClick={() => selectNewSchool(school)}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                      🏫 {school.name}
+                      <Icon name="school" size={18} color="#B8CCE0" style={{ verticalAlign: "-3px", marginRight: 4 }} />{school.name}
                     </div>
                   ))}
                   <div onClick={() => { setNewSelectedSchool(null); setShowNewSchoolDropdown(false); }}
@@ -826,7 +827,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
             {newSelectedSchool && (
               <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "8px", padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}>✓ {newSelectedSchool.name}</span>
+                <span style={{ color: "#02C39A", fontSize: "0.85rem" }}><Icon name="check" size={16} color="#02C39A" style={{ verticalAlign: "-2px", marginRight: 2 }} />{newSelectedSchool.name}</span>
               </div>
             )}
           </>
@@ -851,7 +852,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
               {newTeacherResults.filter(t => normTeacher(t).includes(normTeacher(newTeacher))).map(teacher => (
                 <div key={teacher} onClick={() => { setNewTeacher(teacher); setShowNewTeacherDropdown(false); }}
                   style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
-                  📚 {teacher}
+                  <Icon name="menu_book" size={18} color="#B8CCE0" style={{ verticalAlign: "-3px", marginRight: 4 }} />{teacher}
                 </div>
               ))}
             </div>
@@ -865,7 +866,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             </p>
             <Button variant="secondary" size="sm" onClick={() => { setNewTeacher(nearTeacherMatch); setShowNewTeacherDropdown(false); }}
               style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
-              📚 Use "{nearTeacherMatch}"
+              <Icon name="menu_book" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Use "{nearTeacherMatch}"
             </Button>
           </div>
         )}
@@ -897,7 +898,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-          <button onClick={() => setShowBirthdayList(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <button onClick={() => setShowBirthdayList(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Birthdays coming up</h1>
           <div style={{ width: "60px" }} />
         </div>
@@ -954,11 +955,11 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
           <button onClick={() => { setSelectedClassroom(null); setDrillMessage(""); }}
             style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "0.95rem", cursor: "pointer", padding: "0 0 1rem", display: "flex", alignItems: "center", gap: "6px" }}>
-            ← Back to classrooms
+            <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back to classrooms
           </button>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderRadius: "10px", marginBottom: "1.25rem" }}>
-            <span style={{ fontSize: "1.2rem" }}>📚</span>
+            <Icon name="menu_book" size={22} color="#B8CCE0" />
             <div>
               <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 2px" }}>
                 {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
@@ -979,7 +980,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
           {cards.length === 0 ? (
             <div style={{ textAlign: "center", padding: "2rem 1rem", marginBottom: "1rem" }}>
-              <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
+              <p style={{ margin: "0 0 1rem" }}><Icon name="waving_hand" size={44} color="#3E5A7F" /></p>
               <p style={{ color: "#FFFFFF", fontSize: "1.05rem", margin: "0 0 0.5rem" }}>No other families here yet</p>
               <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
                 Invite a parent from this class to Huddle — once they join, you can set up playdates.
@@ -1014,7 +1015,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
           <Button fullWidth onClick={() => setInviting(true)}
             style={{ border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", borderRadius: "12px", marginTop: "1rem" }}>
-            ➕ Invite a parent to Huddle
+            <Icon name="add" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Invite a parent to Huddle
           </Button>
 
           <button onClick={() => leaveClassroom(m)} disabled={householdBusy}
@@ -1052,10 +1053,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
               {nextPlaydate._role === "hosting" ? "YOU'RE HOSTING" : "NEXT PLAYDATE"}
             </p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "600", margin: "0 0 3px" }}>
-              📅 {fmtPlaydate(nextPlaydate.proposed_date)}
+              <Icon name="calendar_month" size={18} color="#02C39A" style={{ verticalAlign: "-3px", marginRight: 4 }} />{fmtPlaydate(nextPlaydate.proposed_date)}
             </p>
             <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>
-              📍 {nextPlaydate.location_name}{nextPlaydate._otherLabel ? ` · with ${nextPlaydate._otherLabel}` : ""}
+              <Icon name="location_on" size={18} color="#8AAEC8" style={{ verticalAlign: "-3px", marginRight: 4 }} />{nextPlaydate.location_name}{nextPlaydate._otherLabel ? ` · with ${nextPlaydate._otherLabel}` : ""}
             </p>
           </div>
         ) : (
@@ -1140,7 +1141,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         {Object.entries(membershipsBySchool).map(([schoolKey, school]) => (
           <div key={schoolKey} style={{ marginBottom: "1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0.85rem 1rem", background: "#1A3A5C", borderRadius: "10px 10px 0 0", borderBottom: "2px solid #02C39A" }}>
-              <span style={{ fontSize: "1.2rem" }}>🏫</span>
+              <Icon name="school" size={22} color="#B8CCE0" />
               <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: 0 }}>{school.name}</p>
             </div>
             <div style={{ background: "#162D50", borderRadius: "0 0 12px 12px", border: "1px solid #2A4A6B", borderTop: "none", overflow: "hidden" }}>
@@ -1150,7 +1151,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                   <div key={m.id} onClick={() => setSelectedClassroom(m)}
                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "1rem", cursor: "pointer", borderBottom: idx < school.classrooms.length - 1 ? "1px solid #2A4A6B" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span style={{ fontSize: "1.1rem" }}>📚</span>
+                      <Icon name="menu_book" size={20} color="#B8CCE0" />
                       <div>
                         <p style={{ color: "#FFFFFF", fontSize: "0.95rem", margin: "0 0 2px", fontWeight: "500" }}>
                           {m.classrooms?.teacher_name} · {getGradeLabel(m.classrooms?.grade)}
@@ -1174,13 +1175,13 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
         {memberships.length === 0 && (
           <div style={{ textAlign: "center", padding: "2rem 1rem", marginBottom: "1rem" }}>
-            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🏫</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="school" size={44} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Add your kid's classroom</p>
             <p style={{ color: "#607080", fontSize: "0.9rem", margin: "0 0 1.25rem", lineHeight: "1.5" }}>
               Add your school and classroom to find other families to huddle with.
             </p>
             <Button variant="primary" onClick={openAddDifferentSchool}>
-              ➕ Add a classroom
+              <Icon name="add" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Add a classroom
             </Button>
           </div>
         )}
@@ -1195,7 +1196,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         {memberships.length > 0 && (
           <Button fullWidth variant="secondary" onClick={openAddDifferentSchool}
             style={{ background: "#162D50", borderRadius: "12px", marginBottom: "0.75rem" }}>
-            🏫 Add a different school
+            <Icon name="school" size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />Add a different school
           </Button>
         )}
 

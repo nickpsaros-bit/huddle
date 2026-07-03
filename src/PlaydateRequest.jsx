@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
+import Icon from "./Icon";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -706,7 +707,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "40px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-          <button onClick={() => setShowFamilyPicker(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <button onClick={() => setShowFamilyPicker(false)} style={{ background: "transparent", border: "none", color: "#7C5CBF", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Add families</h1>
           <div style={{ width: "60px" }} />
         </div>
@@ -715,7 +716,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading families...</p>
           ) : pickerPeople.length === 0 ? (
             <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-              <p style={{ fontSize: "2rem", margin: "0 0 0.75rem" }}>✅</p>
+              <p style={{ margin: "0 0 0.75rem" }}><Icon name="check_circle" size={40} color="#02C39A" /></p>
               <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.4rem" }}>Everyone's already invited</p>
               <p style={{ color: "#607080", fontSize: "0.85rem" }}>No more families to add right now.</p>
             </div>
@@ -744,7 +745,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }}>
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: accent, fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+        <button onClick={onBack} style={{ background: "transparent", border: "none", color: accent, fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>{isEditing ? (isBirthday ? "🎂 Edit birthday" : "Edit playdate") : (isBirthday ? "🎂 Birthday Invite" : "Request a Playdate")}</h1>
         <div style={{ width: "60px" }} />
       </div>

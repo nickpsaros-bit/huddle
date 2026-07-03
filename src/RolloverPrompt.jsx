@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Button from "./Button";
+import Icon from "./Icon";
 
 // Elementary grades (must match the app-wide grades arrays: TK–5th).
 const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
@@ -143,7 +144,7 @@ export default function RolloverPrompt({ session, householdId, currentYear, memb
             <div key={r.membershipId} style={{ background: "#162D50", border: "1px solid #22355A", borderRadius: "12px", padding: "1.1rem 1.25rem", marginBottom: "12px" }}>
               <p style={{ color: "#8AAEC8", fontSize: "0.72rem", margin: "0 0 2px", letterSpacing: "0.05em" }}>LAST YEAR</p>
               <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 0.9rem" }}>
-                🏫 {r.schoolName} · {r.lastLabel}
+                <Icon name="school" size={18} color="#B8CCE0" style={{ verticalAlign: "-3px", marginRight: 4 }} />{r.schoolName} · {r.lastLabel}
               </p>
 
               <div style={{ display: "flex", gap: "6px", marginBottom: r.choice === "up" ? "1rem" : (r.choice ? "0.85rem" : 0) }}>

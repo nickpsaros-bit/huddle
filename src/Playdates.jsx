@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
 import PlaydateRequest from "./PlaydateRequest";
+import Icon from "./Icon";
 
 export default function Playdates({ session, onChanged, avatarUrl, onProfileClick }) {
   const [householdId, setHouseholdId] = useState(null);
@@ -671,7 +672,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   });
 
   const statusBadge = (status) => {
-    if (status === "confirmed") return { text: "✓ Confirmed", bg: "#0F3D2E", color: "#02C39A" };
+    if (status === "confirmed") return { text: "Confirmed", bg: "#0F3D2E", color: "#02C39A" };
     if (status === "cancelled") return { text: "Cancelled", bg: "#1A2A3F", color: "#607080" };
     if (status === "expired") return { text: "Expired", bg: "#13233F", color: "#8AAEC8" };
     return null; // "pending" shows no badge — keep the card clean.
@@ -765,7 +766,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-          <button onClick={() => setPicking(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>← Back</button>
+          <button onClick={() => setPicking(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
           <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Who's it with?</h1>
           <div style={{ width: "52px" }} />
         </div>
@@ -871,8 +872,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           {pd.event_type === "birthday" && (
             <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px" }}>🎂 {pd.title || "Birthday celebration"}</p>
           )}
-          <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}>📅 {fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
-          <p style={metaRow}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
+          <p style={{ ...metaRow, color: dim ? "#8AAEC8" : "#02C39A" }}><Icon name="calendar_month" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />{fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
+          <p style={metaRow}><Icon name="location_on" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />{pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           {petLine(pd, true)}
           {pd.note && <p style={{ color: "#607080", fontSize: "0.85rem", margin: "0.5rem 0 0", fontStyle: "italic" }}>"{pd.note}"</p>}
 
@@ -905,7 +906,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             <div style={{ marginTop: "0.85rem" }}>
               <Button variant="secondary" size="sm" onClick={() => addToCalendar(pd)}
                 style={{ color: "#02C39A", border: "1px solid #02C39A" }}>
-                📆 Add to calendar
+                <Icon name="event" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Add to calendar
               </Button>
             </div>
           )}
@@ -925,8 +926,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             {pd.event_type === "birthday" && (
               <p style={{ color: "#C9A9FF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 2px" }}>🎂 {pd.title || "Birthday celebration"}</p>
             )}
-            <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>📅 {fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
-            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>📍 {pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
+            <p style={{ color: dim ? "#8AAEC8" : "#02C39A", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}><Icon name="calendar_month" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />{fmtDate(pd.proposed_date)}{recurrenceBadge(pd)}</p>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}><Icon name="location_on" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />{pd.location_name}{pd.location_address ? ` — ${pd.location_address}` : ""}</p>
           </div>
           {sb && (
             <span style={{ fontSize: "0.65rem", background: sb.bg, color: sb.color, padding: "3px 9px", borderRadius: "8px", whiteSpace: "nowrap" }}>
@@ -962,18 +963,18 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             {showNudge && (
               <Button variant="accent" size="sm" onClick={() => nudgeGuests(it)} disabled={busy}
                 style={{ background: "#3D2A0A", color: "#F59E0B", border: "1px solid #854F0B" }}>
-                👋 Nudge {unfirmedCount === 1 ? "who hasn't replied" : `${unfirmedCount} who haven't`}
+                <Icon name="waving_hand" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Nudge {unfirmedCount === 1 ? "who hasn't replied" : `${unfirmedCount} who haven't`}
               </Button>
             )}
             {showCal && (
               <Button variant="secondary" size="sm" onClick={() => addToCalendar(pd)}
                 style={{ color: "#02C39A", border: "1px solid #02C39A" }}>
-                📆 Add to calendar
+                <Icon name="event" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Add to calendar
               </Button>
             )}
             {!dim && (
               <Button variant="secondary" size="sm" onClick={() => openEdit(it)} disabled={busy}>
-                ✏️ Edit
+                <Icon name="edit" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Edit
               </Button>
             )}
             {!dim && (
@@ -1016,7 +1017,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
         <button onClick={openPicker}
           style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-          ➕ Set up a playdate
+          <Icon name="add" size={20} style={{ verticalAlign: "-3px", marginRight: 4 }} />Set up a playdate
         </button>
 
         {message && (
@@ -1027,7 +1028,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
         {nothing && (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
-            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>📅</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="calendar_month" size={44} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No playdates yet</p>
             <p style={{ color: "#607080", fontSize: "0.9rem" }}>Tap "Set up a playdate" above to invite a family.</p>
           </div>

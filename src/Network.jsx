@@ -4,6 +4,7 @@ import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
+import Icon from "./Icon";
 
 export default function Network({ session, avatarUrl, onProfileClick }) {
   const [households, setHouseholds] = useState([]);
@@ -234,7 +235,7 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
         ) : households.length === 0 ? (
           <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
-            <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>🤝</p>
+            <p style={{ margin: "0 0 1rem" }}><Icon name="group" size={44} color="#3E5A7F" /></p>
             <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No connections yet</p>
             <p style={{ color: "#607080", fontSize: "0.85rem" }}>Use Search to find other parents at your school, or invite a parent below. They'll show up here so you can set up playdates across classrooms.</p>
           </div>
@@ -248,7 +249,7 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
 
                 {hh.classrooms.length > 0 && (
                   <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", padding: "0 4px 8px" }}>
-                    <span style={{ fontSize: "0.9rem" }}>🏫</span>
+                    <Icon name="school" size={16} color="#8AAEC8" />
                     {hh.classrooms.map((c, idx) => (
                       <span key={idx} style={{ color: idx === 0 ? "#B8CCE0" : "#607080", fontSize: "0.82rem" }}>
                         {idx > 0 && <span style={{ color: "#3A4D68", margin: "0 2px" }}>·</span>}
@@ -299,7 +300,7 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
         {!loading && (
           <Button fullWidth onClick={() => setInviting(true)}
             style={{ border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", borderRadius: "12px", marginTop: "1.5rem" }}>
-            ➕ Invite a parent to Huddle
+            <Icon name="add" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Invite a parent to Huddle
           </Button>
         )}
       </div>
