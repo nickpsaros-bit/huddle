@@ -370,10 +370,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       if (prev.includes(p.id)) {
         return prev.filter((id) => id !== p.id);
       }
-      if (myPlan !== "premium" && prev.length >= 1) {
-        setPremiumPrompt(true);
-        return prev;
-      }
       return [...prev, p.id];
     });
   };
@@ -780,30 +776,15 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             style={{ width: "100%", padding: "0.85rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "1rem", marginBottom: "1rem", boxSizing: "border-box" }}
           />
 
-          {myPlan === "premium" ? (
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
-              Select one or more families to invite to the same playdate.
-            </p>
-          ) : (
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
-              Pick a family to invite. ✨ Inviting multiple families is a premium feature.
-            </p>
-          )}
+          <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
+            Select one or more families to invite to the same playdate.
+          </p>
 
           {count > 0 && (
             <button onClick={continueWithSelected}
               style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.25rem" }}>
               Continue with {count} {count === 1 ? "family" : "families"} →
             </button>
-          )}
-
-          {premiumPrompt && (
-            <div style={{ background: "#3D1F0A", border: "1px solid #854F0B", borderRadius: "10px", padding: "0.85rem 1rem", marginBottom: "1.25rem" }}>
-              <p style={{ color: "#F59E0B", fontSize: "0.85rem", margin: "0 0 4px", fontWeight: "600" }}>✨ Invite multiple families with Premium</p>
-              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
-                Free playdates are one family at a time. Multi-family invites are coming soon as a premium feature.
-              </p>
-            </div>
           )}
 
           {pickLoading ? (
