@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
-import { blockParent } from "./blocks";
+import { blockParent, getHiddenParentIds } from "./blocks";
 import Button from "./Button";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
@@ -85,6 +85,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
       .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
       .eq("status", "accepted");
 
+    const hiddenNet = await getHiddenParentIds();
     const connectedPeople = (data || []).map((conn) => {
       const isRequester = conn.requester_id === userId;
       return {
@@ -92,7 +93,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
         person: isRequester ? conn.recipient : conn.requester,
         connectedSince: conn.created_at,
       };
-    });
+    }).filter((c) => c.person?.id && !hiddenNet.has(c.person.id));
 
     const householdsMap = {};
     const loosePeople = [];

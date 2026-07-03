@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Button from "./Button";
 import Icon from "./Icon";
+import { getHiddenParentIds } from "./blocks";
 
 export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
   const [query, setQuery] = useState("");
@@ -190,7 +191,10 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
         });
         if (!error && data && data.found && data.hasProfile && data.parent) {
           if (data.parent.id !== session.user.id) {
-            setEmailResult(data.parent);
+            const hidden = await getHiddenParentIds();
+            if (!hidden.has(data.parent.id)) {
+              setEmailResult(data.parent);
+            }
           }
         }
       } catch (e) {
@@ -219,8 +223,11 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
       return;
     }
 
+    const hidden = await getHiddenParentIds();
+
     const enriched = [];
     for (const parent of parents) {
+      if (hidden.has(parent.id)) continue; // blocked either direction — hide
       const { data: hm } = await supabase
         .from("household_members")
         .select("household_id")

@@ -4,6 +4,7 @@ import Icon from "./Icon";
 import TopBar from "./TopBar";
 import PlaydateRequest from "./PlaydateRequest";
 import ConfirmModal from "./ConfirmModal";
+import { getHiddenParentIds } from "./blocks";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
@@ -74,9 +75,10 @@ export default function Birthdays({
         .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
         .eq("status", "accepted");
 
-      const otherParentIds = (conns || []).map((c) =>
-        c.requester_id === userId ? c.recipient_id : c.requester_id
-      );
+      const hiddenFeed = await getHiddenParentIds();
+      const otherParentIds = (conns || [])
+        .map((c) => c.requester_id === userId ? c.recipient_id : c.requester_id)
+        .filter((pid) => !hiddenFeed.has(pid));
 
       let feed = [];
       if (otherParentIds.length > 0) {
@@ -415,12 +417,14 @@ export default function Birthdays({
         .select("household_id, parents(id, name, photo_url)")
         .in("household_id", hhIdList);
 
+      const hidden = await getHiddenParentIds();
       const seen = new Set();
       const people = [];
       for (const m of (members || [])) {
         if (seen.has(m.household_id)) continue;
         const p = m.parents;
         if (!p) continue;
+        if (hidden.has(p.id)) continue; // blocked either direction — hide
         seen.add(m.household_id);
         const cls = classByHousehold[m.household_id];
         people.push({

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import Button from "./Button";
 import Icon from "./Icon";
+import { getHiddenParentIds } from "./blocks";
 
 export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
@@ -32,12 +33,14 @@ export default function Inbox({ session, onBack }) {
   const fetchAll = async () => {
     setLoading(true);
 
+    const hiddenReqs = await getHiddenParentIds();
+
     const { data: conns } = await supabase
       .from("connections")
       .select("*, requester:parents!connections_requester_id_fkey(*)")
       .eq("recipient_id", session.user.id)
       .eq("status", "pending");
-    setConnectionRequests(conns || []);
+    setConnectionRequests((conns || []).filter((c) => c.requester?.id && !hiddenReqs.has(c.requester.id)));
 
     const { data: myHh } = await supabase
       .from("household_members")
@@ -51,16 +54,20 @@ export default function Inbox({ session, onBack }) {
         .select("*, requester:parents!household_join_requests_requesting_parent_id_fkey(id, name, photo_url)")
         .eq("target_household_id", myHh.household_id)
         .eq("status", "pending");
-      setJoinRequests(joins || []);
+      setJoinRequests((joins || []).filter((j) => j.requester?.id && !hiddenReqs.has(j.requester.id)));
     } else {
       setJoinRequests([]);
     }
 
-    const { data: notifs } = await supabase
+    const { data: rawNotifs } = await supabase
       .from("notifications")
       .select("*")
       .eq("recipient_id", session.user.id)
       .order("created_at", { ascending: false });
+
+    // Suppress notifications from blocked people (either direction).
+    const hidden = await getHiddenParentIds();
+    const notifs = (rawNotifs || []).filter((n) => !n.actor_id || !hidden.has(n.actor_id));
 
     // Look up sender (actor) photos so notifications can show who they're from.
     const actorIds = [...new Set((notifs || []).map((n) => n.actor_id).filter(Boolean))];

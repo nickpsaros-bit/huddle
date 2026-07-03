@@ -6,6 +6,7 @@ import { currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import Icon from "./Icon";
+import { getHiddenParentIds } from "./blocks";
 import TopBar from "./TopBar";
 
 export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney, onSearchClick }) {
@@ -145,6 +146,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       .eq("household_id", hhId);
     setMemberships(membershipData || []);
 
+    const hidden = await getHiddenParentIds();
     const classmatesMap = {};
     const otherHouseholdIds = new Set();
     for (const m of (membershipData || [])) {
@@ -154,11 +156,16 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
         .eq("classroom_id", m.classroom_id)
         .eq("school_year", m.school_year)
         .neq("household_id", hhId);
+      // Hide any household containing a blocked parent (either direction).
+      const visibleMembers = (otherMembers || []).filter((cm) => {
+        const members = cm.households?.household_members || [];
+        return !members.some((mm) => mm.parents?.id && hidden.has(mm.parents.id));
+      });
       classmatesMap[m.id] = {
         classroomLabel: `${m.classrooms?.teacher_name} · ${grades[m.classrooms?.grade] || "Unknown grade"}`,
-        rows: otherMembers || [],
+        rows: visibleMembers,
       };
-      for (const cm of (otherMembers || [])) {
+      for (const cm of visibleMembers) {
         if (cm.household_id) otherHouseholdIds.add(cm.household_id);
       }
     }
