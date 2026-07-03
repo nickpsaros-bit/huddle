@@ -38,6 +38,9 @@ export default function Birthdays({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [connectPrompt, setConnectPrompt] = useState(null); // { hostParentId, hostName }
+  const [activeBday, setActiveBday] = useState(null); // the feed item whose action menu is open
+  const [wishedIds, setWishedIds] = useState({});     // birthday_id -> true (already wished this year)
+  const [askedIds, setAskedIds] = useState({});       // birthday_id -> true (already asked this year)
 
   // Create flow: opens the birthday invite form (family picker first).
   const [creating, setCreating] = useState(false);
@@ -99,12 +102,13 @@ export default function Birthdays({
 
           const { data: bdays } = await supabase
             .from("household_birthdays")
-            .select("household_id, month, day, label")
+            .select("id, household_id, month, day, label")
             .in("household_id", householdIds);
 
           feed = (bdays || []).map((b) => {
             const days = daysUntil(b.month, b.day);
             return {
+              id: b.id,
               householdId: b.household_id,
               familyName: nameByHousehold[b.household_id] || "A family",
               label: b.label,
@@ -113,6 +117,20 @@ export default function Birthdays({
               days,
             };
           }).sort((a, b) => a.days - b.days);
+
+          // Which of these have I already wished this year?
+          const bdayIds = (bdays || []).map((b) => b.id);
+          if (bdayIds.length > 0) {
+            const { data: myWishes } = await supabase
+              .from("birthday_wishes")
+              .select("birthday_id")
+              .eq("wisher_id", userId)
+              .eq("year", new Date().getFullYear())
+              .in("birthday_id", bdayIds);
+            const wished = {};
+            for (const w of (myWishes || [])) wished[w.birthday_id] = true;
+            setWishedIds(wished);
+          }
         }
       }
       setUpcoming(feed);
@@ -131,16 +149,21 @@ export default function Birthdays({
         if (pd.organizer_household_id === hhId) continue;
         if (new Date(pd.proposed_date).getTime() < Date.now()) continue;
         // organizer label
+        // Build the host label from ALL parents in the household (e.g. "Nick & Angi"),
+        // so the recipient recognizes the family and trusts the invite.
         let organizerLabel = "A family";
         const { data: orgMembers } = await supabase
           .from("household_members")
           .select("parent_id")
-          .eq("household_id", pd.organizer_household_id)
-          .limit(1);
-        if (orgMembers && orgMembers[0]) {
-          const { data: op } = await supabase
-            .from("parents").select("name").eq("id", orgMembers[0].parent_id).maybeSingle();
-          if (op?.name) organizerLabel = op.name;
+          .eq("household_id", pd.organizer_household_id);
+        const orgIds = (orgMembers || []).map((m) => m.parent_id).filter(Boolean);
+        if (orgIds.length > 0) {
+          const { data: orgParents } = await supabase
+            .from("parents").select("name").in("id", orgIds);
+          const names = (orgParents || []).map((p) => (p.name || "").trim().split(/\s+/)[0]).filter(Boolean);
+          if (names.length === 1) organizerLabel = names[0];
+          else if (names.length === 2) organizerLabel = `${names[0]} & ${names[1]}`;
+          else if (names.length > 2) organizerLabel = `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
         }
         bdayInvites.push({ invite: inv, playdate: pd, organizerLabel });
       }
@@ -242,6 +265,91 @@ export default function Birthdays({
       setMessage("Couldn't connect, but you're still going to the party.");
     }
     setConnectPrompt(null);
+    setBusy(false);
+  };
+
+  // Self-reminder. NOTE: the app has no scheduled-notification system yet, so
+  // this drops a note into your OWN inbox now ("remember to get a gift for X").
+  // A true date-scheduled reminder would need a reminders table + a scheduler.
+  const addGiftReminder = async (b) => {
+    setBusy(true);
+    try {
+      const who = b.label ? b.label : `${b.familyName}'s family`;
+      await supabase.from("notifications").insert({
+        recipient_id: session.user.id,
+        type: "self_reminder",
+        title: "Gift reminder 🎁",
+        body: `Remember to get a gift or card for ${who} — birthday on ${MONTHS[b.month - 1]} ${b.day}.`,
+      });
+      setMessage("Saved to your inbox as a reminder! 🎁");
+      setActiveBday(null);
+      if (typeof onChanged === "function") onChanged();
+    } catch (e) {
+      setMessage("Couldn't save the reminder, please try again.");
+    }
+    setBusy(false);
+  };
+
+  // Send a birthday wish to a family in the awareness feed.
+  const sendWish = async (b) => {
+    setBusy(true);
+    try {
+      // Notify each parent in the target household.
+      const { data: members } = await supabase
+        .from("household_members").select("parent_id").eq("household_id", b.householdId);
+      // My first name for the message.
+      const { data: me } = await supabase
+        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+      const myFirst = (me?.name || "A family").trim().split(/\s+/)[0];
+      const rows = (members || []).map((m) => ({
+        recipient_id: m.parent_id,
+        type: "birthday_wish",
+        title: "Birthday wishes! 🎂",
+        body: `${myFirst}'s family is thinking of your family this birthday month!`,
+      }));
+      if (rows.length > 0) await supabase.from("notifications").insert(rows);
+      // Persist so it sticks.
+      try {
+        await supabase.from("birthday_wishes").insert({
+          birthday_id: b.id,
+          wisher_id: session.user.id,
+          target_household_id: b.householdId,
+          year: new Date().getFullYear(),
+        });
+      } catch (e) { /* duplicate = already wished, fine */ }
+      setWishedIds((prev) => ({ ...prev, [b.id]: true }));
+      setMessage("Birthday wishes sent! 🎉");
+      setActiveBday(null);
+      if (typeof onChanged === "function") onChanged();
+    } catch (e) {
+      setMessage("Couldn't send wishes, please try again.");
+    }
+    setBusy(false);
+  };
+
+  // Ask the family what their child would like (gift-idea nudge).
+  const askGift = async (b) => {
+    setBusy(true);
+    try {
+      const { data: members } = await supabase
+        .from("household_members").select("parent_id").eq("household_id", b.householdId);
+      const { data: me } = await supabase
+        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+      const myFirst = (me?.name || "A family").trim().split(/\s+/)[0];
+      const rows = (members || []).map((m) => ({
+        recipient_id: m.parent_id,
+        type: "gift_ask",
+        title: "A gift question 🎁",
+        body: `${myFirst}'s family asked: is there anything special your child would like for their birthday?`,
+      }));
+      if (rows.length > 0) await supabase.from("notifications").insert(rows);
+      setAskedIds((prev) => ({ ...prev, [b.id]: true }));
+      setMessage("Your question was sent! 🎁");
+      setActiveBday(null);
+      if (typeof onChanged === "function") onChanged();
+    } catch (e) {
+      setMessage("Couldn't send, please try again.");
+    }
     setBusy(false);
   };
 
@@ -444,7 +552,7 @@ export default function Birthdays({
                 {invites.map(({ invite, playdate, organizerLabel }) => (
                   <div key={invite.id} style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "1rem", marginBottom: "0.75rem" }}>
                     <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 4px" }}>
-                      🎂 {organizerLabel}'s birthday celebration
+                      🎂 {organizerLabel} {organizerLabel.includes("&") ? "are" : "is"} throwing a birthday party
                     </p>
                     <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 2px" }}>{fmtInviteDate(playdate.proposed_date)}</p>
                     {playdate.location_name && (
@@ -528,7 +636,7 @@ export default function Birthdays({
                 const friendly = friendlyWhen(b.days);
                 const dateStr = `${MONTHS[b.month - 1]} ${b.day}`;
                 return (
-                  <div key={`${b.householdId}-${i}`} style={{ display: "flex", alignItems: "center", gap: "12px", background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.85rem 1rem", marginBottom: "0.6rem" }}>
+                  <div key={`${b.householdId}-${i}`} onClick={() => setActiveBday(b)} style={{ display: "flex", alignItems: "center", gap: "12px", background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.85rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>
                     <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#2A1E3D", border: "1px solid #7C5CBF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: "1.1rem" }}>🎂</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>
@@ -548,6 +656,43 @@ export default function Birthdays({
           </>
         )}
       </div>
+
+      {/* Birthday action menu */}
+      {activeBday && (
+        <div onClick={() => setActiveBday(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#162D50", borderTopLeftRadius: "20px", borderTopRightRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "600px", borderTop: "2px solid #7C5CBF" }}>
+            <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
+              <div style={{ fontSize: "2rem" }}>🎂</div>
+              <p style={{ color: "#FFFFFF", fontSize: "1.05rem", fontWeight: "700", margin: "0.25rem 0 0" }}>
+                {activeBday.label ? activeBday.label : `${activeBday.familyName}'s family`}
+              </p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "2px 0 0" }}>
+                {MONTHS[activeBday.month - 1]} {activeBday.day}
+              </p>
+            </div>
+
+            <button disabled={busy || wishedIds[activeBday.id]} onClick={() => sendWish(activeBday)}
+              style={{ width: "100%", padding: "0.9rem", borderRadius: "12px", border: "none", background: wishedIds[activeBday.id] ? "#28405F" : "#7C5CBF", color: "#FFFFFF", fontSize: "0.92rem", fontWeight: "600", cursor: wishedIds[activeBday.id] ? "default" : "pointer", marginBottom: "0.6rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              <Icon name="celebration" size={18} color="#FFFFFF" />{wishedIds[activeBday.id] ? "Birthday wishes sent 🎉" : "Wish them a happy birthday"}
+            </button>
+
+            <button disabled={busy || askedIds[activeBday.id]} onClick={() => askGift(activeBday)}
+              style={{ width: "100%", padding: "0.9rem", borderRadius: "12px", border: "1px solid #7C5CBF", background: "transparent", color: "#B8A4E0", fontSize: "0.92rem", fontWeight: "600", cursor: askedIds[activeBday.id] ? "default" : "pointer", marginBottom: "0.6rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              <Icon name="card_giftcard" size={18} color="#B8A4E0" />{askedIds[activeBday.id] ? "Question sent 🎁" : "Ask what they'd like"}
+            </button>
+
+            <button disabled={busy} onClick={() => addGiftReminder(activeBday)}
+              style={{ width: "100%", padding: "0.9rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontSize: "0.92rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.6rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              <Icon name="notifications" size={18} color="#8AAEC8" />Remind me to get a gift or card
+            </button>
+
+            <button onClick={() => setActiveBday(null)}
+              style={{ width: "100%", padding: "0.8rem", borderRadius: "12px", border: "none", background: "transparent", color: "#607080", fontSize: "0.88rem", fontWeight: "600", cursor: "pointer" }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Connect-on-accept prompt */}
       {connectPrompt && (
