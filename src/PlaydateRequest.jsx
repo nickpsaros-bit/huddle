@@ -868,32 +868,36 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             ))}
           </select>
 
-          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", margin: "1rem 0 0.4rem" }}>Repeats</label>
-          <select
-            value={recurrence}
-            onChange={(e) => { setRecurrence(e.target.value); if (e.target.value === "none") setRecurrenceEnd(""); }}
-            style={{ ...inputStyle, appearance: "auto", cursor: "pointer", marginBottom: recurrence === "none" ? 0 : "0.85rem" }}
-          >
-            <option value="none">Just once</option>
-            <option value="daily">Every day</option>
-            <option value="weekday">Every weekday (Mon–Fri)</option>
-            <option value="weekly">Weekly (same day each week)</option>
-            <option value="monthly">Monthly</option>
-          </select>
-
-          {recurrence !== "none" && (
+          {!isBirthday && (
             <>
-              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Repeat until</label>
-              <input
-                type="date"
-                value={recurrenceEnd}
-                onChange={(e) => setRecurrenceEnd(e.target.value)}
-                min={date || new Date().toISOString().split("T")[0]}
-                style={inputStyle}
-              />
-              <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.5rem 0 0", lineHeight: "1.4" }}>
-                {recurrenceLabel(recurrence, date, recurrenceEnd)}
-              </p>
+              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", margin: "1rem 0 0.4rem" }}>Repeats</label>
+              <select
+                value={recurrence}
+                onChange={(e) => { setRecurrence(e.target.value); if (e.target.value === "none") setRecurrenceEnd(""); }}
+                style={{ ...inputStyle, appearance: "auto", cursor: "pointer", marginBottom: recurrence === "none" ? 0 : "0.85rem" }}
+              >
+                <option value="none">Just once</option>
+                <option value="daily">Every day</option>
+                <option value="weekday">Every weekday (Mon–Fri)</option>
+                <option value="weekly">Weekly (same day each week)</option>
+                <option value="monthly">Monthly</option>
+              </select>
+
+              {recurrence !== "none" && (
+                <>
+                  <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Repeat until</label>
+                  <input
+                    type="date"
+                    value={recurrenceEnd}
+                    onChange={(e) => setRecurrenceEnd(e.target.value)}
+                    min={date || new Date().toISOString().split("T")[0]}
+                    style={inputStyle}
+                  />
+                  <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.5rem 0 0", lineHeight: "1.4" }}>
+                    {recurrenceLabel(recurrence, date, recurrenceEnd)}
+                  </p>
+                </>
+              )}
             </>
           )}
         </div>
