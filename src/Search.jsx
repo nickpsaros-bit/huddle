@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import Button from "./Button";
 import Icon from "./Icon";
 
-export default function Search({ session, avatarUrl, onProfileClick }) {
+export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -239,7 +239,14 @@ export default function Search({ session, avatarUrl, onProfileClick }) {
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "1rem" }}>
-          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Find Parents</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {typeof onBack === "function" && (
+              <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center" }}>
+                <Icon name="arrow_back" size={22} color="#8AAEC8" />
+              </button>
+            )}
+            <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Find Parents</h1>
+          </div>
           {profileAvatar()}
         </div>
         <input

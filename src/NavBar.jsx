@@ -10,7 +10,6 @@ export default function NavBar(props) {
     { id: "home", label: "Home", icon: "home" },
     { id: "network", label: "Network", icon: "group" },
     { id: "playdates", label: "Playdates", icon: "calendar_month" },
-    { id: "search", label: "Search", icon: "search" },
   ];
 
   const haloStyles = {

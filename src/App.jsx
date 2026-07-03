@@ -30,6 +30,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showJourney, setShowJourney] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
@@ -425,17 +426,19 @@ export default function App() {
     return <Journey session={session} onBack={() => setShowJourney(false)} />;
   }
 
+  if (showSearch) {
+    return <Search session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onBack={() => setShowSearch(false)} />;
+  }
+
   let screen;
   if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} />;
-  } else if (activeTab === "search") {
-    screen = <Search session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} onSearchClick={() => setShowSearch(true)} />;
   } else if (activeTab === "network") {
-    screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
+    screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
   } else if (activeTab === "playdates") {
-    screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
+    screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
   } else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} />;
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
   }
 
   return (

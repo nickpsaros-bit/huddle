@@ -6,8 +6,9 @@ import { currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import Icon from "./Icon";
+import TopBar from "./TopBar";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney, onSearchClick }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -710,29 +711,15 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   }
 
   const headerBar = (
-    <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #02C39A" }}>
-      <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0, letterSpacing: "-0.02em" }}>Huddle</h1>
-      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-        <button onClick={onBellClick}
-          style={{ background: "transparent", border: "none", cursor: "pointer", position: "relative", padding: "4px 8px", fontSize: "1.3rem" }}>
-          <Icon name="notifications" size={22} color="#8AAEC8" />
-          {notificationCount > 0 && (
-            <span style={{ position: "absolute", top: 0, right: 0, background: "#E05A5A", color: "#FFFFFF", fontSize: "0.6rem", fontWeight: "700", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {notificationCount}
-            </span>
-          )}
-        </button>
-        {parent?.photo_url ? (
-          <img src={parent.photo_url} alt="Profile" onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
-            style={{ width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover", cursor: "pointer", border: "2px solid #02C39A" }} />
-        ) : (
-          <div onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
-            style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", border: "2px solid #02C39A" }}>
-            {parent?.name?.charAt(0) || "?"}
-          </div>
-        )}
-      </div>
-    </div>
+    <TopBar
+      isHome
+      notificationCount={notificationCount}
+      onBellClick={onBellClick}
+      onSearchClick={onSearchClick}
+      onProfileClick={onProfileClick}
+      avatarUrl={parent?.photo_url}
+      initial={parent?.name?.charAt(0) || "?"}
+    />
   );
 
   const addClassroomModal = addingClassroom && (
