@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
+import { blockParent } from "./blocks";
 import Button from "./Button";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
@@ -14,6 +15,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
   const [inviting, setInviting] = useState(false);
   const [myName, setMyName] = useState("");
   const [confirm, setConfirm] = useState(null);
+  const [message, setMessage] = useState("");
   const [petsByHousehold, setPetsByHousehold] = useState({});
 
   useEffect(() => { fetchConnections(); }, []);
@@ -199,6 +201,30 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
     });
   };
 
+  const blockPerson = (personId, personName) => {
+    setConfirm({
+      title: `Block ${shortName(personName)}?`,
+      body: `You won't see each other or be able to invite each other on Huddle, and your connection will be removed. They won't be notified. (This won't change the fact that your children may share a classroom in real life.)`,
+      confirmLabel: "Block",
+      cancelLabel: "Cancel",
+      tone: "danger",
+      onConfirm: () => doBlockPerson(personId, personName),
+    });
+  };
+
+  const doBlockPerson = async (personId, personName) => {
+    setConfirm(null);
+    const res = await blockParent(session.user.id, personId);
+    if (res.ok) {
+      setMessage(`${shortName(personName)} has been blocked.`);
+      fetchConnections();
+      setTimeout(() => setMessage(""), 3000);
+    } else {
+      setMessage("Couldn't block, please try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
   const grades = ["TK","K","1st","2nd","3rd","4th","5th"];
 
   if (requestingPlaydate) {
@@ -233,6 +259,14 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
       <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: 0, padding: "0.75rem 1.5rem 0", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
         Parents you've connected with across classrooms
       </p>
+
+      {message && (
+        <div style={{ maxWidth: "600px", margin: "0.75rem auto 0", padding: "0 1.5rem" }}>
+          <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.7rem 1rem" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>{message}</p>
+          </div>
+        </div>
+      )}
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
@@ -283,10 +317,16 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
                           <p style={{ color: "#607080", fontSize: "0.78rem", margin: "2px 0 0" }}>Co-parent</p>
                         )}
                         {m.connectionId && (
-                          <button onClick={() => removeConnection(m.connectionId, m.name)}
-                            style={{ background: "transparent", border: "none", color: "#4A5D78", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0", marginTop: "1px" }}>
-                            Remove
-                          </button>
+                          <div style={{ display: "flex", gap: "12px", marginTop: "1px" }}>
+                            <button onClick={() => removeConnection(m.connectionId, m.name)}
+                              style={{ background: "transparent", border: "none", color: "#4A5D78", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
+                              Remove
+                            </button>
+                            <button onClick={() => blockPerson(m.id, m.name)}
+                              style={{ background: "transparent", border: "none", color: "#7A3B3B", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
+                              Block
+                            </button>
+                          </div>
                         )}
                       </div>
                       {m.connectionId && (

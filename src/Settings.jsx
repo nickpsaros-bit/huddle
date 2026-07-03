@@ -4,11 +4,14 @@ import { supabase } from "./supabase";
 import Button from "./Button";
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from "./legal";
 import Icon from "./Icon";
+import { getMyBlockedList, unblockParent } from "./blocks";
 
 export default function Settings({ session, onBack }) {
   const [parent, setParent] = useState(null);
   const [consents, setConsents] = useState([]);
-  const [view, setView] = useState("main"); // "main" | "terms" | "privacy" | "adminBugs"
+  const [view, setView] = useState("main"); // "main" | "terms" | "privacy" | "adminBugs" | "blocked"
+  const [blockedList, setBlockedList] = useState([]);
+  const [blockedLoading, setBlockedLoading] = useState(false);
   const [message, setMessage] = useState("");
 
   // ---- Discoverability (school-wide visibility toggle) ----
@@ -204,6 +207,26 @@ export default function Settings({ session, onBack }) {
     await loadAdminBugs();
   };
 
+  const openBlocked = async () => {
+    setView("blocked");
+    setBlockedLoading(true);
+    const list = await getMyBlockedList(session.user.id);
+    setBlockedList(list);
+    setBlockedLoading(false);
+  };
+
+  const doUnblock = async (parentId, name) => {
+    const res = await unblockParent(session.user.id, parentId);
+    if (res.ok) {
+      setBlockedList((prev) => prev.filter((b) => b.parentId !== parentId));
+      setMessage(`${name} has been unblocked.`);
+      setTimeout(() => setMessage(""), 3000);
+    } else {
+      setMessage("Couldn't unblock, please try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -319,6 +342,46 @@ export default function Settings({ session, onBack }) {
                 </div>
               );
             })
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Blocked families viewer ----
+  if (view === "blocked") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("Blocked families", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {message && (
+            <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.7rem 1rem", marginBottom: "1rem" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>{message}</p>
+            </div>
+          )}
+          <p style={{ color: "#607080", fontSize: "0.82rem", lineHeight: "1.5", margin: "0 0 1.25rem" }}>
+            Blocked families can't see you or invite you on Huddle, and you won't see them. They aren't told they've been blocked. You can unblock anyone here.
+          </p>
+          {blockedLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : blockedList.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ margin: "0 0 0.75rem" }}><Icon name="block" size={40} color="#3E5A7F" /></p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>You haven't blocked anyone.</p>
+            </div>
+          ) : (
+            blockedList.map((b) => (
+              <div key={b.parentId} style={{ display: "flex", alignItems: "center", gap: "12px", background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.75rem 1rem", marginBottom: "0.6rem" }}>
+                <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "#028090", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", flexShrink: 0 }}>
+                  {b.photo_url ? <img src={b.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (b.name?.charAt(0) || "?")}
+                </div>
+                <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0, flex: 1 }}>{b.name}</p>
+                <button onClick={() => doUnblock(b.parentId, b.name)}
+                  style={{ padding: "0.45rem 0.9rem", borderRadius: "10px", border: "1px solid #02C39A", background: "transparent", color: "#02C39A", fontSize: "0.82rem", fontWeight: "600", cursor: "pointer" }}>
+                  Unblock
+                </button>
+              </div>
+            ))
           )}
         </div>
       </div>
@@ -501,6 +564,18 @@ export default function Settings({ session, onBack }) {
         )}
 
         {/* LEGAL */}
+        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>SAFETY</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+          <div onClick={openBlocked}
+            style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>Blocked families</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Manage who you've blocked</p>
+            </div>
+            <Icon name="chevron_right" size={22} color="#02C39A" />
+          </div>
+        </div>
+
         <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>LEGAL</p>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
           <div onClick={() => setView("terms")}
