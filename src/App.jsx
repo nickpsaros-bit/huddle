@@ -350,18 +350,14 @@ export default function App() {
       upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
-    setPlaydateBadge(unrepliedCount);
-
     const live = upcoming
       .filter((u) => u.status !== "cancelled")
       .sort((a, b) => a.date - b.date);
 
-    if (live.length === 0) {
-      setPlaydateHalo(null);
-    } else {
-      const soonest = live[0];
-      setPlaydateHalo(soonest.status === "confirmed" ? "teal" : "amber");
-    }
+    // Badge = all active upcoming playdates (scheduled-but-not-confirmed and
+    // confirmed alike). Halo removed in favor of this clearer count.
+    setPlaydateBadge(live.length);
+    setPlaydateHalo(null);
   };
 
   const handleNavigate = (tabId) => {
