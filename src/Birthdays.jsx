@@ -339,6 +339,7 @@ export default function Birthdays({
       const rows = (members || []).map((m) => ({
         recipient_id: m.parent_id,
         type: "gift_ask",
+        actor_id: session.user.id,
         title: "A gift question 🎁",
         body: `${myFirst}'s family asked: is there anything special your child would like for their birthday?`,
       }));

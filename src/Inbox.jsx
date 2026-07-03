@@ -7,6 +7,7 @@ export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [repliedGift, setRepliedGift] = useState({}); // notifId -> chosen category (local)
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -76,6 +77,32 @@ export default function Inbox({ session, onBack }) {
     setNotifications((prev) => prev.map((n) => n.id === notifId ? { ...n, read: false } : n));
     setMessage("Marked as unread — we'll remind you.");
     setTimeout(() => setMessage(""), 2500);
+  };
+
+  // Reply to a gift question with a category — routes back to the asker (actor_id).
+  const replyGift = async (n, category) => {
+    if (!n.actor_id) return;
+    try {
+      const { data: me } = await supabase
+        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+      const myFirst = (me?.name || "A family").trim().split(/\s+/)[0];
+      const body = category === "Please don't — just come"
+        ? `${myFirst}'s family says: no gifts needed — just come celebrate! 🎉`
+        : `${myFirst}'s family suggests: ${category}`;
+      await supabase.from("notifications").insert({
+        recipient_id: n.actor_id,
+        type: "gift_reply",
+        actor_id: session.user.id,
+        title: "Gift idea 🎁",
+        body,
+      });
+      setRepliedGift((prev) => ({ ...prev, [n.id]: category }));
+      setMessage("Your suggestion was sent! 🎁");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (e) {
+      setMessage("Couldn't send, please try again.");
+      setTimeout(() => setMessage(""), 3000);
+    }
   };
 
   const accept = async (connectionId) => {
@@ -275,6 +302,26 @@ export default function Inbox({ session, onBack }) {
                         </div>
                         {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
                         <p style={{ color: "#607080", fontSize: "0.7rem", margin: 0 }}>{fmtWhen(n.created_at)}</p>
+
+                        {n.type === "gift_ask" && (
+                          repliedGift[n.id] ? (
+                            <p style={{ color: "#02C39A", fontSize: "0.82rem", fontWeight: "600", margin: "0.6rem 0 0" }}>
+                              You suggested: {repliedGift[n.id]} 🎁
+                            </p>
+                          ) : (
+                            <div style={{ marginTop: "0.75rem" }}>
+                              <p style={{ color: "#607080", fontSize: "0.72rem", fontWeight: "600", margin: "0 0 6px" }}>Tap to suggest a gift idea:</p>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                                {["Toys", "Books", "Clothes", "Gift card", "Anything they'd love", "Please don't — just come"].map((cat) => (
+                                  <button key={cat} onClick={() => replyGift(n, cat)}
+                                    style={{ padding: "0.45rem 0.8rem", borderRadius: "999px", border: "1px solid #7C5CBF", background: "transparent", color: "#B8A4E0", fontSize: "0.8rem", fontWeight: "600", cursor: "pointer" }}>
+                                    {cat}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        )}
                       </div>
                     </div>
                     {n.read && (
