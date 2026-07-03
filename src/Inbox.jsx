@@ -7,6 +7,8 @@ export default function Inbox({ session, onBack }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [unreadOnOpen, setUnreadOnOpen] = useState([]); // ids unread when inbox opened
+  const [keptUnread, setKeptUnread] = useState([]);      // ids user chose to keep unread
   const [repliedGift, setRepliedGift] = useState({}); // notifId -> chosen category (local)
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -62,21 +64,31 @@ export default function Inbox({ session, onBack }) {
 
     setLoading(false);
 
-    // Auto-mark unread notifications as read shortly after they're seen.
+    // Remember which notifications were unread when the user opened the inbox.
+    // They STAY highlighted while reading; we only mark them read when the user
+    // leaves (see handleBack) — unless they explicitly keep one unread.
     const unreadIds = (notifs || []).filter((n) => !n.read).map((n) => n.id);
-    if (unreadIds.length > 0) {
-      setTimeout(async () => {
-        await supabase.from("notifications").update({ read: true }).in("id", unreadIds);
-        setNotifications((prev) => prev.map((n) => unreadIds.includes(n.id) ? { ...n, read: true } : n));
-      }, 1200);
-    }
+    setUnreadOnOpen(unreadIds);
   };
 
-  const markUnread = async (notifId) => {
-    await supabase.from("notifications").update({ read: false }).eq("id", notifId);
-    setNotifications((prev) => prev.map((n) => n.id === notifId ? { ...n, read: false } : n));
-    setMessage("Marked as unread — we'll remind you.");
-    setTimeout(() => setMessage(""), 2500);
+  // Notifications the user explicitly chose to KEEP unread — excluded from the
+  // mark-read-on-leave sweep.
+  const keepUnread = (notifId) => {
+    setKeptUnread((prev) => (prev.includes(notifId) ? prev : [...prev, notifId]));
+    setMessage("Kept as unread.");
+    setTimeout(() => setMessage(""), 2000);
+  };
+
+  // On leaving the inbox: mark everything that was unread-on-open as read,
+  // except any the user chose to keep unread.
+  const handleBack = async () => {
+    const toMark = unreadOnOpen.filter((id) => !keptUnread.includes(id));
+    if (toMark.length > 0) {
+      try {
+        await supabase.from("notifications").update({ read: true }).in("id", toMark);
+      } catch (e) { /* best-effort */ }
+    }
+    if (typeof onBack === "function") onBack();
   };
 
   // Reply to a gift question with a category — routes back to the asker (actor_id).
@@ -202,7 +214,7 @@ export default function Inbox({ session, onBack }) {
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
       <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
+        <button onClick={handleBack} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
         <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Notifications</h1>
         <div style={{ width: "60px" }} />
       </div>
@@ -292,12 +304,17 @@ export default function Inbox({ session, onBack }) {
             {notifications.length > 0 && (
               <>
                 <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: (joinRequests.length + connectionRequests.length) > 0 ? "1.5rem 0 0.75rem" : "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
-                {notifications.map((n) => (
-                  <div key={n.id} style={{ background: n.read ? "#13233F" : "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: n.read ? "1px solid #2A4A6B" : "1px solid #02C39A" }}>
+                {notifications.map((n) => {
+                  // "New" stays highlighted while the inbox is open (it was unread
+                  // on open and the user hasn't chosen to keep it unread on purpose).
+                  const showNew = (unreadOnOpen.includes(n.id) || !n.read) && !keptUnread.includes(n.id);
+                  const kept = keptUnread.includes(n.id);
+                  return (
+                  <div key={n.id} style={{ background: showNew ? "#162D50" : "#13233F", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: showNew ? "1px solid #02C39A" : "1px solid #2A4A6B" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                          {!n.read && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
+                          {showNew && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
                           <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{n.title}</p>
                         </div>
                         {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
@@ -324,15 +341,22 @@ export default function Inbox({ session, onBack }) {
                         )}
                       </div>
                     </div>
-                    {n.read && (
+                    {/* Keep-unread: only offered while the item is still showing as new. */}
+                    {showNew && (
                       <div style={{ marginTop: "0.75rem" }}>
-                        <Button variant="secondary" size="sm" onClick={() => markUnread(n.id)}>
-                          Mark unread
+                        <Button variant="secondary" size="sm" onClick={() => keepUnread(n.id)}>
+                          Keep unread
                         </Button>
                       </div>
                     )}
+                    {kept && (
+                      <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.6rem 0 0", fontStyle: "italic" }}>
+                        Kept as unread
+                      </p>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </>
