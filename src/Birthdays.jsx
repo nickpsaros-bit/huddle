@@ -29,7 +29,7 @@ function friendlyWhen(days) {
 }
 
 export default function Birthdays({
-  session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0, onChanged,
+  session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0, onChanged, onGoHome,
 }) {
   const [loading, setLoading] = useState(true);
   const [upcoming, setUpcoming] = useState([]);   // connections' birthdays, sorted soonest-first
@@ -590,6 +590,7 @@ export default function Birthdays({
         onBellClick={onBellClick}
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
+        onLogoClick={onGoHome}
         avatarUrl={avatarUrl}
         initial="?"
       />

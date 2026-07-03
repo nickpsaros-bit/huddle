@@ -6,7 +6,7 @@ import PlaydateRequest from "./PlaydateRequest";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
 
-export default function Playdates({ session, onChanged, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0 }) {
+export default function Playdates({ session, onChanged, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0, onGoHome }) {
   const [householdId, setHouseholdId] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -984,6 +984,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         onBellClick={onBellClick}
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
+        onLogoClick={onGoHome}
         avatarUrl={avatarUrl}
         initial="?"
       />

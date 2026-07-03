@@ -7,7 +7,7 @@ import Button from "./Button";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
 
-export default function Network({ session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0 }) {
+export default function Network({ session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0, onGoHome }) {
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -226,6 +226,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
         onBellClick={onBellClick}
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
+        onLogoClick={onGoHome}
         avatarUrl={avatarUrl}
         initial={(myName && myName.charAt(0)) || "?"}
       />

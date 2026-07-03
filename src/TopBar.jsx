@@ -20,6 +20,7 @@ export default function TopBar({
   onBellClick,
   onSearchClick,
   onProfileClick,
+  onLogoClick,
   avatarUrl,
   initial = "",
 }) {
@@ -32,11 +33,19 @@ export default function TopBar({
       justifyContent: "space-between",
       borderBottom: isHome ? "2px solid #02C39A" : "1px solid #2A4A6B",
     }}>
-      {isHome ? (
-        <h1 style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0, letterSpacing: "-0.02em" }}>Huddle</h1>
-      ) : (
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.25rem", fontWeight: "700", margin: 0, letterSpacing: "-0.01em" }}>{title}</h1>
-      )}
+      <div style={{ display: "flex", alignItems: "baseline", gap: "10px", minWidth: 0 }}>
+        <h1
+          onClick={() => { if (typeof onLogoClick === "function") onLogoClick(); }}
+          style={{ color: "#02C39A", fontSize: "1.5rem", fontWeight: "700", margin: 0, letterSpacing: "-0.02em", cursor: "pointer", flexShrink: 0 }}
+        >
+          Huddle
+        </h1>
+        {!isHome && title && (
+          <span style={{ color: "#8AAEC8", fontSize: "1rem", fontWeight: "600", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {title}
+          </span>
+        )}
+      </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
         {/* Global search */}

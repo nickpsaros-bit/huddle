@@ -718,6 +718,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       onBellClick={onBellClick}
       onSearchClick={onSearchClick}
       onProfileClick={onProfileClick}
+      onLogoClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       avatarUrl={parent?.photo_url}
       initial={parent?.name?.charAt(0) || "?"}
     />
