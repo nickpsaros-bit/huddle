@@ -10,6 +10,7 @@ export default function Inbox({ session, onBack }) {
   const [unreadOnOpen, setUnreadOnOpen] = useState([]); // ids unread when inbox opened
   const [keptUnread, setKeptUnread] = useState([]);      // ids user chose to keep unread
   const [repliedGift, setRepliedGift] = useState({}); // notifId -> chosen category (local)
+  const [actorMap, setActorMap] = useState({});        // actor_id -> {name, photo_url}
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -60,6 +61,18 @@ export default function Inbox({ session, onBack }) {
       .select("*")
       .eq("recipient_id", session.user.id)
       .order("created_at", { ascending: false });
+
+    // Look up sender (actor) photos so notifications can show who they're from.
+    const actorIds = [...new Set((notifs || []).map((n) => n.actor_id).filter(Boolean))];
+    if (actorIds.length > 0) {
+      const { data: actors } = await supabase
+        .from("parents")
+        .select("id, name, photo_url")
+        .in("id", actorIds);
+      const map = {};
+      for (const a of (actors || [])) map[a.id] = a;
+      setActorMap(map);
+    }
     setNotifications(notifs || []);
 
     setLoading(false);
@@ -155,6 +168,7 @@ export default function Inbox({ session, onBack }) {
       if (conn?.requester_id) {
         await supabase.from("notifications").insert({
           recipient_id: conn.requester_id,
+          actor_id: session.user.id,
           type: "connection_accepted",
           title: "Connection accepted 🤝",
           body: `${myLabel} accepted your connection. You can now set up playdates together.`,
@@ -198,6 +212,7 @@ export default function Inbox({ session, onBack }) {
         const myLabel = shortName(me?.name);
         await supabase.from("notifications").insert({
           recipient_id: req.requesting_parent_id,
+          actor_id: session.user.id,
           type: "household_joined",
           title: "You joined a household 🏡",
           body: `${myLabel} added you to their household. Your classrooms are now shared.`,
@@ -327,14 +342,21 @@ export default function Inbox({ session, onBack }) {
                   // marks unreadOnOpen items read EXCEPT those in keptUnread.
                   const showNew = unreadOnOpen.includes(n.id) || !n.read || keptUnread.includes(n.id);
                   const kept = keptUnread.includes(n.id);
+                  const actor = n.actor_id ? actorMap[n.actor_id] : null;
                   return (
                   <div key={n.id} style={{ background: showNew ? "#162D50" : "#13233F", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: showNew ? "1px solid #02C39A" : "1px solid #2A4A6B" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                          {showNew && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
-                          <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{n.title}</p>
-                        </div>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", flex: 1 }}>
+                        {actor && (
+                          <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", fontSize: "0.9rem" }}>
+                            {actor.photo_url ? <img src={actor.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (actor.name?.charAt(0) || "?")}
+                          </div>
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                            {showNew && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#02C39A", flexShrink: 0 }} />}
+                            <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{n.title}</p>
+                          </div>
                         {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
                         <p style={{ color: "#607080", fontSize: "0.7rem", margin: 0 }}>{fmtWhen(n.created_at)}</p>
 
@@ -357,6 +379,7 @@ export default function Inbox({ session, onBack }) {
                             </div>
                           )
                         )}
+                        </div>
                       </div>
                     </div>
                     {/* Unread control. */}

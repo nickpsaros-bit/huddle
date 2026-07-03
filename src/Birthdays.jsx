@@ -305,6 +305,7 @@ export default function Birthdays({
       const myFirst = (me?.name || "A family").trim().split(/\s+/)[0];
       const rows = (members || []).map((m) => ({
         recipient_id: m.parent_id,
+        actor_id: session.user.id,
         type: "birthday_wish",
         title: "Birthday wishes! 🎂",
         body: `${myFirst}'s family is thinking of your family this birthday month!`,
@@ -504,6 +505,7 @@ export default function Birthdays({
             .from("household_members").select("parent_id").in("household_id", invitedHouseholdIds);
           const rows = (guestParents || []).map((m) => ({
             recipient_id: m.parent_id,
+            actor_id: session.user.id,
             type: "birthday_cancelled",
             title: "Birthday party cancelled",
             body: `${hostLabel}'s birthday party has been cancelled and removed from your calendar.`,

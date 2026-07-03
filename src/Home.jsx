@@ -493,6 +493,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       const myFirst = parent?.name ? parent.name.trim().split(/\s+/)[0] : "A family";
       const rows = (members || []).map((m) => ({
         recipient_id: m.parent_id,
+        actor_id: session.user.id,
         type: "birthday_wish",
         title: "Someone wished you a happy birthday 🎂",
         body: `${myFirst}'s family sent your family birthday wishes!`,

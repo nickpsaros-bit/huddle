@@ -443,6 +443,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
           const rows = (hostMembers || []).map((m) => ({
             recipient_id: m.parent_id,
+            actor_id: session.user.id,
             type: "playdate_rsvp",
             title: `Playdate RSVP ${emoji}`,
             body: `${respLabel} ${verb} your playdate.`,
@@ -524,6 +525,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
       const rows = (guestParents || []).map((m) => ({
         recipient_id: m.parent_id,
+        actor_id: session.user.id,
         type: "playdate_nudge",
         title: "Can you make this playdate? 🤔",
         body: `${hostLabel} is hoping you can confirm or decline their playdate for ${whenStr}. Open the Playdates tab to reply.`,
@@ -572,6 +574,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
           const rows = (guestParents || []).map((m) => ({
             recipient_id: m.parent_id,
+            actor_id: session.user.id,
             type: "playdate_cancelled",
             title: "Playdate cancelled",
             body: `${hostLabel} cancelled the playdate for ${whenStr}.`,

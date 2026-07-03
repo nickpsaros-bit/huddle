@@ -427,6 +427,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
 
         const rows = (theirMembers || []).map((m) => ({
           recipient_id: m.parent_id,
+          actor_id: session.user.id,
           type: isBirthday ? "birthday_invite" : "playdate_invite",
           title: isBirthday ? "You're invited to a birthday! 🎂" : "New playdate invite 🎉",
           body: isBirthday
@@ -549,6 +550,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             .from("household_members").select("parent_id").in("household_id", toAdd.map((t) => t.householdId));
           const rows = (addMembers || []).map((m) => ({
             recipient_id: m.parent_id,
+            actor_id: session.user.id,
             type: isBirthday ? "birthday_invite" : "playdate_invite",
             title: isBirthday ? "You're invited to a birthday! 🎂" : "New playdate invite 🎉",
             body: `${inviterLabel} invited you to a ${kind}. Open the Playdates tab to RSVP.`,
@@ -562,6 +564,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
             .from("household_members").select("parent_id").in("household_id", removeRows.map((r) => r.household_id));
           const rows = (remMembers || []).map((m) => ({
             recipient_id: m.parent_id,
+            actor_id: session.user.id,
             type: "event_removed",
             title: "Plans changed",
             body: `${inviterLabel}'s ${kind} plans changed and it's no longer on your calendar.`,
@@ -577,6 +580,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
               .from("household_members").select("parent_id").in("household_id", keptIds);
             const rows = (keptMembers || []).map((m) => ({
               recipient_id: m.parent_id,
+              actor_id: session.user.id,
               type: "event_updated",
               title: isBirthday ? "Birthday details updated 🎂" : "Playdate details updated",
               body: `${inviterLabel} updated the ${kind} details. Open the Playdates tab to see what changed.`,
