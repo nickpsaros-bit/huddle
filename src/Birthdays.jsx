@@ -5,6 +5,10 @@ import TopBar from "./TopBar";
 import PlaydateRequest from "./PlaydateRequest";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
+function gradeLabel(g) {
+  return typeof g === "number" && GRADES[g] ? GRADES[g] : "Classroom";
+}
 
 // Days until the next occurrence of a month/day (this year or next).
 function daysUntil(month, day) {
@@ -33,6 +37,7 @@ export default function Birthdays({
   const [myHouseholdId, setMyHouseholdId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [connectPrompt, setConnectPrompt] = useState(null); // { hostParentId, hostName }
 
   // Create flow: opens the birthday invite form (family picker first).
   const [creating, setCreating] = useState(false);
@@ -183,12 +188,35 @@ export default function Birthdays({
 
   useEffect(() => { load(); }, [session]);
 
-  const respond = async (inviteId, rsvp) => {
+  const respond = async (inviteId, rsvp, hostHouseholdId) => {
     setBusy(true);
     try {
       await supabase.from("playdate_invites").update({ rsvp }).eq("id", inviteId);
       setMessage(rsvp === "yes" ? "You're going! 🎉" : "Response sent.");
       if (typeof onChanged === "function") onChanged();
+
+      // On acceptance, if we're not already connected to the host, offer to connect.
+      if (rsvp === "yes" && hostHouseholdId) {
+        const userId = session.user.id;
+        // Find a host parent to connect with.
+        const { data: hostMembers } = await supabase
+          .from("household_members")
+          .select("parent_id, parents(name)")
+          .eq("household_id", hostHouseholdId)
+          .limit(1);
+        const hostParentId = hostMembers?.[0]?.parent_id;
+        const hostName = hostMembers?.[0]?.parents?.name || "this family";
+        if (hostParentId && hostParentId !== userId) {
+          // Already connected (either direction, any status)?
+          const { data: existing } = await supabase
+            .from("connections")
+            .select("id, status")
+            .or(`and(requester_id.eq.${userId},recipient_id.eq.${hostParentId}),and(requester_id.eq.${hostParentId},recipient_id.eq.${userId})`);
+          if (!existing || existing.length === 0) {
+            setConnectPrompt({ hostParentId, hostName });
+          }
+        }
+      }
       await load();
     } catch (e) {
       setMessage("Something went wrong.");
@@ -196,24 +224,100 @@ export default function Birthdays({
     setBusy(false);
   };
 
-  // --- Create flow: load families I can invite (my connections) ---
+  const acceptConnect = async () => {
+    if (!connectPrompt) return;
+    setBusy(true);
+    try {
+      // Both sides consented (host invited, guest chose to connect) -> accepted.
+      await supabase.from("connections").insert({
+        requester_id: session.user.id,
+        recipient_id: connectPrompt.hostParentId,
+        status: "accepted",
+      });
+      setMessage(`You're now connected with ${connectPrompt.hostName}! 🤝`);
+      if (typeof onChanged === "function") onChanged();
+    } catch (e) {
+      setMessage("Couldn't connect, but you're still going to the party.");
+    }
+    setConnectPrompt(null);
+    setBusy(false);
+  };
+
+  // --- Create flow: load ALL families at my school(s) (not just connections) ---
   const openCreate = async () => {
     setCreating(true);
     setPickLoading(true);
     setSelectedIds([]);
     try {
       const userId = session.user.id;
-      const { data } = await supabase
-        .from("connections")
-        .select(`requester_id, recipient_id, status,
-                 requester:parents!connections_requester_id_fkey(id, name, photo_url),
-                 recipient:parents!connections_recipient_id_fkey(id, name, photo_url)`)
-        .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
-        .eq("status", "accepted");
-      const people = (data || []).map((c) => {
-        const isReq = c.requester_id === userId;
-        return isReq ? c.recipient : c.requester;
-      }).filter(Boolean);
+      // My household.
+      const { data: myHm } = await supabase
+        .from("household_members")
+        .select("household_id")
+        .eq("parent_id", userId)
+        .maybeSingle();
+      const myHhId = myHm?.household_id;
+
+      // My classrooms -> my school ids.
+      const { data: myCms } = await supabase
+        .from("classroom_members")
+        .select("classrooms(school_id)")
+        .eq("household_id", myHhId);
+      const schoolIds = [...new Set((myCms || []).map((c) => c.classrooms?.school_id).filter(Boolean))];
+      if (schoolIds.length === 0) { setPickPeople([]); setPickLoading(false); return; }
+
+      // All classrooms at those schools.
+      const { data: schoolClassrooms } = await supabase
+        .from("classrooms")
+        .select("id, grade, teacher_name")
+        .in("school_id", schoolIds);
+      const classroomIds = (schoolClassrooms || []).map((c) => c.id);
+      const classroomById = {};
+      for (const c of (schoolClassrooms || [])) classroomById[c.id] = c;
+      if (classroomIds.length === 0) { setPickPeople([]); setPickLoading(false); return; }
+
+      // All memberships in those classrooms -> household ids (+ remember a grade/class per household).
+      const { data: allMemberships } = await supabase
+        .from("classroom_members")
+        .select("household_id, classroom_id")
+        .in("classroom_id", classroomIds);
+
+      const classByHousehold = {}; // household_id -> {grade, teacher}
+      const householdIds = new Set();
+      for (const m of (allMemberships || [])) {
+        if (m.household_id === myHhId) continue; // exclude self
+        householdIds.add(m.household_id);
+        if (!classByHousehold[m.household_id]) {
+          const cr = classroomById[m.classroom_id];
+          if (cr) classByHousehold[m.household_id] = { grade: cr.grade, teacher: cr.teacher_name };
+        }
+      }
+      const hhIdList = [...householdIds];
+      if (hhIdList.length === 0) { setPickPeople([]); setPickLoading(false); return; }
+
+      // A representative parent (name/photo) per household.
+      const { data: members } = await supabase
+        .from("household_members")
+        .select("household_id, parents(id, name, photo_url)")
+        .in("household_id", hhIdList);
+
+      const seen = new Set();
+      const people = [];
+      for (const m of (members || [])) {
+        if (seen.has(m.household_id)) continue;
+        const p = m.parents;
+        if (!p) continue;
+        seen.add(m.household_id);
+        const cls = classByHousehold[m.household_id];
+        people.push({
+          id: p.id,
+          householdId: m.household_id,
+          name: p.name,
+          photo_url: p.photo_url,
+          classLabel: cls ? `${gradeLabel(cls.grade)}${cls.teacher ? " · " + cls.teacher : ""}` : "",
+        });
+      }
+      people.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
       setPickPeople(people);
     } catch (e) {
       setPickPeople([]);
@@ -305,11 +409,11 @@ export default function Birthdays({
                     )}
                     {invite.rsvp === "invited" ? (
                       <div style={{ display: "flex", gap: "8px", marginTop: "0.85rem" }}>
-                        <button disabled={busy} onClick={() => respond(invite.id, "yes")}
+                        <button disabled={busy} onClick={() => respond(invite.id, "yes", playdate.organizer_household_id)}
                           style={{ flex: 1, padding: "0.6rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontWeight: "700", cursor: "pointer" }}>
                           Going
                         </button>
-                        <button disabled={busy} onClick={() => respond(invite.id, "no")}
+                        <button disabled={busy} onClick={() => respond(invite.id, "no", playdate.organizer_household_id)}
                           style={{ flex: 1, padding: "0.6rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontWeight: "600", cursor: "pointer" }}>
                           Can't make it
                         </button>
@@ -396,6 +500,31 @@ export default function Birthdays({
         )}
       </div>
 
+      {/* Connect-on-accept prompt */}
+      {connectPrompt && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "16px", padding: "1.5rem", maxWidth: "360px", width: "100%" }}>
+            <p style={{ margin: "0 0 0.75rem", textAlign: "center" }}><Icon name="group_add" size={40} color="#7C5CBF" /></p>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: "0 0 0.5rem", textAlign: "center" }}>
+              Connect with {connectPrompt.hostName}?
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.88rem", lineHeight: "1.5", margin: "0 0 1.25rem", textAlign: "center" }}>
+              You're going to their celebration! Connect on Huddle to plan playdates and stay in touch more easily.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <button disabled={busy} onClick={acceptConnect}
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontWeight: "700", cursor: "pointer", fontSize: "0.9rem" }}>
+                Yes, connect
+              </button>
+              <button disabled={busy} onClick={() => setConnectPrompt(null)}
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontWeight: "600", cursor: "pointer", fontSize: "0.9rem" }}>
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create: family picker overlay */}
       {creating && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0F2044", zIndex: 60, overflowY: "auto" }}>
@@ -428,7 +557,7 @@ export default function Birthdays({
               <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
                 <p style={{ margin: "0 0 0.75rem" }}><Icon name="group" size={40} color="#3E5A7F" /></p>
                 <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
-                  You'll be able to invite families once you've connected with some. Head to your network to connect.
+                  No other families found at your school yet. As more families join, they'll appear here to invite.
                 </p>
               </div>
             ) : (
@@ -442,7 +571,10 @@ export default function Birthdays({
                     <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", flexShrink: 0 }}>
                       {p.photo_url ? <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (p.name?.charAt(0) || "?")}
                     </div>
-                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0, flex: 1 }}>{p.name}</p>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{p.name}</p>
+                      {p.classLabel && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "1px 0 0" }}>{p.classLabel}</p>}
+                    </div>
                     {sel && <Icon name="check_circle" size={22} color="#7C5CBF" />}
                   </div>
                 );
