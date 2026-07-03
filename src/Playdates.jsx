@@ -4,8 +4,9 @@ import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
 import PlaydateRequest from "./PlaydateRequest";
 import Icon from "./Icon";
+import TopBar from "./TopBar";
 
-export default function Playdates({ session, onChanged, avatarUrl, onProfileClick }) {
+export default function Playdates({ session, onChanged, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0 }) {
   const [householdId, setHouseholdId] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -972,27 +973,20 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
-      <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Playdates</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {(needsAttention.length + upcoming.length) > 0 && (
-            <span style={{ color: "#607080", fontSize: "0.8rem" }}>{needsAttention.length + upcoming.length} upcoming</span>
-          )}
-          <button
-            onClick={() => { if (typeof onProfileClick === "function") onProfileClick(); }}
-            aria-label="Open your profile"
-            style={{
-              width: "38px", height: "38px", borderRadius: "50%", padding: 0,
-              border: "2px solid #02C39A", background: "#028090", cursor: "pointer",
-              overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center",
-              justifyContent: "center", color: "#FFFFFF", fontSize: "1rem", fontWeight: "600",
-            }}>
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            ) : "👤"}
-          </button>
-        </div>
-      </div>
+      <TopBar
+        title="Playdates"
+        notificationCount={notificationCount}
+        onBellClick={onBellClick}
+        onSearchClick={onSearchClick}
+        onProfileClick={onProfileClick}
+        avatarUrl={avatarUrl}
+        initial="?"
+      />
+      {(needsAttention.length + upcoming.length) > 0 && (
+        <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, padding: "0.6rem 1.5rem 0", maxWidth: "600px", marginLeft: "auto", marginRight: "auto", textAlign: "right" }}>
+          {needsAttention.length + upcoming.length} upcoming
+        </p>
+      )}
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
