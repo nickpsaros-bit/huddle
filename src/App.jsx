@@ -434,7 +434,7 @@ export default function App() {
   if (activeTab === "home") {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} onSearchClick={() => setShowSearch(true)} />;
   } else if (activeTab === "network") {
-    screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
+    screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} />;
   } else if (activeTab === "playdates") {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
   } else {

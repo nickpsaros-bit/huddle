@@ -5,8 +5,9 @@ import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
 import Icon from "./Icon";
+import TopBar from "./TopBar";
 
-export default function Network({ session, avatarUrl, onProfileClick }) {
+export default function Network({ session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0 }) {
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -219,15 +220,18 @@ export default function Network({ session, avatarUrl, onProfileClick }) {
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
 
-      <div style={{ background: "#162D50", padding: "1.1rem 1.5rem", borderBottom: "1px solid #2A4A6B", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
-        <div style={{ minWidth: 0 }}>
-          <h1 style={{ color: "#FFFFFF", fontSize: "1.35rem", fontWeight: "700", margin: 0, letterSpacing: "-0.01em" }}>Your Network</h1>
-          <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "3px 0 0" }}>
-            Parents you've connected with across classrooms
-          </p>
-        </div>
-        {profileAvatar()}
-      </div>
+      <TopBar
+        title="Your Network"
+        notificationCount={notificationCount}
+        onBellClick={onBellClick}
+        onSearchClick={onSearchClick}
+        onProfileClick={onProfileClick}
+        avatarUrl={avatarUrl}
+        initial={(myName && myName.charAt(0)) || "?"}
+      />
+      <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: 0, padding: "0.75rem 1.5rem 0", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
+        Parents you've connected with across classrooms
+      </p>
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
