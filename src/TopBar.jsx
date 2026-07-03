@@ -41,7 +41,7 @@ export default function TopBar({
           Huddle
         </h1>
         {isHome && (
-          <span style={{ color: "#8AAEC8", fontFamily: "'Caveat', cursive", fontSize: "1.3rem", fontWeight: "600", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span style={{ color: "#8AAEC8", fontFamily: "'Kalam', cursive", fontSize: "1.15rem", fontWeight: "400", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             where school families connect
           </span>
         )}
