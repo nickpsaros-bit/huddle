@@ -46,6 +46,8 @@ export default function Birthdays({
   const [selectedIds, setSelectedIds] = useState([]);
   const [pickFilter, setPickFilter] = useState("");
   const [launchRecipients, setLaunchRecipients] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [editingRecipients, setEditingRecipients] = useState([]);
 
   const load = async () => {
     setLoading(true);
@@ -337,6 +339,49 @@ export default function Birthdays({
     setLaunchRecipients(chosen.map((p) => ({ id: p.id, name: p.name, photo_url: p.photo_url })));
   };
 
+  // Open the editor for a birthday I'm hosting (change date/venue/notes/guests).
+  const openEdit = async (pd) => {
+    try {
+      const { data: invRows } = await supabase
+        .from("playdate_invites")
+        .select("invited_parent_id, household_id")
+        .eq("playdate_id", pd.id)
+        .neq("household_id", pd.organizer_household_id);
+      const parentIds = [...new Set((invRows || []).map((r) => r.invited_parent_id).filter(Boolean))];
+      let recipients = [];
+      if (parentIds.length > 0) {
+        const { data: parents } = await supabase
+          .from("parents")
+          .select("id, name, photo_url")
+          .in("id", parentIds);
+        recipients = parents || [];
+      }
+      setEditingRecipients(recipients);
+      setEditingEvent(pd);
+    } catch (err) {
+      setMessage("Couldn't open editor.");
+    }
+  };
+
+  // When editing a hosted birthday, open the editor.
+  if (editingEvent) {
+    return (
+      <PlaydateRequest
+        session={session}
+        editEvent={editingEvent}
+        recipients={editingRecipients}
+        onBack={() => { setEditingEvent(null); setEditingRecipients([]); }}
+        onSent={() => {
+          setEditingEvent(null);
+          setEditingRecipients([]);
+          setMessage("Birthday updated! 🎂");
+          if (typeof onChanged === "function") onChanged();
+          load();
+        }}
+      />
+    );
+  }
+
   // When the birthday form is open, render it.
   if (launchRecipients) {
     return (
@@ -460,6 +505,10 @@ export default function Birthdays({
                         ))
                       )}
                     </div>
+                    <button onClick={() => openEdit(playdate)}
+                      style={{ marginTop: "10px", padding: "0.55rem 1rem", borderRadius: "10px", border: "1px solid #7C5CBF", background: "transparent", color: "#B8A4E0", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <Icon name="edit" size={16} color="#B8A4E0" />Edit birthday
+                    </button>
                   </div>
                 ))}
               </div>
