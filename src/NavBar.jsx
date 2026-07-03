@@ -1,3 +1,5 @@
+import Icon from "./Icon";
+
 export default function NavBar(props) {
   const active = props.active;
   const onNavigate = props.onNavigate;
@@ -5,10 +7,10 @@ export default function NavBar(props) {
   const halos = props.halos || {};
 
   const tabs = [
-    { id: "home", label: "Home", icon: "🏠" },
-    { id: "network", label: "Network", icon: "🤝" },
-    { id: "playdates", label: "Playdates", icon: "📅" },
-    { id: "search", label: "Search", icon: "🔍" },
+    { id: "home", label: "Home", icon: "home" },
+    { id: "network", label: "Network", icon: "group" },
+    { id: "playdates", label: "Playdates", icon: "calendar_month" },
+    { id: "search", label: "Search", icon: "search" },
   ];
 
   const haloStyles = {
@@ -62,7 +64,7 @@ export default function NavBar(props) {
                   zIndex: 0,
                 }} />
               )}
-              <span style={{ position: "relative", zIndex: 1 }}>{tab.icon}</span>
+              <span style={{ position: "relative", zIndex: 1 }}><Icon name={tab.icon} size={26} color={active === tab.id ? "#02C39A" : "#8AAEC8"} fill={active === tab.id} /></span>
               {badgeCount > 0 && (
                 <span style={{
                   position: "absolute",
