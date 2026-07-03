@@ -38,6 +38,7 @@ export default function Birthdays({
   const [pickPeople, setPickPeople] = useState([]);
   const [pickLoading, setPickLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [pickFilter, setPickFilter] = useState("");
   const [launchRecipients, setLaunchRecipients] = useState(null);
 
   const load = async () => {
@@ -334,6 +335,13 @@ export default function Birthdays({
             <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
               Choose which families to invite to the birthday celebration.
             </p>
+            <input
+              type="text"
+              value={pickFilter}
+              onChange={(e) => setPickFilter(e.target.value)}
+              placeholder="Search families…"
+              style={{ width: "100%", padding: "0.75rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.95rem", marginBottom: "1rem", boxSizing: "border-box" }}
+            />
             {selectedIds.length > 0 && (
               <button onClick={continueToForm}
                 style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.25rem" }}>
@@ -350,7 +358,9 @@ export default function Birthdays({
                 </p>
               </div>
             ) : (
-              pickPeople.map((p) => {
+              pickPeople
+                .filter((p) => !pickFilter.trim() || (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()))
+                .map((p) => {
                 const sel = selectedIds.includes(p.id);
                 return (
                   <div key={p.id} onClick={() => toggleSelect(p)}

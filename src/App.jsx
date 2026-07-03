@@ -35,6 +35,7 @@ export default function App() {
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
+  const [birthdayBadge, setBirthdayBadge] = useState(0);
   const [playdateHalo, setPlaydateHalo] = useState(null);
 
   // Invite handling.
@@ -319,12 +320,14 @@ export default function App() {
     if (!myHh) {
       setPlaydateBadge(0);
       setPlaydateHalo(null);
+      setBirthdayBadge(0);
       return;
     }
 
     const nowMs = Date.now();
 
     let unrepliedCount = 0;
+    let unrepliedBirthdays = 0;
     const upcoming = []; // { date, status }
 
     const { data: myInv } = await supabase
@@ -335,7 +338,15 @@ export default function App() {
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
-      if (pd.event_type === "birthday") continue; // birthdays counted in the Birthdays tab
+      if (pd.event_type === "birthday") {
+        // Count unreplied, upcoming birthday invites for the Birthdays badge.
+        if (pd.organizer_household_id !== myHh.household_id
+            && new Date(pd.proposed_date).getTime() >= nowMs
+            && inv.rsvp === "invited") {
+          unrepliedBirthdays++;
+        }
+        continue; // not shown in Playdates
+      }
       if (pd.organizer_household_id === myHh.household_id) continue;
       if (new Date(pd.proposed_date).getTime() < nowMs) continue;
       if (inv.rsvp === "invited") unrepliedCount++;
@@ -362,6 +373,7 @@ export default function App() {
     // confirmed alike). Halo removed in favor of this clearer count.
     setPlaydateBadge(live.length);
     setPlaydateHalo(null);
+    setBirthdayBadge(unrepliedBirthdays);
   };
 
   const handleNavigate = (tabId) => {
@@ -454,7 +466,7 @@ export default function App() {
       <NavBar
         active={activeTab}
         onNavigate={handleNavigate}
-        badges={{ playdates: playdateBadge }}
+        badges={{ playdates: playdateBadge, birthdays: birthdayBadge }}
         halos={{ playdates: playdateHalo }}
       />
     </div>
