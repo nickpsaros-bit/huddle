@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
 import PlaydateRequest from "./PlaydateRequest";
+import ConfirmModal from "./ConfirmModal";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const GRADES = ["TK", "Kindergarten", "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade"];
@@ -51,6 +52,7 @@ export default function Birthdays({
   const [launchRecipients, setLaunchRecipients] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [editingRecipients, setEditingRecipients] = useState([]);
+  const [confirm, setConfirm] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -472,6 +474,68 @@ export default function Birthdays({
     }
   };
 
+  // Cancel a hosted birthday: cancellation .ics to everyone + in-app notice + delete.
+  const doCancelBirthday = async (pd) => {
+    setBusy(true);
+    try {
+      try {
+        await supabase.functions.invoke("cancel-playdate-invite", { body: { playdate_id: pd.id } });
+      } catch (calErr) { /* best-effort */ }
+
+      const { data: invRows } = await supabase
+        .from("playdate_invites").select("household_id").eq("playdate_id", pd.id);
+      const invitedHouseholdIds = [...new Set((invRows || []).map((i) => i.household_id))]
+        .filter((id) => id && id !== pd.organizer_household_id);
+
+      try {
+        // Host label (both parents) for the message.
+        const { data: hostMembers } = await supabase
+          .from("household_members").select("parent_id").eq("household_id", pd.organizer_household_id);
+        const hostIds = (hostMembers || []).map((m) => m.parent_id).filter(Boolean);
+        let hostLabel = "A family";
+        if (hostIds.length > 0) {
+          const { data: hp } = await supabase.from("parents").select("name").in("id", hostIds);
+          const names = (hp || []).map((p) => (p.name || "").trim().split(/\s+/)[0]).filter(Boolean);
+          if (names.length === 1) hostLabel = names[0];
+          else if (names.length >= 2) hostLabel = `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+        }
+        if (invitedHouseholdIds.length > 0) {
+          const { data: guestParents } = await supabase
+            .from("household_members").select("parent_id").in("household_id", invitedHouseholdIds);
+          const rows = (guestParents || []).map((m) => ({
+            recipient_id: m.parent_id,
+            type: "birthday_cancelled",
+            title: "Birthday party cancelled",
+            body: `${hostLabel}'s birthday party has been cancelled and removed from your calendar.`,
+          }));
+          if (rows.length > 0) await supabase.from("notifications").insert(rows);
+        }
+      } catch (notifErr) { /* best-effort */ }
+
+      await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
+      await supabase.from("playdates").delete().eq("id", pd.id);
+
+      setMessage("Birthday party cancelled. Everyone's been notified.");
+      if (typeof onChanged === "function") onChanged();
+      await load();
+      setTimeout(() => setMessage(""), 3500);
+    } catch (err) {
+      setMessage("Couldn't cancel, please try again.");
+    }
+    setBusy(false);
+  };
+
+  const cancelBirthday = (pd) => {
+    setConfirm({
+      title: "Cancel this birthday party?",
+      body: "Everyone invited will be notified and it'll be removed from their calendars. This can't be undone.",
+      confirmLabel: "Cancel party",
+      cancelLabel: "Keep it",
+      tone: "danger",
+      onConfirm: () => { setConfirm(null); doCancelBirthday(pd); },
+    });
+  };
+
   // When editing a hosted birthday, open the editor.
   if (editingEvent) {
     return (
@@ -614,10 +678,16 @@ export default function Birthdays({
                         ))
                       )}
                     </div>
-                    <button onClick={() => openEdit(playdate)}
-                      style={{ marginTop: "10px", padding: "0.55rem 1rem", borderRadius: "10px", border: "1px solid #7C5CBF", background: "transparent", color: "#B8A4E0", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                      <Icon name="edit" size={16} color="#B8A4E0" />Edit birthday
-                    </button>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
+                      <button onClick={() => openEdit(playdate)}
+                        style={{ padding: "0.55rem 1rem", borderRadius: "10px", border: "1px solid #7C5CBF", background: "transparent", color: "#B8A4E0", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Icon name="edit" size={16} color="#B8A4E0" />Edit birthday
+                      </button>
+                      <button onClick={() => cancelBirthday(playdate)}
+                        style={{ padding: "0.55rem 1rem", borderRadius: "10px", border: "1px solid #7A3B3B", background: "transparent", color: "#E39A9A", fontSize: "0.85rem", fontWeight: "600", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Icon name="cancel" size={16} color="#E39A9A" />Cancel
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -719,6 +789,8 @@ export default function Birthdays({
           </div>
         </div>
       )}
+
+      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
 
       {/* Create: family picker overlay */}
       {creating && (
