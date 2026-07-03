@@ -52,6 +52,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
   const [error, setError] = useState("");
   const [coords, setCoords] = useState(null);
   const [sent, setSent] = useState(false);
+  const [editSummary, setEditSummary] = useState(null); // { added, removed, detailsChanged }
 
   // Pets: organizer's own pets, the "bringing" toggles, and recipients' aggregated comfort prefs.
   const [myPets, setMyPets] = useState({ has_dog: false, has_cat: false });
@@ -585,6 +586,11 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
         }
       } catch (notifErr) { /* best-effort */ }
 
+      setEditSummary({
+        added: toAdd.length,
+        removed: removeRows.length,
+        detailsChanged,
+      });
       setSent(true);
       setTimeout(() => { onSent(); }, 1400);
     } catch (err) {
@@ -687,7 +693,18 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
           <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>{isBirthday ? "🎂" : "🎉"}</div>
           <h2 style={{ color: accent, fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>{isEditing ? "Changes saved!" : "Invite sent!"}</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
-            {isMulti
+            {isEditing && editSummary
+              ? (() => {
+                  const parts = [];
+                  if (editSummary.added > 0) parts.push(`${editSummary.added} newly added ${editSummary.added === 1 ? "family gets" : "families get"} the invite`);
+                  if (editSummary.detailsChanged) parts.push("everyone already invited gets the updated details");
+                  if (editSummary.removed > 0) parts.push(`${editSummary.removed} ${editSummary.removed === 1 ? "family was" : "families were"} removed`);
+                  if (parts.length === 0) return "Your changes have been saved. No one needed to be notified.";
+                  // Capitalize first word.
+                  const s = parts.join(", and ") + ".";
+                  return s.charAt(0).toUpperCase() + s.slice(1);
+                })()
+              : isMulti
               ? `${recipientList.length} families will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`
               : `${shortName(recipientList[0]?.name)}'s family will get your ${isBirthday ? "birthday" : "playdate"} invite. You'll be notified when they reply.`}
           </p>
