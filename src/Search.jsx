@@ -6,6 +6,7 @@ import Icon from "./Icon";
 export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
+  const [eventResults, setEventResults] = useState([]); // matching past events
   const [loading, setLoading] = useState(false);
   const [mySchoolIds, setMySchoolIds] = useState([]);
   const [myHouseholdId, setMyHouseholdId] = useState(null);
@@ -80,6 +81,77 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
 
   const isEmail = (s) => s.includes("@") && s.includes(".") && !s.endsWith("@");
 
+  // Search the user's PAST events (playdates + birthdays) by location, title,
+  // notes, guest names, or date. Only events this household hosted or was invited to.
+  const searchEvents = async (q) => {
+    try {
+      const term = q.trim().toLowerCase();
+      const nowIso = new Date().toISOString();
+
+      // My household.
+      const { data: hm } = await supabase
+        .from("household_members").select("household_id").eq("parent_id", session.user.id).maybeSingle();
+      if (!hm) { setEventResults([]); return; }
+      const hhId = hm.household_id;
+
+      // Past events I hosted.
+      const { data: hosted } = await supabase
+        .from("playdates")
+        .select("*")
+        .eq("organizer_household_id", hhId)
+        .lt("proposed_date", nowIso);
+
+      // Past events I was invited to.
+      const { data: myInvites } = await supabase
+        .from("playdate_invites")
+        .select("playdates(*)")
+        .eq("household_id", hhId);
+      const invitedPast = (myInvites || [])
+        .map((i) => i.playdates)
+        .filter((pd) => pd && new Date(pd.proposed_date) < new Date(nowIso));
+
+      // Merge + de-dupe by id.
+      const byId = {};
+      for (const pd of [...(hosted || []), ...invitedPast]) { if (pd) byId[pd.id] = pd; }
+      const events = Object.values(byId);
+      if (events.length === 0) { setEventResults([]); return; }
+
+      // Enrich each with guest names (for name-based matching + display).
+      const enriched = [];
+      for (const pd of events) {
+        const { data: invRows } = await supabase
+          .from("playdate_invites").select("household_id").eq("playdate_id", pd.id);
+        const otherHhIds = [...new Set((invRows || []).map((r) => r.household_id).filter((id) => id && id !== hhId))];
+        let guestNames = [];
+        if (otherHhIds.length > 0) {
+          const { data: gm } = await supabase
+            .from("household_members").select("household_id, parents(name)").in("household_id", otherHhIds);
+          guestNames = [...new Set((gm || []).map((m) => m.parents?.name).filter(Boolean))];
+        }
+        // If I was a guest, also include the host's name.
+        if (pd.organizer_household_id !== hhId) {
+          const { data: om } = await supabase
+            .from("household_members").select("parents(name)").eq("household_id", pd.organizer_household_id);
+          for (const m of (om || [])) if (m.parents?.name) guestNames.push(m.parents.name);
+        }
+
+        const dateStr = new Date(pd.proposed_date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+        const haystack = [
+          pd.location_name, pd.location_address, pd.title, pd.note,
+          dateStr, ...guestNames,
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        if (haystack.includes(term)) {
+          enriched.push({ ...pd, guestNames, dateStr });
+        }
+      }
+      enriched.sort((a, b) => new Date(b.proposed_date) - new Date(a.proposed_date));
+      setEventResults(enriched);
+    } catch (e) {
+      setEventResults([]);
+    }
+  };
+
   const search = async (q) => {
     setQuery(q);
     setEmailResult(null);
@@ -87,6 +159,7 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
 
     if (q.length < 2) {
       setResults([]);
+      setEventResults([]);
       return;
     }
 
@@ -111,6 +184,9 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
     }
 
     setLoading(true);
+
+    // Search past events in parallel with the people search.
+    searchEvents(q);
 
     const { data: parents } = await supabase
       .from("parents")
@@ -251,7 +327,7 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
         </div>
         <input
           type="text"
-          placeholder="Search by name, or enter an email..."
+          placeholder="Search people, past events, or an email..."
           value={query}
           onChange={(e) => search(e.target.value)}
           style={{
@@ -308,12 +384,12 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
           </div>
         )}
 
-        {!loading && !emailSearched && query.length >= 2 && results.length === 0 && (
+        {!loading && !emailSearched && query.length >= 2 && results.length === 0 && eventResults.length === 0 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <p style={{ margin: "0 0 1rem" }}><Icon name="search" size={40} color="#3E5A7F" /></p>
-            <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No parents found</p>
+            <p style={{ color: "#FFFFFF", fontSize: "1rem", margin: "0 0 0.5rem" }}>No matches found</p>
             <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
-              Only parents at your school show up by name. To connect with someone at another school, enter their exact email.
+              Search for parents at your school by name, past events by place or who was there, or enter an exact email to connect across schools.
             </p>
           </div>
         )}
@@ -326,6 +402,40 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
           </div>
         )}
 
+        {/* Your past events section */}
+        {eventResults.length > 0 && (
+          <div style={{ marginBottom: "1.5rem" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>YOUR PAST EVENTS</p>
+            {eventResults.map((ev) => {
+              const isBday = ev.event_type === "birthday";
+              return (
+                <div key={ev.id} style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "1rem", marginBottom: "0.6rem" }}>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: "0 0 4px" }}>
+                    {isBday ? "🎂 " : "🧸 "}{ev.title || (isBday ? "Birthday party" : "Playdate")}
+                  </p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "0 0 2px" }}>{ev.dateStr}</p>
+                  {ev.location_name && (
+                    <p style={{ color: "#8AAEC8", fontSize: "0.82rem", margin: "0 0 2px" }}>
+                      <Icon name="location_on" size={15} style={{ verticalAlign: "-3px", marginRight: 2 }} />{ev.location_name}{ev.location_address ? ` — ${ev.location_address}` : ""}
+                    </p>
+                  )}
+                  {ev.guestNames && ev.guestNames.length > 0 && (
+                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: "4px 0 0" }}>
+                      With {ev.guestNames.slice(0, 4).join(", ")}{ev.guestNames.length > 4 ? ` +${ev.guestNames.length - 4} more` : ""}
+                    </p>
+                  )}
+                  {ev.note && (
+                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: "4px 0 0", fontStyle: "italic" }}>"{ev.note}"</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>PEOPLE</p>
+        )}
         {results.map((parent) => {
           const sameHousehold = myHouseholdId && parent.householdId === myHouseholdId;
           const classroomLabel = (parent.classrooms || []).map(c =>
