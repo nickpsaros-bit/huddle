@@ -17,6 +17,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [petsByHousehold, setPetsByHousehold] = useState({});
   const [nextPlaydate, setNextPlaydate] = useState(null);
   const [statConnections, setStatConnections] = useState(0);
+  const [connectedIds, setConnectedIds] = useState(new Set());   // parent ids I'm connected to
+  const [pendingIds, setPendingIds] = useState(new Set());       // parent ids with a pending request (either direction)
+  const [connectBusy, setConnectBusy] = useState(null);          // parent id currently connecting
   const [statUpcoming, setStatUpcoming] = useState(0);
   const [loading, setLoading] = useState(true);
   const [requestingPlaydate, setRequestingPlaydate] = useState(null);
@@ -364,10 +367,19 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     try {
       const { data: conns } = await supabase
         .from("connections")
-        .select("id")
-        .or(`requester_id.eq.${session.user.id},recipient_id.eq.${session.user.id}`)
-        .eq("status", "accepted");
-      setStatConnections((conns || []).length);
+        .select("requester_id, recipient_id, status")
+        .or(`requester_id.eq.${session.user.id},recipient_id.eq.${session.user.id}`);
+      const connected = new Set();
+      const pending = new Set();
+      let acceptedCount = 0;
+      for (const c of (conns || [])) {
+        const otherId = c.requester_id === session.user.id ? c.recipient_id : c.requester_id;
+        if (c.status === "accepted") { connected.add(otherId); acceptedCount++; }
+        else if (c.status === "pending") { pending.add(otherId); }
+      }
+      setConnectedIds(connected);
+      setPendingIds(pending);
+      setStatConnections(acceptedCount);
     } catch (e) {
       setStatConnections(0);
     }
@@ -637,6 +649,22 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       tone: "danger",
       onConfirm: () => doLeaveClassroom(membershipRow),
     });
+  };
+
+  const connectTo = async (parentId) => {
+    if (!parentId || connectBusy) return;
+    setConnectBusy(parentId);
+    try {
+      const { error } = await supabase.from("connections").insert({
+        requester_id: session.user.id,
+        recipient_id: parentId,
+        status: "pending",
+      });
+      if (!error) {
+        setPendingIds((prev) => new Set([...prev, parentId]));
+      }
+    } catch (e) { /* best-effort */ }
+    setConnectBusy(null);
   };
 
   const familyCardsFor = (membershipRow) => {
@@ -995,11 +1023,21 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                     {shortName(card.parents?.name)}{petBadges(card.householdId)}
                   </p>
                 </div>
-                <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                  <Button variant="accent" size="sm" title="Send a birthday invite"
-                    onClick={() => { setRequestEventType("birthday"); setRequestingPlaydate(card.parents); }}>
-                    🎂
-                  </Button>
+                <div style={{ display: "flex", gap: "6px", flexShrink: 0, alignItems: "center" }}>
+                  {connectedIds.has(card.parents?.id) ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", color: "#02C39A", fontSize: "0.78rem", fontWeight: "600", padding: "0 6px" }}>
+                      <Icon name="check_circle" size={15} color="#02C39A" />Connected
+                    </span>
+                  ) : pendingIds.has(card.parents?.id) ? (
+                    <span style={{ color: "#8AAEC8", fontSize: "0.78rem", fontWeight: "600", padding: "0 6px" }}>
+                      Requested
+                    </span>
+                  ) : (
+                    <Button variant="accent" size="sm" title="Connect with this family"
+                      onClick={() => connectTo(card.parents?.id)} disabled={connectBusy === card.parents?.id}>
+                      {connectBusy === card.parents?.id ? "..." : "Connect"}
+                    </Button>
+                  )}
                   <Button variant="primary" size="sm"
                     onClick={() => { setRequestEventType("playdate"); setRequestingPlaydate(card.parents); }}>
                     Huddle →
