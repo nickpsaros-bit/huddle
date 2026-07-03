@@ -79,6 +79,22 @@ export default function Inbox({ session, onBack }) {
     setTimeout(() => setMessage(""), 2000);
   };
 
+  // Flip an already-read notification back to unread (persists immediately).
+  const reMarkUnread = async (notifId) => {
+    try {
+      await supabase.from("notifications").update({ read: false }).eq("id", notifId);
+      setNotifications((prev) => prev.map((n) => n.id === notifId ? { ...n, read: false } : n));
+      // Treat it as unread-on-open and keep it that way so the leave-sweep won't re-read it.
+      setUnreadOnOpen((prev) => (prev.includes(notifId) ? prev : [...prev, notifId]));
+      setKeptUnread((prev) => (prev.includes(notifId) ? prev : [...prev, notifId]));
+      setMessage("Marked as unread.");
+      setTimeout(() => setMessage(""), 2000);
+    } catch (e) {
+      setMessage("Couldn't update, please try again.");
+      setTimeout(() => setMessage(""), 2500);
+    }
+  };
+
   // On leaving the inbox: mark everything that was unread-on-open as read,
   // except any the user chose to keep unread.
   const handleBack = async () => {
@@ -305,9 +321,11 @@ export default function Inbox({ session, onBack }) {
               <>
                 <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: (joinRequests.length + connectionRequests.length) > 0 ? "1.5rem 0 0.75rem" : "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
                 {notifications.map((n) => {
-                  // "New" stays highlighted while the inbox is open (it was unread
-                  // on open and the user hasn't chosen to keep it unread on purpose).
-                  const showNew = (unreadOnOpen.includes(n.id) || !n.read) && !keptUnread.includes(n.id);
+                  // An item looks "new" (highlighted) if it's unread this session:
+                  // it was unread on open, is still marked unread, or the user
+                  // explicitly kept/re-marked it unread. The leave-sweep (handleBack)
+                  // marks unreadOnOpen items read EXCEPT those in keptUnread.
+                  const showNew = unreadOnOpen.includes(n.id) || !n.read || keptUnread.includes(n.id);
                   const kept = keptUnread.includes(n.id);
                   return (
                   <div key={n.id} style={{ background: showNew ? "#162D50" : "#13233F", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: showNew ? "1px solid #02C39A" : "1px solid #2A4A6B" }}>
@@ -341,8 +359,15 @@ export default function Inbox({ session, onBack }) {
                         )}
                       </div>
                     </div>
-                    {/* Keep-unread: only offered while the item is still showing as new. */}
-                    {showNew && (
+                    {/* Unread control. */}
+                    {!showNew && (
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <Button variant="secondary" size="sm" onClick={() => reMarkUnread(n.id)}>
+                          Mark unread
+                        </Button>
+                      </div>
+                    )}
+                    {showNew && !kept && (
                       <div style={{ marginTop: "0.75rem" }}>
                         <Button variant="secondary" size="sm" onClick={() => keepUnread(n.id)}>
                           Keep unread
