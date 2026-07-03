@@ -123,16 +123,34 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
           .from("playdate_invites").select("household_id").eq("playdate_id", pd.id);
         const otherHhIds = [...new Set((invRows || []).map((r) => r.household_id).filter((id) => id && id !== hhId))];
         let guestNames = [];
+        let guestPeople = []; // { name, photo_url }
         if (otherHhIds.length > 0) {
           const { data: gm } = await supabase
-            .from("household_members").select("household_id, parents(name)").in("household_id", otherHhIds);
-          guestNames = [...new Set((gm || []).map((m) => m.parents?.name).filter(Boolean))];
+            .from("household_members").select("household_id, parents(name, photo_url)").in("household_id", otherHhIds);
+          const seenH = new Set();
+          for (const m of (gm || [])) {
+            if (!m.parents?.name) continue;
+            // one representative person per guest household for the avatar row
+            if (!seenH.has(m.household_id)) {
+              seenH.add(m.household_id);
+              guestPeople.push({ name: m.parents.name, photo_url: m.parents.photo_url });
+            }
+            guestNames.push(m.parents.name);
+          }
+          guestNames = [...new Set(guestNames)];
         }
-        // If I was a guest, also include the host's name.
+        // If I was a guest, also include the host's name + photo.
         if (pd.organizer_household_id !== hhId) {
           const { data: om } = await supabase
-            .from("household_members").select("parents(name)").eq("household_id", pd.organizer_household_id);
-          for (const m of (om || [])) if (m.parents?.name) guestNames.push(m.parents.name);
+            .from("household_members").select("parents(name, photo_url)").eq("household_id", pd.organizer_household_id);
+          for (const m of (om || [])) {
+            if (m.parents?.name) {
+              guestNames.push(m.parents.name);
+              if (!guestPeople.some((p) => p.name === m.parents.name)) {
+                guestPeople.push({ name: m.parents.name, photo_url: m.parents.photo_url });
+              }
+            }
+          }
         }
 
         const dateStr = new Date(pd.proposed_date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
@@ -142,7 +160,7 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
         ].filter(Boolean).join(" ").toLowerCase();
 
         if (haystack.includes(term)) {
-          enriched.push({ ...pd, guestNames, dateStr });
+          enriched.push({ ...pd, guestNames, guestPeople, dateStr });
         }
       }
       enriched.sort((a, b) => new Date(b.proposed_date) - new Date(a.proposed_date));
@@ -419,10 +437,19 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
                       <Icon name="location_on" size={15} style={{ verticalAlign: "-3px", marginRight: 2 }} />{ev.location_name}{ev.location_address ? ` — ${ev.location_address}` : ""}
                     </p>
                   )}
-                  {ev.guestNames && ev.guestNames.length > 0 && (
-                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: "4px 0 0" }}>
-                      With {ev.guestNames.slice(0, 4).join(", ")}{ev.guestNames.length > 4 ? ` +${ev.guestNames.length - 4} more` : ""}
-                    </p>
+                  {ev.guestPeople && ev.guestPeople.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center" }}>
+                        {ev.guestPeople.slice(0, 5).map((g, gi) => (
+                          <div key={gi} title={g.name} style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#028090", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", fontSize: "0.72rem", border: "2px solid #162D50", marginLeft: gi === 0 ? 0 : "-8px", flexShrink: 0 }}>
+                            {g.photo_url ? <img src={g.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (g.name?.charAt(0) || "?")}
+                          </div>
+                        ))}
+                      </div>
+                      <span style={{ color: "#607080", fontSize: "0.78rem" }}>
+                        {ev.guestNames.slice(0, 3).map((n) => n.split(/\s+/)[0]).join(", ")}{ev.guestNames.length > 3 ? ` +${ev.guestNames.length - 3}` : ""}
+                      </span>
+                    </div>
                   )}
                   {ev.note && (
                     <p style={{ color: "#607080", fontSize: "0.78rem", margin: "4px 0 0", fontStyle: "italic" }}>"{ev.note}"</p>
