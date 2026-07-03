@@ -57,15 +57,32 @@ export default function Journey({ session, onBack }) {
         const startMonth = earliestStartMonth(startMonths);
 
         // Count classmates per membership (families huddled with that year).
+        // One batched query instead of a per-classroom count loop: fetch all
+        // members of the relevant classrooms, then tally in memory.
         const classmateCounts = {};
-        for (const m of (memberships || [])) {
-          const { count } = await supabase
+        const classroomIds = [...new Set(
+          (memberships || []).map((m) => m.classrooms?.id).filter(Boolean)
+        )];
+        if (classroomIds.length > 0) {
+          const { data: allMembers } = await supabase
             .from("classroom_members")
-            .select("household_id", { count: "exact", head: true })
-            .eq("classroom_id", m.classrooms?.id)
-            .eq("school_year", m.school_year)
-            .neq("household_id", hhId);
-          classmateCounts[m.id] = count || 0;
+            .select("classroom_id, school_year, household_id")
+            .in("classroom_id", classroomIds);
+
+          // Tally distinct OTHER households per (classroom_id + school_year).
+          const tally = {}; // key: `${classroom_id}|${school_year}` -> Set of household_ids
+          for (const row of (allMembers || [])) {
+            if (row.household_id === hhId) continue; // exclude self
+            const key = `${row.classroom_id}|${row.school_year}`;
+            if (!tally[key]) tally[key] = new Set();
+            tally[key].add(row.household_id);
+          }
+
+          // Map each membership to its count.
+          for (const m of (memberships || [])) {
+            const key = `${m.classrooms?.id}|${m.school_year}`;
+            classmateCounts[m.id] = tally[key] ? tally[key].size : 0;
+          }
         }
 
         // 2) Playdates + birthday parties this household was part of (as host or invitee).
