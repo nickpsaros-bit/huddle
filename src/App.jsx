@@ -14,6 +14,7 @@ import Playdates from "./Playdates";
 import InviteLanding from "./InviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
 import Journey from "./Journey";
+import Birthdays from "./Birthdays";
 import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
@@ -328,12 +329,13 @@ export default function App() {
 
     const { data: myInv } = await supabase
       .from("playdate_invites")
-      .select("rsvp, playdates(proposed_date, organizer_household_id, status)")
+      .select("rsvp, playdates(proposed_date, organizer_household_id, status, event_type)")
       .eq("household_id", myHh.household_id);
 
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
+      if (pd.event_type === "birthday") continue; // birthdays counted in the Birthdays tab
       if (pd.organizer_household_id === myHh.household_id) continue;
       if (new Date(pd.proposed_date).getTime() < nowMs) continue;
       if (inv.rsvp === "invited") unrepliedCount++;
@@ -343,11 +345,12 @@ export default function App() {
 
     const { data: hosting } = await supabase
       .from("playdates")
-      .select("proposed_date, status")
+      .select("proposed_date, status, event_type")
       .eq("organizer_household_id", myHh.household_id)
       .gte("proposed_date", new Date(nowMs).toISOString());
 
     for (const pd of (hosting || [])) {
+      if (pd.event_type === "birthday") continue; // birthdays counted in the Birthdays tab
       upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
     }
 
@@ -437,6 +440,8 @@ export default function App() {
     screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} />;
   } else if (activeTab === "playdates") {
     screen = <Playdates session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} />;
+  } else if (activeTab === "birthdays") {
+    screen = <Birthdays session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} />;
   } else {
     screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
   }

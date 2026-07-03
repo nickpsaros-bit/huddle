@@ -210,6 +210,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       .eq("organizer_household_id", hhId);
 
     for (const pd of (hosting || [])) {
+      if (pd.event_type === "birthday") continue; // birthdays live in the Birthdays tab
       const { data: invites } = await supabase
         .from("playdate_invites")
         .select("*")
@@ -240,6 +241,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     for (const inv of (myInvites || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
+      if (pd.event_type === "birthday") continue; // birthdays live in the Birthdays tab
       if (pd.organizer_household_id === hhId) continue;
       let organizerLabel = await householdLabel(pd.organizer_household_id);
       if (pd.organizer_parent_id) {
