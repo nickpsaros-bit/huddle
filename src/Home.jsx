@@ -442,8 +442,21 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     setNewTeacherResults([]);
     setNewTeacher("");
     if (query.length < 2) { setNewSchoolResults([]); setShowNewSchoolDropdown(false); return; }
-    const { data } = await supabase.from("schools").select("*").ilike("name", `%${query}%`).limit(5);
-    setNewSchoolResults(data || []);
+    const noise = /\b(elementary|elem|school|academy|the|of|charter|primary|middle|high|k-?8|stem)\b/gi;
+    const core = query.toLowerCase().replace(noise, "").replace(/[^a-z0-9 ]/g, "").trim();
+    const terms = core.split(/\s+/).filter((t) => t.length >= 2);
+    const { data } = await supabase
+      .from("schools").select("*")
+      .ilike("name", `%${(terms[0] || query).slice(0, 20)}%`).limit(25);
+    let ranked = (data || []);
+    if (terms.length > 0) {
+      ranked = ranked
+        .map((s) => ({ s, hits: terms.filter((t) => (s.name || "").toLowerCase().includes(t)).length }))
+        .filter((r) => r.hits > 0)
+        .sort((a, b) => b.hits - a.hits)
+        .map((r) => r.s);
+    }
+    setNewSchoolResults(ranked.slice(0, 6));
     setShowNewSchoolDropdown(true);
   };
 

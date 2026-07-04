@@ -82,8 +82,33 @@ export default function Profile({ session, onComplete }) {
     setTeacherResults([]);
     setTeacher("");
     if (query.length < 2) { setSchoolResults([]); setShowSchoolDropdown(false); return; }
-    const { data } = await supabase.from("schools").select("*").ilike("name", `%${query}%`).limit(5);
-    setSchoolResults(data || []);
+    // Normalize: drop common noise words + punctuation so "sun valley",
+    // "Sun Valley Elementary", "sun valley school" all surface the same record.
+    // This steers users to PICK an existing school instead of creating a near-duplicate.
+    const noise = /\b(elementary|elem|school|academy|the|of|charter|primary|middle|high|k-?8|stem)\b/gi;
+    const core = query.toLowerCase().replace(noise, "").replace(/[^a-z0-9 ]/g, "").trim();
+    const terms = core.split(/\s+/).filter((t) => t.length >= 2);
+
+    // Pull a broad candidate set, then rank by how many query terms match.
+    const { data } = await supabase
+      .from("schools")
+      .select("*")
+      .ilike("name", `%${(terms[0] || query).slice(0, 20)}%`)
+      .limit(25);
+
+    let ranked = (data || []);
+    if (terms.length > 0) {
+      ranked = ranked
+        .map((s) => {
+          const n = (s.name || "").toLowerCase();
+          const hits = terms.filter((t) => n.includes(t)).length;
+          return { s, hits };
+        })
+        .filter((r) => r.hits > 0)
+        .sort((a, b) => b.hits - a.hits)
+        .map((r) => r.s);
+    }
+    setSchoolResults(ranked.slice(0, 6));
     setShowSchoolDropdown(true);
   };
 
@@ -316,6 +341,11 @@ export default function Profile({ session, onComplete }) {
                 style={{ ...inputStyle, marginBottom: 0 }} />
               {showSchoolDropdown && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1A3A5C", borderRadius: "0 0 10px 10px", border: "1px solid #2A4A6B", borderTop: "none", zIndex: 10 }}>
+                  {schoolResults.length > 0 && (
+                    <div style={{ padding: "0.5rem 1rem 0.25rem", color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "600" }}>
+                      Is your school one of these? Tap to select it.
+                    </div>
+                  )}
                   {schoolResults.map(school => (
                     <div key={school.id} onClick={() => selectSchool(school)}
                       style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#FFFFFF", fontSize: "0.9rem", borderBottom: "1px solid #2A4A6B" }}>
@@ -323,8 +353,10 @@ export default function Profile({ session, onComplete }) {
                     </div>
                   ))}
                   <div onClick={() => { setSelectedSchool(null); setShowSchoolDropdown(false); }}
-                    style={{ padding: "0.75rem 1rem", cursor: "pointer", color: "#8AAEC8", fontSize: "0.85rem" }}>
-                    + Add "{schoolSearch}" as a new school
+                    style={{ padding: "0.75rem 1rem", cursor: "pointer", color: schoolResults.length > 0 ? "#607080" : "#02C39A", fontSize: "0.82rem", fontWeight: schoolResults.length > 0 ? "400" : "600" }}>
+                    {schoolResults.length > 0
+                      ? `Not listed? + Add "${schoolSearch}" as new`
+                      : `+ Add "${schoolSearch}" as a new school`}
                   </div>
                 </div>
               )}
