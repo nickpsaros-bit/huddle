@@ -125,9 +125,27 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         .eq("status", "accepted");
       const connections = (conns || []).length;
 
-      setStats({ playdates, bdaysAttended, bdaysHosted, connections, classrooms });
+      // Birthday wishes I've sent (rewards kindness/generosity).
+      let wishesSent = 0;
+      try {
+        const { count } = await supabase
+          .from("birthday_wishes")
+          .select("id", { count: "exact", head: true })
+          .eq("wisher_id", userId);
+        wishesSent = count || 0;
+      } catch (e) { /* table may vary */ }
+
+      // Member since (from the parents row created_at).
+      let memberSince = null;
+      try {
+        const { data: p } = await supabase
+          .from("parents").select("created_at").eq("id", userId).maybeSingle();
+        if (p?.created_at) memberSince = p.created_at;
+      } catch (e) { /* best-effort */ }
+
+      setStats({ playdates, bdaysAttended, bdaysHosted, connections, classrooms, wishesSent, memberSince });
     } catch (e) {
-      setStats({ playdates: 0, bdaysAttended: 0, bdaysHosted: 0, connections: 0, classrooms: 0 });
+      setStats({ playdates: 0, bdaysAttended: 0, bdaysHosted: 0, connections: 0, classrooms: 0, wishesSent: 0, memberSince: null });
     }
   };
 
@@ -690,6 +708,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
             { icon: "cake", value: stats.bdaysHosted, label: stats.bdaysHosted === 1 ? "party hosted" : "parties hosted" },
             { icon: "celebration", value: stats.bdaysAttended, label: stats.bdaysAttended === 1 ? "birthday attended" : "birthdays attended" },
             { icon: "favorite", value: stats.connections, label: stats.connections === 1 ? "family connected" : "families connected" },
+            { icon: "volunteer_activism", value: stats.wishesSent, label: stats.wishesSent === 1 ? "birthday wish sent" : "birthday wishes sent" },
             { icon: "school", value: stats.classrooms, label: stats.classrooms === 1 ? "classroom" : "classrooms" },
           ];
           return (
@@ -717,7 +736,13 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
                     </div>
                   ))}
                 </div>
-                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.85rem 0 0", textAlign: "center" }}>
+                {stats.memberSince && (
+                  <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0.9rem 0 0", textAlign: "center" }}>
+                    <Icon name="favorite" size={13} color="#8AAEC8" style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    Part of the community since {new Date(stats.memberSince).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  </p>
+                )}
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.5rem 0 0", textAlign: "center" }}>
                   Just for you — this is only visible on your own profile.
                 </p>
               </div>
