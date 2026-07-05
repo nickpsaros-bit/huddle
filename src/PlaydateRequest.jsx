@@ -715,7 +715,7 @@ export default function PlaydateRequest({ session, recipient, recipients, onBack
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
         <div style={{ textAlign: "center", maxWidth: "340px" }}>
-          <div style={{ fontSize: "3.5rem", margin: "0 0 1rem" }}>{isBirthday ? "🎂" : "🎉"}</div>
+          <div style={{ fontSize: "3.5rem", margin: "0 0 1rem", animation: "huddlePop 450ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>{isBirthday ? "🎂" : "🎉"}</div>
           <h2 style={{ color: accent, fontSize: "1.5rem", fontWeight: "700", margin: "0 0 0.5rem" }}>{isEditing ? "Changes saved!" : "Invite sent!"}</h2>
           <p style={{ color: "#8AAEC8", fontSize: "0.95rem", margin: "0 0 1.75rem", lineHeight: "1.5" }}>
             {isEditing && editSummary

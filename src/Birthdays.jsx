@@ -737,8 +737,8 @@ export default function Birthdays({
 
       {/* Birthday action menu */}
       {activeBday && (
-        <div onClick={() => setActiveBday(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#162D50", borderTopLeftRadius: "20px", borderTopRightRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "600px", borderTop: "2px solid #7C5CBF" }}>
+        <div onClick={() => setActiveBday(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "huddleFadeInUp 160ms ease both" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#162D50", borderTopLeftRadius: "20px", borderTopRightRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "600px", borderTop: "2px solid #7C5CBF", animation: "huddleSlideUp 260ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
             <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
               <div style={{ fontSize: "2rem" }}>🎂</div>
               <p style={{ color: "#FFFFFF", fontSize: "1.05rem", fontWeight: "700", margin: "0.25rem 0 0" }}>
@@ -775,7 +775,7 @@ export default function Birthdays({
       {/* Connect-on-accept prompt */}
       {connectPrompt && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
-          <div style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "16px", padding: "1.5rem", maxWidth: "360px", width: "100%" }}>
+          <div style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "16px", padding: "1.5rem", maxWidth: "360px", width: "100%", animation: "huddleScaleIn 200ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
             <p style={{ margin: "0 0 0.75rem", textAlign: "center" }}><Icon name="group_add" size={40} color="#7C5CBF" /></p>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: "0 0 0.5rem", textAlign: "center" }}>
               Connect with {connectPrompt.hostName}?

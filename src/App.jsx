@@ -15,6 +15,7 @@ import InviteLanding from "./InviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
 import Journey from "./Journey";
 import Birthdays from "./Birthdays";
+import FadeIn from "./FadeIn";
 import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
@@ -461,7 +462,9 @@ export default function App() {
   return (
     <div>
       <div style={{ paddingBottom: "70px" }}>
-        {screen}
+        <FadeIn key={activeTab} variant="up" speed="fast">
+          {screen}
+        </FadeIn>
       </div>
       <NavBar
         active={activeTab}
