@@ -145,32 +145,42 @@ export default function Birthdays({
         .select("*, playdates(*)")
         .eq("household_id", hhId);
 
-      const bdayInvites = [];
-      for (const inv of (myInv || [])) {
+      // Figure out which invites qualify, then BATCH-load all organizer names at once.
+      const qualifyingInvites = (myInv || []).filter((inv) => {
         const pd = inv.playdates;
-        if (!pd) continue;
-        if (pd.event_type !== "birthday") continue;
-        if (pd.organizer_household_id === hhId) continue;
-        if (new Date(pd.proposed_date).getTime() < Date.now()) continue;
-        // organizer label
-        // Build the host label from ALL parents in the household (e.g. "Nick & Angi"),
-        // so the recipient recognizes the family and trusts the invite.
-        let organizerLabel = "A family";
-        const { data: orgMembers } = await supabase
+        if (!pd) return false;
+        if (pd.event_type !== "birthday") return false;
+        if (pd.organizer_household_id === hhId) return false;
+        if (new Date(pd.proposed_date).getTime() < Date.now()) return false;
+        return true;
+      });
+
+      // One batched query: all members of all organizer households.
+      const orgHhIds = [...new Set(qualifyingInvites.map((inv) => inv.playdates.organizer_household_id))];
+      const namesByHh = {};
+      if (orgHhIds.length > 0) {
+        const { data: orgMembersAll } = await supabase
           .from("household_members")
-          .select("parent_id")
-          .eq("household_id", pd.organizer_household_id);
-        const orgIds = (orgMembers || []).map((m) => m.parent_id).filter(Boolean);
-        if (orgIds.length > 0) {
-          const { data: orgParents } = await supabase
-            .from("parents").select("name").in("id", orgIds);
-          const names = (orgParents || []).map((p) => (p.name || "").trim().split(/\s+/)[0]).filter(Boolean);
-          if (names.length === 1) organizerLabel = names[0];
-          else if (names.length === 2) organizerLabel = `${names[0]} & ${names[1]}`;
-          else if (names.length > 2) organizerLabel = `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+          .select("household_id, parents(name)")
+          .in("household_id", orgHhIds);
+        for (const row of (orgMembersAll || [])) {
+          const first = (row.parents?.name || "").trim().split(/\s+/)[0];
+          if (first) (namesByHh[row.household_id] = namesByHh[row.household_id] || []).push(first);
         }
-        bdayInvites.push({ invite: inv, playdate: pd, organizerLabel });
       }
+      const labelFor = (hhIdKey) => {
+        const names = namesByHh[hhIdKey] || [];
+        if (names.length === 0) return "A family";
+        if (names.length === 1) return names[0];
+        if (names.length === 2) return `${names[0]} & ${names[1]}`;
+        return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+      };
+
+      const bdayInvites = qualifyingInvites.map((inv) => ({
+        invite: inv,
+        playdate: inv.playdates,
+        organizerLabel: labelFor(inv.playdates.organizer_household_id),
+      }));
       bdayInvites.sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
       setInvites(bdayInvites);
 
@@ -183,29 +193,43 @@ export default function Birthdays({
         .gte("proposed_date", new Date(Date.now()).toISOString());
 
       const hostedList = [];
-      for (const pd of (myHosted || [])) {
-        const { data: pdInvites } = await supabase
+      if ((myHosted || []).length > 0) {
+        // Load ALL invites for ALL hosted parties in one query.
+        const hostedIds = myHosted.map((pd) => pd.id);
+        const { data: allInvites } = await supabase
           .from("playdate_invites")
           .select("*")
-          .eq("playdate_id", pd.id);
-        const guests = (pdInvites || []).filter((inv) => inv.household_id !== hhId);
-        const roster = [];
-        for (const inv of guests) {
-          // lightweight household label (first parent's name)
-          let label = "A family";
-          const { data: gm } = await supabase
-            .from("household_members").select("parent_id").eq("household_id", inv.household_id).limit(1);
-          if (gm && gm[0]) {
-            const { data: gp } = await supabase.from("parents").select("name").eq("id", gm[0].parent_id).maybeSingle();
-            if (gp?.name) label = gp.name;
+          .in("playdate_id", hostedIds);
+
+        // Batch-load names for every guest household across all parties.
+        const guestHhIds = [...new Set((allInvites || [])
+          .map((inv) => inv.household_id)
+          .filter((id) => id && id !== hhId))];
+        const guestNameByHh = {};
+        if (guestHhIds.length > 0) {
+          const { data: guestMembers } = await supabase
+            .from("household_members")
+            .select("household_id, parents(name)")
+            .in("household_id", guestHhIds);
+          for (const row of (guestMembers || [])) {
+            if (!guestNameByHh[row.household_id] && row.parents?.name) {
+              guestNameByHh[row.household_id] = row.parents.name;
+            }
           }
-          roster.push({ ...inv, label });
         }
-        hostedList.push({
-          playdate: pd,
-          roster,
-          goingCount: roster.filter((r) => r.rsvp === "yes").length,
-        });
+
+        for (const pd of myHosted) {
+          const guests = (allInvites || []).filter((inv) => inv.playdate_id === pd.id && inv.household_id !== hhId);
+          const roster = guests.map((inv) => ({
+            ...inv,
+            label: guestNameByHh[inv.household_id] || "A family",
+          }));
+          hostedList.push({
+            playdate: pd,
+            roster,
+            goingCount: roster.filter((r) => r.rsvp === "yes").length,
+          });
+        }
       }
       hostedList.sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
       setHosting(hostedList);
