@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
@@ -37,24 +37,36 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     return `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
   };
 
-  const householdLabel = async (hhId) => {
-    const { data } = await supabase
-      .from("household_members")
-      .select("parents(name)")
-      .eq("household_id", hhId);
-    const names = (data || []).map((m) => m.parents?.name).filter(Boolean);
+  // Synchronous lookups backed by a pre-loaded map (see loadHouseholdNames).
+  // Avoids a DB round-trip per household per guest (the big perf killer).
+  const householdNamesRef = useRef({});
+  const householdLabel = (hhId) => {
+    const names = householdNamesRef.current[hhId] || [];
     if (names.length === 0) return "A family";
     return names.map(shortName).join(" & ");
   };
 
-  const householdInitial = async (hhId) => {
+  const householdInitial = (hhId) => {
+    const names = householdNamesRef.current[hhId] || [];
+    const nm = names[0];
+    return nm ? nm.charAt(0).toUpperCase() : "?";
+  };
+
+  // Batch-load the parent names for a set of households in ONE query.
+  const loadHouseholdNames = async (hhIds) => {
+    const missing = [...new Set(hhIds)].filter((id) => id && !householdNamesRef.current[id]);
+    if (missing.length === 0) return;
     const { data } = await supabase
       .from("household_members")
-      .select("parents(name)")
-      .eq("household_id", hhId)
-      .limit(1);
-    const nm = data?.[0]?.parents?.name;
-    return nm ? nm.charAt(0).toUpperCase() : "?";
+      .select("household_id, parents(name)")
+      .in("household_id", missing);
+    const map = { ...householdNamesRef.current };
+    for (const id of missing) map[id] = map[id] || [];
+    for (const row of (data || [])) {
+      const nm = row.parents?.name;
+      if (nm) (map[row.household_id] = map[row.household_id] || []).push(nm);
+    }
+    householdNamesRef.current = map;
   };
 
   // Recompute a playdate's status from its invites and persist it.
@@ -209,20 +221,35 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       .select("*")
       .eq("organizer_household_id", hhId);
 
+    // Pre-load ALL household names we'll need in one batched query up front.
+    const hostGuestHhIds = [];
     for (const pd of (hosting || [])) {
-      if (pd.event_type === "birthday") continue; // birthdays live in the Birthdays tab
-      const { data: invites } = await supabase
-        .from("playdate_invites")
-        .select("*")
-        .eq("playdate_id", pd.id);
+      if (pd.event_type === "birthday") continue;
+    }
+    // Gather invite rosters in parallel, then batch-load their names.
+    const hostingNonBday = (hosting || []).filter((pd) => pd.event_type !== "birthday");
+    const inviteResults = await Promise.all(
+      hostingNonBday.map((pd) =>
+        supabase.from("playdate_invites").select("*").eq("playdate_id", pd.id)
+          .then((res) => ({ pd, invites: res.data || [] }))
+      )
+    );
+    for (const { invites } of inviteResults) {
+      for (const inv of invites) {
+        if (inv.household_id !== hhId) hostGuestHhIds.push(inv.household_id);
+      }
+    }
+    await loadHouseholdNames(hostGuestHhIds);
+
+    for (const { pd, invites } of inviteResults) {
       // Hide the host's own row from the displayed roster (shown separately as host).
-      const guestInvites = (invites || []).filter((inv) => inv.household_id !== hhId);
+      const guestInvites = invites.filter((inv) => inv.household_id !== hhId);
       const roster = [];
       for (const inv of guestInvites) {
         roster.push({
           ...inv,
-          label: await householdLabel(inv.household_id),
-          initial: await householdInitial(inv.household_id),
+          label: householdLabel(inv.household_id),
+          initial: householdInitial(inv.household_id),
         });
       }
       all.push({
@@ -238,12 +265,19 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       .select("*, playdates(*)")
       .eq("household_id", hhId);
 
+    // Pre-load organizer household names for invited playdates in one batch.
+    const orgHhIds = (myInvites || [])
+      .map((inv) => inv.playdates)
+      .filter((pd) => pd && pd.event_type !== "birthday" && pd.organizer_household_id !== hhId)
+      .map((pd) => pd.organizer_household_id);
+    await loadHouseholdNames(orgHhIds);
+
     for (const inv of (myInvites || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
       if (pd.event_type === "birthday") continue; // birthdays live in the Birthdays tab
       if (pd.organizer_household_id === hhId) continue;
-      let organizerLabel = await householdLabel(pd.organizer_household_id);
+      let organizerLabel = householdLabel(pd.organizer_household_id);
       if (pd.organizer_parent_id) {
         const { data: orgParent } = await supabase
           .from("parents")
@@ -514,7 +548,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       }
 
       // Host label for the message.
-      const hostLabel = await householdLabel(pd.organizer_household_id);
+      await loadHouseholdNames([pd.organizer_household_id]);
+      const hostLabel = householdLabel(pd.organizer_household_id);
       const whenStr = fmtDate(pd.proposed_date);
 
       // Parents of each un-firmed guest household.
@@ -561,7 +596,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         .eq("playdate_id", pd.id);
 
       try {
-        const hostLabel = await householdLabel(pd.organizer_household_id);
+        await loadHouseholdNames([pd.organizer_household_id]);
+        const hostLabel = householdLabel(pd.organizer_household_id);
         const whenStr = fmtDate(pd.proposed_date);
         const invitedHouseholdIds = [...new Set((invites || []).map((i) => i.household_id))]
           .filter((id) => id && id !== pd.organizer_household_id);
@@ -839,7 +875,9 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }} />
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Loading...</p>
+      </div>
     );
   }
 

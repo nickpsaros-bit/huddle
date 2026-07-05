@@ -103,19 +103,23 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
     const householdsMap = {};
     const loosePeople = [];
 
-    for (const c of connectedPeople) {
-      const { data: hm } = await supabase
+    // Batch: one query for ALL connected people's households instead of one-per-person.
+    const connectedParentIds = connectedPeople.map((c) => c.person.id);
+    const hmByParent = {};
+    if (connectedParentIds.length > 0) {
+      const { data: allHms } = await supabase
         .from("household_members")
-        .select("household_id")
-        .eq("parent_id", c.person.id)
-        .maybeSingle();
+        .select("parent_id, household_id")
+        .in("parent_id", connectedParentIds);
+      for (const row of (allHms || [])) hmByParent[row.parent_id] = row.household_id;
+    }
 
-      if (!hm) {
+    for (const c of connectedPeople) {
+      const hhId = hmByParent[c.person.id];
+      if (!hhId) {
         loosePeople.push(c);
         continue;
       }
-
-      const hhId = hm.household_id;
       if (!householdsMap[hhId]) {
         householdsMap[hhId] = { householdId: hhId, classrooms: [], members: [], _seen: new Set() };
       }
@@ -127,21 +131,17 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
     }
 
     const householdIds = Object.keys(householdsMap);
-    for (const hhId of householdIds) {
-      const { data: memberships } = await supabase
-        .from("classroom_members")
-        .select("*, classrooms(teacher_name, grade, schools(name))")
-        .eq("household_id", hhId);
-      householdsMap[hhId].classrooms = memberships || [];
-
-      const { data: allMembers } = await supabase
-        .from("household_members")
-        .select("parents(id, name, photo_url)")
-        .eq("household_id", hhId);
+    // Run each household's two queries in parallel across ALL households.
+    await Promise.all(householdIds.map(async (hhId) => {
+      const [membershipsRes, allMembersRes] = await Promise.all([
+        supabase.from("classroom_members").select("*, classrooms(teacher_name, grade, schools(name))").eq("household_id", hhId),
+        supabase.from("household_members").select("parents(id, name, photo_url)").eq("household_id", hhId),
+      ]);
+      householdsMap[hhId].classrooms = membershipsRes.data || [];
 
       const connectedById = householdsMap[hhId]._connectedById || {};
       const members = [];
-      for (const row of (allMembers || [])) {
+      for (const row of (allMembersRes.data || [])) {
         const p = row.parents;
         if (!p || !p.id) continue;
         if (p.id === userId) continue;
@@ -158,7 +158,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
         return (a.name || "").localeCompare(b.name || "");
       });
       householdsMap[hhId].members = members;
-    }
+    }));
 
     const grouped = Object.values(householdsMap)
       .map(({ _seen, _connectedById, ...rest }) => rest)
