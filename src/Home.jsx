@@ -122,18 +122,15 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const fetchData = async () => {
     setLoading(true);
 
-    const { data: parentData } = await supabase
-      .from("parents")
-      .select("*")
-      .eq("id", session.user.id)
-      .single();
+    // These three are independent — run in parallel.
+    const [parentRes, hhRes, hidden] = await Promise.all([
+      supabase.from("parents").select("*").eq("id", session.user.id).single(),
+      supabase.from("household_members").select("household_id, role").eq("parent_id", session.user.id).single(),
+      getHiddenParentIds(),
+    ]);
+    const parentData = parentRes.data;
+    const householdMember = hhRes.data;
     setParent(parentData);
-
-    const { data: householdMember } = await supabase
-      .from("household_members")
-      .select("household_id, role")
-      .eq("parent_id", session.user.id)
-      .single();
 
     if (!householdMember) {
       setLoading(false);
@@ -149,16 +146,21 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       .eq("household_id", hhId);
     setMemberships(membershipData || []);
 
-    const hidden = await getHiddenParentIds();
     const classmatesMap = {};
     const otherHouseholdIds = new Set();
-    for (const m of (membershipData || [])) {
-      const { data: otherMembers } = await supabase
-        .from("classroom_members")
-        .select("*, households(id, household_members(parent_id, parents(id, name, photo_url)))")
-        .eq("classroom_id", m.classroom_id)
-        .eq("school_year", m.school_year)
-        .neq("household_id", hhId);
+    // Run all classroom-roster queries in PARALLEL instead of one-at-a-time.
+    const rosterResults = await Promise.all(
+      (membershipData || []).map((m) =>
+        supabase
+          .from("classroom_members")
+          .select("*, households(id, household_members(parent_id, parents(id, name, photo_url)))")
+          .eq("classroom_id", m.classroom_id)
+          .eq("school_year", m.school_year)
+          .neq("household_id", hhId)
+          .then((res) => ({ m, otherMembers: res.data }))
+      )
+    );
+    for (const { m, otherMembers } of rosterResults) {
       // Hide any household containing a blocked parent (either direction).
       const visibleMembers = (otherMembers || []).filter((cm) => {
         const members = cm.households?.household_members || [];
@@ -741,7 +743,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }} />
+      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Loading...</p>
+      </div>
     );
   }
 
