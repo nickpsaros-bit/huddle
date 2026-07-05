@@ -26,8 +26,6 @@ export default function Profile({ session, onComplete }) {
   const [householdId, setHouseholdId] = useState(null);
   const [photoUrl, setPhotoUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [coParentEmail, setCoParentEmail] = useState("");
-  const [coParentMsg, setCoParentMsg] = useState("");
   const [bdayMonth, setBdayMonth] = useState("");
   const [bdayDay, setBdayDay] = useState("");
   const [bdayLabel, setBdayLabel] = useState("");
@@ -222,23 +220,6 @@ export default function Profile({ session, onComplete }) {
       setError(err.message);
     }
     setUploading(false);
-  };
-
-  const inviteCoParent = async () => {
-    const email = coParentEmail.trim().toLowerCase();
-    if (!/^\S+@\S+\.\S+$/.test(email)) { setCoParentMsg("Please enter a valid email."); return; }
-    setCoParentMsg("");
-    try {
-      // Lightweight: send a co-parent invite by email (they'll link on signup).
-      // Full co-parent linking also lives in Profile later.
-      await supabase.functions.invoke("send-invite", {
-        body: { email, inviter_id: session.user.id, kind: "coparent" },
-      }).catch(() => {});
-      setCoParentMsg(`Invite sent to ${email}! They can join your household when they sign up.`);
-      setCoParentEmail("");
-    } catch (e) {
-      setCoParentMsg("Couldn't send the invite, but you can add a co-parent later in your profile.");
-    }
   };
 
   const addBirthdayInline = async () => {
@@ -445,25 +426,24 @@ export default function Profile({ session, onComplete }) {
           </div>
         )}
 
-        {/* Step 4: Co-parent (skippable) */}
+        {/* Step 4: Co-parent (skippable, informational) */}
         {step === 4 && (
           <div>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>Add a co-parent?</h2>
-            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem" }}>If you share parenting with a partner, invite them to your household so you're both in the loop. Optional — you can do this anytime.</p>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", fontWeight: "500", margin: "0 0 0.5rem" }}>Share with a co-parent?</h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>If you share parenting with a partner, you can link them to your household so you're both in the loop on playdates and invites.</p>
 
-            <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Co-parent's email</label>
-            <input type="email" placeholder="partner@email.com" value={coParentEmail}
-              onChange={(e) => { setCoParentEmail(e.target.value); setCoParentMsg(""); }}
-              style={inputStyle} />
-            {coParentMsg && <p style={{ color: "#02C39A", fontSize: "0.82rem", marginBottom: "1rem" }}>{coParentMsg}</p>}
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", padding: "1.1rem 1.25rem", marginBottom: "1.5rem" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                <Icon name="diversity_3" size={22} color="#02C39A" />
+                <p style={{ color: "#B8CCE0", fontSize: "0.88rem", margin: 0, lineHeight: "1.5" }}>
+                  Once your co-parent has joined Huddle, you can link them anytime from <strong style={{ color: "#FFFFFF" }}>your profile</strong> → <strong style={{ color: "#FFFFFF" }}>Link a co-parent</strong>. We'll help you find them.
+                </p>
+              </div>
+            </div>
 
-            <button onClick={inviteCoParent} disabled={!coParentEmail}
-              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: coParentEmail ? "#02C39A" : "#2A4A6B", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: coParentEmail ? "pointer" : "not-allowed", marginBottom: "0.75rem" }}>
-              Send invite
-            </button>
             <button onClick={() => { setError(""); setStep(5); }}
-              style={{ width: "100%", padding: "0.6rem", borderRadius: "10px", border: "none", background: "transparent", color: "#8AAEC8", fontSize: "0.9rem", cursor: "pointer" }}>
-              {coParentMsg ? "Continue →" : "Skip for now"}
+              style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "1rem", fontWeight: "600", cursor: "pointer", marginBottom: "0.75rem" }}>
+              Got it, continue →
             </button>
           </div>
         )}
