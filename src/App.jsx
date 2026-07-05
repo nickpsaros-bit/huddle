@@ -462,7 +462,7 @@ export default function App() {
   return (
     <div>
       <div style={{ paddingBottom: "70px" }}>
-        <FadeIn key={activeTab} variant="up" speed="fast">
+        <FadeIn key={activeTab} variant="up" speed="normal">
           {screen}
         </FadeIn>
       </div>

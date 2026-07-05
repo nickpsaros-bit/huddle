@@ -10,7 +10,7 @@ function ensureKeyframes() {
   style.setAttribute("data-huddle-anim", "true");
   style.textContent = `
     @keyframes huddleFadeInUp {
-      from { opacity: 0; transform: translateY(8px); }
+      from { opacity: 0; transform: translateY(16px); }
       to   { opacity: 1; transform: translateY(0); }
     }
     @keyframes huddleScaleIn {
@@ -33,7 +33,7 @@ function ensureKeyframes() {
   document.head.appendChild(style);
 }
 
-const DURATIONS = { fast: 180, normal: 240, slow: 320 };
+const DURATIONS = { fast: 280, normal: 340, slow: 420 };
 
 /**
  * FadeIn — snappy, subtle entrance. Wrap any content.
