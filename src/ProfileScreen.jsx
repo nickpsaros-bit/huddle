@@ -15,6 +15,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   const [memberships, setMemberships] = useState([]);
   const [householdMembers, setHouseholdMembers] = useState([]);
   const [householdId, setHouseholdId] = useState(null);
+  const [stats, setStats] = useState(null); // { playdates, bdaysAttended, bdaysHosted, connections, classrooms }
   const [confirm, setConfirm] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
  const [prefs, setPrefs] = useState({
@@ -48,6 +49,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
   useEffect(() => {
     fetchProfile();
     fetchFamily();
+    fetchStats();
   }, []);
 
   // Privacy-safe short name: "Nick Psaros" -> "Nick P."
@@ -70,6 +72,63 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
     setParent(data);
     setNewName(data?.name || "");
     setLoading(false);
+  };
+
+  // Your personal activity tally — private, shown only to you.
+  const fetchStats = async () => {
+    try {
+      const userId = session.user.id;
+      const { data: hm } = await supabase
+        .from("household_members").select("household_id").eq("parent_id", userId).maybeSingle();
+      const hhId = hm?.household_id;
+      const nowMs = Date.now();
+
+      let playdates = 0, bdaysAttended = 0, bdaysHosted = 0, classrooms = 0;
+
+      if (hhId) {
+        // Events I hosted (past, non-cancelled).
+        const { data: hosted } = await supabase
+          .from("playdates")
+          .select("event_type, proposed_date, status")
+          .eq("organizer_household_id", hhId);
+        for (const pd of (hosted || [])) {
+          if (pd.status === "cancelled") continue;
+          if (new Date(pd.proposed_date).getTime() > nowMs) continue;
+          if (pd.event_type === "birthday") bdaysHosted++;
+          else playdates++;
+        }
+
+        // Events I attended (accepted invites, past, non-cancelled).
+        const { data: myInvites } = await supabase
+          .from("playdate_invites")
+          .select("rsvp, playdates(event_type, proposed_date, status, organizer_household_id)")
+          .eq("household_id", hhId);
+        for (const inv of (myInvites || [])) {
+          const pd = inv.playdates;
+          if (!pd || inv.rsvp !== "yes") continue;
+          if (pd.status === "cancelled") continue;
+          if (pd.organizer_household_id === hhId) continue; // don't double-count my own
+          if (new Date(pd.proposed_date).getTime() > nowMs) continue;
+          if (pd.event_type === "birthday") bdaysAttended++;
+          else playdates++;
+        }
+
+        const { data: cms } = await supabase
+          .from("classroom_members").select("id").eq("household_id", hhId);
+        classrooms = (cms || []).length;
+      }
+
+      const { data: conns } = await supabase
+        .from("connections")
+        .select("id")
+        .or(`requester_id.eq.${userId},recipient_id.eq.${userId}`)
+        .eq("status", "accepted");
+      const connections = (conns || []).length;
+
+      setStats({ playdates, bdaysAttended, bdaysHosted, connections, classrooms });
+    } catch (e) {
+      setStats({ playdates: 0, bdaysAttended: 0, bdaysHosted: 0, connections: 0, classrooms: 0 });
+    }
   };
 
   // Your classrooms + household members (the "about my family" data) + pet prefs.
@@ -349,6 +408,7 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
           .eq("household_id", person.household_id);
         const rows = (targetMembers || []).map((m) => ({
           recipient_id: m.parent_id,
+          actor_id: session.user.id,
           type: "household_join_request",
           title: "Household link request 🏡",
           body: `${myLabel} wants to join your household. Open your notifications to approve.`,
@@ -622,8 +682,54 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
           )}
         </div>
 
+        {/* YOUR HUDDLE JOURNEY (private activity tally) */}
+        {stats && (() => {
+          const total = stats.playdates + stats.bdaysAttended + stats.bdaysHosted;
+          const items = [
+            { icon: "diversity_3", value: stats.playdates, label: stats.playdates === 1 ? "playdate" : "playdates", verb: "set up & joined" },
+            { icon: "cake", value: stats.bdaysHosted, label: stats.bdaysHosted === 1 ? "party hosted" : "parties hosted" },
+            { icon: "celebration", value: stats.bdaysAttended, label: stats.bdaysAttended === 1 ? "birthday attended" : "birthdays attended" },
+            { icon: "favorite", value: stats.connections, label: stats.connections === 1 ? "family connected" : "families connected" },
+            { icon: "school", value: stats.classrooms, label: stats.classrooms === 1 ? "classroom" : "classrooms" },
+          ];
+          return (
+            <div style={{ marginBottom: "1.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+                <Icon name="auto_awesome" size={18} color="#8AAEC8" />
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>YOUR HUDDLE JOURNEY</p>
+              </div>
+              <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", padding: "1.1rem 1.25rem" }}>
+                <p style={{ color: "#FFFFFF", fontSize: "0.95rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
+                  {total === 0
+                    ? "Your first playdate is just around the corner 🌱 Every great connection starts with one hello."
+                    : total < 5
+                    ? "You're off to a lovely start 🌟 Look at the community you're building."
+                    : "Look at everything you've made happen 🎉 Your family is a real part of this community."}
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  {items.map((it, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", background: "#0F2044", borderRadius: "10px", padding: "0.7rem 0.85rem" }}>
+                      <Icon name={it.icon} size={22} color="#02C39A" />
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: 0, lineHeight: 1.1 }}>{it.value}</p>
+                        <p style={{ color: "#8AAEC8", fontSize: "0.72rem", margin: "1px 0 0", lineHeight: 1.2 }}>{it.label}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0.85rem 0 0", textAlign: "center" }}>
+                  Just for you — this is only visible on your own profile.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* YOUR CLASSROOMS */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="school" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>YOUR CLASSROOMS</p>
+        </div>
         {memberships.length === 0 ? (
           <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", padding: "1rem 1.25rem", marginBottom: "1rem" }}>
             <p style={{ color: "#607080", fontSize: "0.85rem", margin: 0 }}>No classrooms yet.</p>
@@ -650,7 +756,10 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         )}
 
         {/* YOUR HOUSEHOLD */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "1.5rem 0 0.75rem" }}>
+          <Icon name="home" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>YOUR HOUSEHOLD</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.75rem", overflow: "hidden" }}>
           {householdMembers.length === 0 ? (
             <div style={{ padding: "1rem 1.25rem" }}>
@@ -759,7 +868,10 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         )}
 
         {/* PETS & PLAYDATE PREFERENCES (household-level) */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>PETS & PLAYDATE PREFERENCES</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "1.5rem 0 0.75rem" }}>
+          <Icon name="pets" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>PETS & PLAYDATE PREFERENCES</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
 
           <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Pets in your household</p>
@@ -796,7 +908,10 @@ export default function ProfileScreen({ session, onBack, onOpenSettings }) {
         </div>
 
         {/* BIRTHDAYS (household attribute — month/day only, optional label) */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "1.5rem 0 0.75rem", letterSpacing: "0.05em" }}>BIRTHDAYS</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "1.5rem 0 0.75rem" }}>
+          <Icon name="cake" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>BIRTHDAYS</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1rem", padding: "1.25rem" }}>
           <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>Birthdays in your family 🎂</p>
           <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem", lineHeight: "1.4" }}>
