@@ -487,38 +487,38 @@ export default function Settings({ session, onBack }) {
           </div>
         )}
 
-        {/* FASTER SIGN-IN */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
-          <div style={{ padding: "1.25rem", borderBottom: passkeys.length > 0 ? "1px solid #2A4A6B" : "none" }}>
-            <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: "0 0 0.25rem" }}>🔐 Face ID / Touch ID</p>
-            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 0.85rem", lineHeight: "1.4" }}>
-              Turn on Face ID for this device to sign back in with a tap — no email link needed next time.
-            </p>
-            <Button variant="secondary" onClick={addPasskey} disabled={passkeyBusy}
-              style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
-              {passkeyBusy ? "Setting up..." : "Set up Face ID on this device"}
-            </Button>
-            {passkeyMsg && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "0.6rem 0 0" }}>{passkeyMsg}</p>}
-          </div>
-          {passkeys.map((pk) => (
-            <div key={pk.id} style={{ padding: "0.85rem 1.25rem", borderTop: "1px solid #2A4A6B", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "0 0 2px" }}>{pk.friendly_name || "Passkey"}</p>
-                <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0 }}>
-                  Added {pk.created_at ? new Date(pk.created_at).toLocaleDateString() : ""}
-                </p>
-              </div>
-              <button onClick={() => removePasskey(pk.id)} disabled={passkeyBusy}
-                style={{ background: "transparent", border: "none", color: "#F87171", fontSize: "0.8rem", cursor: "pointer", minHeight: "44px" }}>
-                Remove
-              </button>
+        {/* ADMIN (only visible to admins) */}
+        {parent?.is_admin && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+              <Icon name="shield_person" size={18} color="#02C39A" />
+              <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em", fontWeight: "600" }}>ADMIN</p>
             </div>
-          ))}
-        </div>
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+              <div onClick={openAdminBugs}
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📋 Bug Reports</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review what users have reported</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+              <div onClick={openAdminReports}
+                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🛡️ Safety Reports</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review reports about people</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+            </div>
+          </>
+        )}
 
-        {/* ACCOUNT */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>ACCOUNT</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="account_circle" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>ACCOUNT</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
           <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 4px", letterSpacing: "0.05em" }}>EMAIL</p>
@@ -532,8 +532,67 @@ export default function Settings({ session, onBack }) {
           </div>
         </div>
 
-        {/* NOTIFICATIONS */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="fingerprint" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
+        </div>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
+          <div style={{ padding: "1.25rem", borderBottom: passkeys.length > 0 ? "1px solid #2A4A6B" : "none" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>🔐 Face ID / Touch ID</p>
+              {passkeys.length > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#0F3D2E", color: "#02C39A", fontSize: "0.72rem", fontWeight: "700", padding: "3px 10px", borderRadius: "999px", flexShrink: 0 }}>
+                  <Icon name="check_circle" size={13} color="#02C39A" />ON
+                </span>
+              )}
+            </div>
+            {passkeys.length === 0 ? (
+              <>
+                <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0.25rem 0 0.85rem", lineHeight: "1.4" }}>
+                  Turn on Face ID for this device to sign back in with a tap — no email link needed next time.
+                </p>
+                <Button variant="secondary" onClick={addPasskey} disabled={passkeyBusy}
+                  style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
+                  {passkeyBusy ? "Setting up..." : "Set up Face ID on this device"}
+                </Button>
+              </>
+            ) : (
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0.25rem 0 0", lineHeight: "1.4" }}>
+                You can sign back in with a tap on the device{passkeys.length > 1 ? "s" : ""} below.
+              </p>
+            )}
+            {passkeyMsg && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "0.6rem 0 0" }}>{passkeyMsg}</p>}
+          </div>
+          {passkeys.map((pk) => (
+            <div key={pk.id} style={{ padding: "0.85rem 1.25rem", borderTop: "1px solid #2A4A6B", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "0 0 2px" }}>{pk.friendly_name || "This device"}</p>
+                <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0 }}>
+                  Added {pk.created_at ? new Date(pk.created_at).toLocaleDateString() : ""}
+                </p>
+              </div>
+              <button onClick={() => removePasskey(pk.id)} disabled={passkeyBusy}
+                style={{ background: "transparent", border: "none", color: "#F87171", fontSize: "0.8rem", cursor: "pointer", minHeight: "44px" }}>
+                Remove
+              </button>
+            </div>
+          ))}
+          {passkeys.length > 0 && (
+            <div style={{ padding: "0.85rem 1.25rem", borderTop: "1px solid #2A4A6B" }}>
+              <button onClick={addPasskey} disabled={passkeyBusy}
+                style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "0.82rem", fontWeight: "600", cursor: passkeyBusy ? "default" : "pointer", padding: 0, minHeight: "32px" }}>
+                {passkeyBusy ? "Setting up..." : "+ Add this device"}
+              </button>
+            </div>
+          )}
+        </div>
+
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="notifications" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>NOTIFICATIONS</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", padding: "1.25rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
             <div style={{ flex: 1 }}>
@@ -577,8 +636,11 @@ export default function Settings({ session, onBack }) {
           </div>
         </div>
 
-        {/* PRIVACY */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>PRIVACY</p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="shield" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>PRIVACY & SAFETY</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", padding: "1.25rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
             <div style={{ flex: 1 }}>
@@ -595,8 +657,22 @@ export default function Settings({ session, onBack }) {
           </div>
         </div>
 
-        {/* REPORT A PROBLEM */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>HELP</p>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+          <div onClick={openBlocked}
+            style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>Blocked families</p>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Manage who you've blocked</p>
+            </div>
+            <Icon name="chevron_right" size={22} color="#02C39A" />
+          </div>
+        </div>
+
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="help" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>HELP</p>
+        </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
           {!bugOpen ? (
             <div onClick={() => setBugOpen(true)}
@@ -632,45 +708,10 @@ export default function Settings({ session, onBack }) {
           )}
         </div>
 
-        {/* ADMIN (only visible to admins) */}
-        {parent?.is_admin && (
-          <>
-            <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>ADMIN</p>
-            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
-              <div onClick={openAdminBugs}
-                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📋 Bug Reports</p>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review what users have reported</p>
-                </div>
-                <Icon name="chevron_right" size={22} color="#02C39A" />
-              </div>
-              <div onClick={openAdminReports}
-                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🛡️ Safety Reports</p>
-                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review reports about people</p>
-                </div>
-                <Icon name="chevron_right" size={22} color="#02C39A" />
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* LEGAL */}
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>SAFETY</p>
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
-          <div onClick={openBlocked}
-            style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>Blocked families</p>
-              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Manage who you've blocked</p>
-            </div>
-            <Icon name="chevron_right" size={22} color="#02C39A" />
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
+          <Icon name="gavel" size={18} color="#8AAEC8" />
+          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>LEGAL</p>
         </div>
-
-        <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>LEGAL</p>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
           <div onClick={() => setView("terms")}
             style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
