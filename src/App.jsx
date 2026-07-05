@@ -15,7 +15,7 @@ import InviteLanding from "./InviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
 import Journey from "./Journey";
 import Birthdays from "./Birthdays";
-import FadeIn from "./FadeIn";
+import FadeIn, { ensureKeyframes } from "./FadeIn";
 import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
 
@@ -23,6 +23,7 @@ const INVITE_KEY = "huddle_pending_invite_token";
 const INVITE_EMAIL_KEY = "huddle_invite_email";
 
 export default function App() {
+  ensureKeyframes();
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasConsented, setHasConsented] = useState(false);
@@ -462,9 +463,7 @@ export default function App() {
   return (
     <div>
       <div style={{ paddingBottom: "70px" }}>
-        <FadeIn key={activeTab} variant="up" speed="normal">
-          {screen}
-        </FadeIn>
+        {screen}
       </div>
       <NavBar
         active={activeTab}

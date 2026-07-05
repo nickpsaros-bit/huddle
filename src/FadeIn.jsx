@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 // Injects the keyframes once, globally, the first time any animated element mounts.
 // Self-contained so it works regardless of the global stylesheet.
 let injected = false;
-function ensureKeyframes() {
+export function ensureKeyframes() {
   if (injected || typeof document === "undefined") return;
   injected = true;
   const style = document.createElement("style");

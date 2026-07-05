@@ -839,9 +839,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#0F2044", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
-        <p style={{ color: "#02C39A", fontSize: "1.2rem" }}>Loading...</p>
-      </div>
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif" }} />
     );
   }
 
@@ -976,7 +974,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px", animation: "huddleFadeInUp 340ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
 
       <TopBar
         title="Playdates"

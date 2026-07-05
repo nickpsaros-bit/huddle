@@ -587,7 +587,7 @@ export default function Birthdays({
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+    <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px", animation: "huddleFadeInUp 340ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
       <TopBar
         title="Birthdays"
         notificationCount={notificationCount}
