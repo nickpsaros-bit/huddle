@@ -271,14 +271,17 @@ export default function Settings({ session, onBack }) {
       // Signups in the last 7 and 30 days.
       const d7 = new Date(Date.now() - 7 * 864e5).toISOString();
       const d30 = new Date(Date.now() - 30 * 864e5).toISOString();
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
       const signups7 = await countOf("parents", (q) => q.gte("created_at", d7));
       const signups30 = await countOf("parents", (q) => q.gte("created_at", d30));
+      const signupsMonth = await countOf("parents", (q) => q.gte("created_at", monthStart));
 
       setKpis({
         families, households, schools, classrooms,
         connectionsAccepted, connectionsPending,
         playdatesTotal, playdatesPast, birthdaysTotal, birthdaysPast,
-        signups7, signups30,
+        signups7, signups30, signupsMonth,
       });
     } catch (e) {
       setKpis(null);
@@ -662,6 +665,7 @@ export default function Settings({ session, onBack }) {
                 {stat("Households", kpis.households)}
                 {stat("New (7 days)", kpis.signups7, "signups")}
                 {stat("New (30 days)", kpis.signups30, "signups")}
+                {stat("This month", kpis.signupsMonth, "new signups")}
                 {stat("Schools", kpis.schools)}
                 {stat("Classrooms", kpis.classrooms)}
               </div>
