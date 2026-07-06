@@ -317,6 +317,63 @@ export default function Settings({ session, onBack }) {
     await loadUsers();
   };
 
+  // ---- Admin: analytics (time-series) ----
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const loadAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const [parentsRes, connsRes, playdatesRes] = await Promise.all([
+        supabase.from("parents").select("created_at"),
+        supabase.from("connections").select("created_at, status"),
+        supabase.from("playdates").select("created_at, event_type"),
+      ]);
+
+      // Bucket timestamps into the last 12 weeks (cumulative + per-week).
+      const WEEKS = 12;
+      const now = Date.now();
+      const weekMs = 7 * 864e5;
+      const startOf = (i) => now - (WEEKS - 1 - i) * weekMs; // start ms of bucket i
+
+      const bucketize = (rows, field = "created_at") => {
+        const perWeek = new Array(WEEKS).fill(0);
+        for (const r of (rows || [])) {
+          const t = r[field] ? new Date(r[field]).getTime() : null;
+          if (!t) continue;
+          const weeksAgo = Math.floor((now - t) / weekMs);
+          if (weeksAgo < 0 || weeksAgo >= WEEKS) continue;
+          const idx = WEEKS - 1 - weeksAgo;
+          perWeek[idx]++;
+        }
+        // cumulative running total
+        const cumulative = [];
+        let run = 0;
+        for (const v of perWeek) { run += v; cumulative.push(run); }
+        return { perWeek, cumulative };
+      };
+
+      const labels = [];
+      for (let i = 0; i < WEEKS; i++) {
+        const d = new Date(startOf(i));
+        labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+      }
+
+      setAnalytics({
+        labels,
+        signups: bucketize(parentsRes.data),
+        connections: bucketize((connsRes.data || []).filter((c) => c.status === "accepted")),
+        playdates: bucketize((playdatesRes.data || []).filter((p) => p.event_type === "playdate")),
+      });
+    } catch (e) {
+      setAnalytics(null);
+    }
+    setAnalyticsLoading(false);
+  };
+  const openAnalytics = async () => {
+    setView("adminAnalytics");
+    await loadAnalytics();
+  };
+
   const doErase = async () => {
     if (!eraseTarget || eraseConfirmText !== "ERASE") return;
     setEraseBusy(true);
@@ -694,6 +751,72 @@ export default function Settings({ session, onBack }) {
     );
   }
 
+  // ---- Admin: analytics viewer ----
+  if (view === "adminAnalytics") {
+    // Small inline SVG line chart (cumulative growth).
+    const LineChart = ({ data, color }) => {
+      const w = 300, h = 90, pad = 4;
+      const max = Math.max(1, ...data);
+      const pts = data.map((v, i) => {
+        const x = pad + (i / (data.length - 1 || 1)) * (w - pad * 2);
+        const y = h - pad - (v / max) * (h - pad * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      return (
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto", display: "block" }}>
+          <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      );
+    };
+    // Small inline SVG bar chart (per-week activity).
+    const BarChart = ({ data, color }) => {
+      const w = 300, h = 60, gap = 2;
+      const max = Math.max(1, ...data);
+      const bw = (w - gap * (data.length - 1)) / data.length;
+      return (
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto", display: "block" }}>
+          {data.map((v, i) => {
+            const bh = (v / max) * h;
+            return <rect key={i} x={i * (bw + gap)} y={h - bh} width={bw} height={bh} rx="1.5" fill={color} opacity={v === 0 ? 0.15 : 1} />;
+          })}
+        </svg>
+      );
+    };
+    const section = (title, series, color, totalLabel) => (
+      <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "1.1rem 1.25rem", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.75rem" }}>
+          <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", margin: 0 }}>{title}</p>
+          <p style={{ color: color, fontSize: "1.1rem", fontWeight: "700", margin: 0 }}>
+            {series.cumulative[series.cumulative.length - 1]}<span style={{ color: "#607080", fontSize: "0.72rem", fontWeight: "400" }}> {totalLabel}</span>
+          </p>
+        </div>
+        <p style={{ color: "#607080", fontSize: "0.68rem", margin: "0 0 4px" }}>Cumulative (12 weeks)</p>
+        <LineChart data={series.cumulative} color={color} />
+        <p style={{ color: "#607080", fontSize: "0.68rem", margin: "0.5rem 0 4px" }}>Per week</p>
+        <BarChart data={series.perWeek} color={color} />
+      </div>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("Analytics", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {analyticsLoading || !analytics ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : (
+            <>
+              {section("Signups", analytics.signups, "#02C39A", "families")}
+              {section("Connections", analytics.connections, "#5B9BD5", "made")}
+              {section("Playdates", analytics.playdates, "#B084E0", "created")}
+              <p style={{ color: "#607080", fontSize: "0.72rem", textAlign: "center", margin: "0.5rem 0 0", lineHeight: "1.5" }}>
+                Last 12 weeks. Trends become meaningful as real families join — watch the curves climb after launch.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ---- Main settings ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -720,6 +843,14 @@ export default function Settings({ session, onBack }) {
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📊 Dashboard</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Key metrics across Huddle</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+              <div onClick={openAnalytics}
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📈 Analytics</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Growth & engagement over time</p>
                 </div>
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
