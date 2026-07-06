@@ -849,7 +849,8 @@ export default function Settings({ session, onBack }) {
               <Icon name="shield_person" size={18} color="#02C39A" />
               <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em", fontWeight: "600" }}>ADMIN</p>
             </div>
-            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+            <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>INSIGHTS</p>
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.1rem" }}>
               <div onClick={openKpis}
                 style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -859,13 +860,17 @@ export default function Settings({ session, onBack }) {
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
               <div onClick={openAnalytics}
-                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📈 Analytics</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Growth & engagement over time</p>
                 </div>
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
+            </div>
+
+            <p style={{ color: "#607080", fontSize: "0.72rem", margin: "0 0 0.5rem", letterSpacing: "0.05em" }}>MODERATION</p>
+            <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
               <div onClick={openAdminBugs}
                 style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -875,7 +880,7 @@ export default function Settings({ session, onBack }) {
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
               <div onClick={openAdminReports}
-                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🛡️ Safety Reports</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review reports about people</p>
@@ -883,7 +888,7 @@ export default function Settings({ session, onBack }) {
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
               <div onClick={openUsers}
-                style={{ padding: "1rem 1.25rem", borderTop: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>👥 Manage Users</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>View and erase accounts</p>
@@ -898,7 +903,7 @@ export default function Settings({ session, onBack }) {
           <Icon name="account_circle" size={18} color="#8AAEC8" />
           <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>ACCOUNT</p>
         </div>
-        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+        <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "0.85rem" }}>
           <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 4px", letterSpacing: "0.05em" }}>EMAIL</p>
             <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: 0 }}>{session.user.email}</p>
@@ -913,8 +918,8 @@ export default function Settings({ session, onBack }) {
 
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
-          <Icon name="fingerprint" size={18} color="#8AAEC8" />
-          <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
+          <Icon name="fingerprint" size={16} color="#607080" />
+          <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0, letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
         </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
           <div style={{ padding: "1.25rem", borderBottom: passkeys.length > 0 ? "1px solid #2A4A6B" : "none" }}>
