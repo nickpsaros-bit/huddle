@@ -254,7 +254,7 @@ export default function Settings({ session, onBack }) {
       const [
         families, households, schools, classrooms,
         connectionsAccepted, connectionsPending,
-        playdatesTotal, playdatesPast, birthdaysTotal,
+        playdatesTotal, playdatesPast, birthdaysTotal, birthdaysPast,
       ] = await Promise.all([
         countOf("parents"),
         countOf("households"),
@@ -263,8 +263,9 @@ export default function Settings({ session, onBack }) {
         countOf("connections", (q) => q.eq("status", "accepted")),
         countOf("connections", (q) => q.eq("status", "pending")),
         countOf("playdates", (q) => q.eq("event_type", "playdate")),
-        countOf("playdates", (q) => q.eq("event_type", "playdate").lt("proposed_date", nowIso)),
+        countOf("playdates", (q) => q.eq("event_type", "playdate").lt("proposed_date", nowIso).neq("status", "cancelled")),
         countOf("playdates", (q) => q.eq("event_type", "birthday")),
+        countOf("playdates", (q) => q.eq("event_type", "birthday").lt("proposed_date", nowIso).neq("status", "cancelled")),
       ]);
 
       // Signups in the last 7 and 30 days.
@@ -276,7 +277,7 @@ export default function Settings({ session, onBack }) {
       setKpis({
         families, households, schools, classrooms,
         connectionsAccepted, connectionsPending,
-        playdatesTotal, playdatesPast, birthdaysTotal,
+        playdatesTotal, playdatesPast, birthdaysTotal, birthdaysPast,
         signups7, signups30,
       });
     } catch (e) {
@@ -326,7 +327,7 @@ export default function Settings({ session, onBack }) {
       const [parentsRes, connsRes, playdatesRes] = await Promise.all([
         supabase.from("parents").select("created_at"),
         supabase.from("connections").select("created_at, status"),
-        supabase.from("playdates").select("created_at, event_type"),
+        supabase.from("playdates").select("created_at, proposed_date, event_type, status"),
       ]);
 
       // Bucket timestamps into the last 12 weeks (cumulative + per-week).
@@ -358,11 +359,19 @@ export default function Settings({ session, onBack }) {
         labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
       }
 
+      const nowMs = Date.now();
+      const completedPlaydates = (playdatesRes.data || []).filter((p) =>
+        p.event_type === "playdate" && p.status !== "cancelled" && p.proposed_date && new Date(p.proposed_date).getTime() < nowMs);
+      const completedBirthdays = (playdatesRes.data || []).filter((p) =>
+        p.event_type === "birthday" && p.status !== "cancelled" && p.proposed_date && new Date(p.proposed_date).getTime() < nowMs);
+
       setAnalytics({
         labels,
         signups: bucketize(parentsRes.data),
         connections: bucketize((connsRes.data || []).filter((c) => c.status === "accepted")),
         playdates: bucketize((playdatesRes.data || []).filter((p) => p.event_type === "playdate")),
+        completedPlaydates: bucketize(completedPlaydates, "proposed_date"),
+        completedBirthdays: bucketize(completedBirthdays, "proposed_date"),
       });
     } catch (e) {
       setAnalytics(null);
@@ -664,6 +673,7 @@ export default function Settings({ session, onBack }) {
                 {stat("Playdates", kpis.playdatesTotal, "created")}
                 {stat("Completed", kpis.playdatesPast, "playdates")}
                 {stat("Birthdays", kpis.birthdaysTotal, "created")}
+                {stat("Completed", kpis.birthdaysPast, "birthdays")}
               </div>
 
               <p style={{ color: "#607080", fontSize: "0.75rem", textAlign: "center", margin: "0.5rem 0 0" }}>
@@ -807,6 +817,8 @@ export default function Settings({ session, onBack }) {
               {section("Signups", analytics.signups, "#02C39A", "families")}
               {section("Connections", analytics.connections, "#5B9BD5", "made")}
               {section("Playdates", analytics.playdates, "#B084E0", "created")}
+              {section("Completed playdates", analytics.completedPlaydates, "#7CC77C", "happened")}
+              {section("Completed birthdays", analytics.completedBirthdays, "#E0A458", "happened")}
               <p style={{ color: "#607080", fontSize: "0.72rem", textAlign: "center", margin: "0.5rem 0 0", lineHeight: "1.5" }}>
                 Last 12 weeks. Trends become meaningful as real families join — watch the curves climb after launch.
               </p>
