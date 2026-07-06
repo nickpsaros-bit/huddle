@@ -77,9 +77,9 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
       {/* The ⋯ menu */}
       {open && (
         <div onClick={(e) => { e.stopPropagation(); setOpen(false); }}
-          style={{ position: "fixed", inset: 0, background: "rgba(6,16,36,0.6)", zIndex: 90, display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "huddleFadeInUp 160ms ease both" }}>
+          style={{ position: "fixed", inset: 0, background: "rgba(6,16,36,0.6)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem", animation: "huddleFadeInUp 160ms ease both" }}>
           <div onClick={(e) => e.stopPropagation()}
-            style={{ background: "#162D50", borderTopLeftRadius: "18px", borderTopRightRadius: "18px", padding: "1rem", width: "100%", maxWidth: "500px", borderTop: "1px solid #2A4A6B", animation: "huddleSlideUp 240ms cubic-bezier(0.22,1,0.36,1) both" }}>
+            style={{ background: "#162D50", borderRadius: "18px", padding: "1rem", width: "100%", maxWidth: "360px", border: "1px solid #2A4A6B", animation: "huddleScaleIn 200ms cubic-bezier(0.22,1,0.36,1) both" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.82rem", textAlign: "center", margin: "0.25rem 0 1rem" }}>{targetName || "This person"}</p>
             {onRemoveConnection && (
               <button onClick={() => { setOpen(false); onRemoveConnection(); }}
