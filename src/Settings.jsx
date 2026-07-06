@@ -238,6 +238,105 @@ export default function Settings({ session, onBack }) {
     await loadAdminReports();
   };
 
+  // ---- Admin: KPI dashboard ----
+  const [kpis, setKpis] = useState(null);
+  const [kpiLoading, setKpiLoading] = useState(false);
+  const loadKpis = async () => {
+    setKpiLoading(true);
+    try {
+      const countOf = async (table, filter) => {
+        let q = supabase.from(table).select("id", { count: "exact", head: true });
+        if (filter) q = filter(q);
+        const { count } = await q;
+        return count || 0;
+      };
+      const nowIso = new Date().toISOString();
+      const [
+        families, households, schools, classrooms,
+        connectionsAccepted, connectionsPending,
+        playdatesTotal, playdatesPast, birthdaysTotal,
+      ] = await Promise.all([
+        countOf("parents"),
+        countOf("households"),
+        countOf("schools"),
+        countOf("classrooms"),
+        countOf("connections", (q) => q.eq("status", "accepted")),
+        countOf("connections", (q) => q.eq("status", "pending")),
+        countOf("playdates", (q) => q.eq("event_type", "playdate")),
+        countOf("playdates", (q) => q.eq("event_type", "playdate").lt("proposed_date", nowIso)),
+        countOf("playdates", (q) => q.eq("event_type", "birthday")),
+      ]);
+
+      // Signups in the last 7 and 30 days.
+      const d7 = new Date(Date.now() - 7 * 864e5).toISOString();
+      const d30 = new Date(Date.now() - 30 * 864e5).toISOString();
+      const signups7 = await countOf("parents", (q) => q.gte("created_at", d7));
+      const signups30 = await countOf("parents", (q) => q.gte("created_at", d30));
+
+      setKpis({
+        families, households, schools, classrooms,
+        connectionsAccepted, connectionsPending,
+        playdatesTotal, playdatesPast, birthdaysTotal,
+        signups7, signups30,
+      });
+    } catch (e) {
+      setKpis(null);
+    }
+    setKpiLoading(false);
+  };
+  const openKpis = async () => {
+    setView("adminKpis");
+    await loadKpis();
+  };
+
+  // ---- Admin: manage users (incl. erase) ----
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [eraseTarget, setEraseTarget] = useState(null); // { id, name }
+  const [eraseConfirmText, setEraseConfirmText] = useState("");
+  const [eraseBusy, setEraseBusy] = useState(false);
+  const [eraseResult, setEraseResult] = useState("");
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const { data } = await supabase
+        .from("parents")
+        .select("id, name, is_admin, created_at")
+        .order("created_at", { ascending: false })
+        .limit(300);
+      setUsers(data || []);
+    } catch (e) {
+      setUsers([]);
+    }
+    setUsersLoading(false);
+  };
+  const openUsers = async () => {
+    setView("adminUsers");
+    setEraseResult("");
+    await loadUsers();
+  };
+
+  const doErase = async () => {
+    if (!eraseTarget || eraseConfirmText !== "ERASE") return;
+    setEraseBusy(true);
+    setEraseResult("");
+    try {
+      const { data, error } = await supabase.functions.invoke("erase-user", {
+        body: { target_id: eraseTarget.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setEraseResult(`Erased ${eraseTarget.name || "user"}.`);
+      setUsers((list) => list.filter((u) => u.id !== eraseTarget.id));
+      setEraseTarget(null);
+      setEraseConfirmText("");
+    } catch (e) {
+      setEraseResult(`Couldn't erase: ${e.message || e}`);
+    }
+    setEraseBusy(false);
+  };
+
   const REPORT_CAT_LABELS = {
     harassment: "Harassment or bullying",
     inappropriate: "Inappropriate behavior",
@@ -474,6 +573,127 @@ export default function Settings({ session, onBack }) {
     );
   }
 
+  // ---- Admin: KPI dashboard viewer ----
+  if (view === "adminKpis") {
+    const stat = (label, value, hint) => (
+      <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "1rem" }}>
+        <p style={{ color: "#02C39A", fontSize: "1.6rem", fontWeight: "700", margin: 0, lineHeight: 1 }}>{value}</p>
+        <p style={{ color: "#FFFFFF", fontSize: "0.85rem", margin: "6px 0 0" }}>{label}</p>
+        {hint && <p style={{ color: "#607080", fontSize: "0.72rem", margin: "2px 0 0" }}>{hint}</p>}
+      </div>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("Dashboard", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {kpiLoading || !kpis ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : (
+            <>
+              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>GROWTH</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginBottom: "1.5rem" }}>
+                {stat("Families", kpis.families)}
+                {stat("Households", kpis.households)}
+                {stat("New (7 days)", kpis.signups7, "signups")}
+                {stat("New (30 days)", kpis.signups30, "signups")}
+                {stat("Schools", kpis.schools)}
+                {stat("Classrooms", kpis.classrooms)}
+              </div>
+
+              <p style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>ENGAGEMENT</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", marginBottom: "1.5rem" }}>
+                {stat("Connections", kpis.connectionsAccepted, "accepted")}
+                {stat("Pending", kpis.connectionsPending, "connection requests")}
+                {stat("Playdates", kpis.playdatesTotal, "created")}
+                {stat("Completed", kpis.playdatesPast, "playdates")}
+                {stat("Birthdays", kpis.birthdaysTotal, "created")}
+              </div>
+
+              <p style={{ color: "#607080", fontSize: "0.75rem", textAlign: "center", margin: "0.5rem 0 0" }}>
+                Live counts across all of Huddle.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Admin: manage users viewer ----
+  if (view === "adminUsers") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("Manage Users", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          <div style={{ background: "#3A1A1A", border: "1px solid #7A3B3B", borderRadius: "10px", padding: "0.75rem 1rem", marginBottom: "1.25rem" }}>
+            <p style={{ color: "#E39A9A", fontSize: "0.8rem", margin: 0, lineHeight: "1.5" }}>
+              ⚠️ Erasing a user is permanent and immediate. It removes their profile, memberships, connections, notifications, and login — and their household if they're its only member. There is no undo.
+            </p>
+          </div>
+
+          {eraseResult && (
+            <div style={{ background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "10px", padding: "0.7rem 1rem", marginBottom: "1rem" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0 }}>{eraseResult}</p>
+            </div>
+          )}
+
+          {usersLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : (
+            users.map((u) => (
+              <div key={u.id} style={{ display: "flex", alignItems: "center", gap: "10px", background: "#162D50", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.75rem 1rem", marginBottom: "0.6rem" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>
+                    {u.name || "(no name)"}{u.is_admin ? " · admin" : ""}
+                  </p>
+                  <p style={{ color: "#607080", fontSize: "0.72rem", margin: "2px 0 0" }}>
+                    Joined {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
+                  </p>
+                </div>
+                {u.id === parent?.id ? (
+                  <span style={{ color: "#607080", fontSize: "0.75rem" }}>you</span>
+                ) : (
+                  <button onClick={() => { setEraseTarget({ id: u.id, name: u.name }); setEraseConfirmText(""); }}
+                    style={{ padding: "0.45rem 0.8rem", borderRadius: "8px", border: "1px solid #7A3B3B", background: "transparent", color: "#E39A9A", fontSize: "0.78rem", fontWeight: "600", cursor: "pointer" }}>
+                    Erase
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Hard-gated erase confirmation */}
+        {eraseTarget && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(6,16,36,0.88)", zIndex: 95, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+            <div style={{ background: "#162D50", border: "1px solid #7A3B3B", borderRadius: "16px", padding: "1.5rem", maxWidth: "400px", width: "100%" }}>
+              <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: "0 0 0.6rem" }}>
+                Erase {eraseTarget.name || "this user"}?
+              </h2>
+              <p style={{ color: "#8AAEC8", fontSize: "0.85rem", lineHeight: "1.5", margin: "0 0 1rem" }}>
+                This permanently deletes their account and data. This cannot be undone. Type <strong style={{ color: "#E39A9A" }}>ERASE</strong> to confirm.
+              </p>
+              <input
+                value={eraseConfirmText}
+                onChange={(e) => setEraseConfirmText(e.target.value)}
+                placeholder="Type ERASE"
+                style={{ width: "100%", padding: "0.7rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", marginBottom: "1rem", boxSizing: "border-box" }}
+              />
+              <button disabled={eraseConfirmText !== "ERASE" || eraseBusy} onClick={doErase}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: (eraseConfirmText === "ERASE" && !eraseBusy) ? "#C0504D" : "#28405F", color: "#FFFFFF", fontWeight: "700", cursor: (eraseConfirmText === "ERASE" && !eraseBusy) ? "pointer" : "default", fontSize: "0.9rem", marginBottom: "0.6rem" }}>
+                {eraseBusy ? "Erasing..." : "Permanently erase"}
+              </button>
+              <button onClick={() => { setEraseTarget(null); setEraseConfirmText(""); }}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontWeight: "600", cursor: "pointer", fontSize: "0.9rem" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ---- Main settings ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -495,6 +715,14 @@ export default function Settings({ session, onBack }) {
               <p style={{ color: "#02C39A", fontSize: "0.8rem", margin: 0, letterSpacing: "0.05em", fontWeight: "600" }}>ADMIN</p>
             </div>
             <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem" }}>
+              <div onClick={openKpis}
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📊 Dashboard</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Key metrics across Huddle</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
               <div onClick={openAdminBugs}
                 style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -508,6 +736,14 @@ export default function Settings({ session, onBack }) {
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🛡️ Safety Reports</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Review reports about people</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+              <div onClick={openUsers}
+                style={{ padding: "1rem 1.25rem", borderTop: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>👥 Manage Users</p>
+                  <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>View and erase accounts</p>
                 </div>
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
