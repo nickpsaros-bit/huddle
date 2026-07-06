@@ -4,7 +4,7 @@ import { blockParent, submitReport } from "./blocks";
 
 // Drop-in "⋯" menu for blocking/reporting ANY person, anywhere they appear.
 // Usage: <PersonMenu session={session} targetId={parentId} targetName={name} onDone={() => refresh()} />
-export default function PersonMenu({ session, targetId, targetName, onDone, size = 20, color = "#8AAEC8" }) {
+export default function PersonMenu({ session, targetId, targetName, onDone, onRemoveConnection, size = 20, color = "#8AAEC8" }) {
   const [open, setOpen] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -81,6 +81,13 @@ export default function PersonMenu({ session, targetId, targetName, onDone, size
           <div onClick={(e) => e.stopPropagation()}
             style={{ background: "#162D50", borderTopLeftRadius: "18px", borderTopRightRadius: "18px", padding: "1rem", width: "100%", maxWidth: "500px", borderTop: "1px solid #2A4A6B", animation: "huddleSlideUp 240ms cubic-bezier(0.22,1,0.36,1) both" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.82rem", textAlign: "center", margin: "0.25rem 0 1rem" }}>{targetName || "This person"}</p>
+            {onRemoveConnection && (
+              <button onClick={() => { setOpen(false); onRemoveConnection(); }}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>
+                <Icon name="link_off" size={20} color="#8AAEC8" />
+                <span style={{ color: "#FFFFFF", fontSize: "0.92rem" }}>Remove connection</span>
+              </button>
+            )}
             <button onClick={openReport}
               style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>
               <Icon name="flag" size={20} color="#E39A9A" />

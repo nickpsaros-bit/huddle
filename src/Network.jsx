@@ -4,6 +4,7 @@ import PlaydateRequest from "./PlaydateRequest";
 import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import { blockParent, getHiddenParentIds, submitReport } from "./blocks";
+import PersonMenu from "./PersonMenu";
 import Button from "./Button";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
@@ -348,20 +349,13 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
                           <p style={{ color: "#607080", fontSize: "0.78rem", margin: "2px 0 0" }}>Co-parent</p>
                         )}
                         {m.connectionId && (
-                          <div style={{ display: "flex", gap: "12px", marginTop: "1px" }}>
-                            <button onClick={() => removeConnection(m.connectionId, m.name)}
-                              style={{ background: "transparent", border: "none", color: "#4A5D78", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
-                              Remove
-                            </button>
-                            <button onClick={() => blockPerson(m.id, m.name)}
-                              style={{ background: "transparent", border: "none", color: "#7A3B3B", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
-                              Block
-                            </button>
-                            <button onClick={() => openReport(m.id, m.name)}
-                              style={{ background: "transparent", border: "none", color: "#7A3B3B", fontSize: "0.75rem", cursor: "pointer", padding: "2px 0 0" }}>
-                              Report
-                            </button>
-                          </div>
+                          <PersonMenu
+                            session={session}
+                            targetId={m.id}
+                            targetName={m.name}
+                            onRemoveConnection={() => removeConnection(m.connectionId, m.name)}
+                            onDone={fetchConnections}
+                          />
                         )}
                       </div>
                       {m.connectionId && (
