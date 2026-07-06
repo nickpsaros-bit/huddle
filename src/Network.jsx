@@ -348,20 +348,20 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
                         {!m.connectionId && (
                           <p style={{ color: "#607080", fontSize: "0.78rem", margin: "2px 0 0" }}>Co-parent</p>
                         )}
-                        {m.connectionId && (
-                          <PersonMenu
-                            session={session}
-                            targetId={m.id}
-                            targetName={m.name}
-                            onRemoveConnection={() => removeConnection(m.connectionId, m.name)}
-                            onDone={fetchConnections}
-                          />
-                        )}
                       </div>
                       {m.connectionId && (
                         <Button variant="primary" size="sm" onClick={() => setRequestingPlaydate({ id: m.id, name: m.name, photo_url: m.photo_url })} style={{ flexShrink: 0 }}>
                           Huddle →
                         </Button>
+                      )}
+                      {m.connectionId && (
+                        <PersonMenu
+                          session={session}
+                          targetId={m.id}
+                          targetName={m.name}
+                          onRemoveConnection={() => removeConnection(m.connectionId, m.name)}
+                          onDone={fetchConnections}
+                        />
                       )}
                     </div>
                   ))}
