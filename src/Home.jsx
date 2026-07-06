@@ -7,6 +7,7 @@ import InviteFamily from "./InviteFamily";
 import ConfirmModal from "./ConfirmModal";
 import Icon from "./Icon";
 import { getHiddenParentIds } from "./blocks";
+import PersonMenu from "./PersonMenu";
 import TopBar from "./TopBar";
 
 export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney, onSearchClick }) {
@@ -1057,6 +1058,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                     onClick={() => { setRequestEventType("playdate"); setRequestingPlaydate(card.parents); }}>
                     Huddle →
                   </Button>
+                  <PersonMenu session={session} targetId={card.parents?.id} targetName={card.parents?.name} onDone={fetchData} />
                 </div>
               </div>
             ))

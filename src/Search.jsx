@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import Button from "./Button";
 import Icon from "./Icon";
 import { getHiddenParentIds } from "./blocks";
+import PersonMenu from "./PersonMenu";
 
 export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
   const [query, setQuery] = useState("");
@@ -485,7 +486,12 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
                   <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{classroomLabel || "Same school"}</p>
                 </div>
               </div>
-              {connectionControl(parent.id, sameHousehold)}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                {connectionControl(parent.id, sameHousehold)}
+                {!sameHousehold && (
+                  <PersonMenu session={session} targetId={parent.id} targetName={parent.name} onDone={() => search(query)} />
+                )}
+              </div>
             </div>
           );
         })}
