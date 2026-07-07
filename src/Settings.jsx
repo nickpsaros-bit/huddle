@@ -294,6 +294,23 @@ export default function Settings({ session, onBack }) {
     await loadKpis();
   };
 
+  // ---- Admin: email this report on demand ----
+  const [emailingReport, setEmailingReport] = useState(false);
+  const [reportMsg, setReportMsg] = useState("");
+  const emailReport = async () => {
+    setEmailingReport(true);
+    setReportMsg("");
+    try {
+      const { data, error } = await supabase.functions.invoke("email-admin-report", { body: {} });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setReportMsg(`Sent to ${data?.sent_to || "your email"}. Check your inbox.`);
+    } catch (e) {
+      setReportMsg(`Couldn't send: ${e.message || e}`);
+    }
+    setEmailingReport(false);
+  };
+
   // ---- Admin: manage users (incl. erase) ----
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -773,6 +790,15 @@ export default function Settings({ session, onBack }) {
               <p style={{ color: "#607080", fontSize: "0.75rem", textAlign: "center", margin: "0.5rem 0 0" }}>
                 Live counts across all of Huddle.
               </p>
+
+              <button onClick={emailReport} disabled={emailingReport}
+                style={{ width: "100%", padding: "0.85rem", borderRadius: "12px", border: "1px solid #2A4A6B", background: "#162D50", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "600", cursor: emailingReport ? "default" : "pointer", marginTop: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                <Icon name="mail" size={18} color="#02C39A" />
+                {emailingReport ? "Sending…" : "Email me this report"}
+              </button>
+              {reportMsg && (
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", textAlign: "center", margin: "0.75rem 0 0" }}>{reportMsg}</p>
+              )}
             </>
           )}
         </div>
