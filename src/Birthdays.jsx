@@ -50,6 +50,9 @@ export default function Birthdays({
   const [myRooms, setMyRooms] = useState([]);          // my classrooms (browse cards)
   const [peopleByRoom, setPeopleByRoom] = useState({}); // classroom_id -> people
   const [viewingRoom, setViewingRoom] = useState(null); // a room object when drilled in
+  const [emailMatch, setEmailMatch] = useState(null);   // exact email lookup result
+  const [emailSearching, setEmailSearching] = useState(false);
+  const [extraSelected, setExtraSelected] = useState([]); // email-found people not in pickPeople
   const [pickLoading, setPickLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [pickFilter, setPickFilter] = useState("");
@@ -393,6 +396,8 @@ export default function Birthdays({
     setSelectedIds([]);
     setViewingRoom(null);
     setPickFilter("");
+    setEmailMatch(null);
+    setExtraSelected([]);
     try {
       const userId = session.user.id;
       // My household.
@@ -501,9 +506,41 @@ export default function Birthdays({
     setSelectedIds((prev) =>
       prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
     );
+    // If this person isn't in the school list (found by email), remember them.
+    if (!pickPeople.some((sp) => sp.id === p.id)) {
+      setExtraSelected((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
+    }
   };
 
-  // Reusable selectable person row (used in both room-drill-in and search results).
+  // Is the query a full, complete email address?
+  const looksLikeEmail = (s) => /^\S+@\S+\.\S+$/.test((s || "").trim());
+
+  // Exact email lookup (finds a specific person, even cross-school) via the edge fn.
+  const runEmailLookup = async (email) => {
+    setEmailSearching(true);
+    setEmailMatch(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("lookup-user-by-email", {
+        body: { email: email.trim().toLowerCase() },
+      });
+      if (!error && data && data.found && data.hasProfile && data.parent && data.parent.id !== session.user.id) {
+        const hidden = await getHiddenParentIds();
+        if (!hidden.has(data.parent.id)) {
+          setEmailMatch({
+            id: data.parent.id,
+            name: data.parent.name,
+            photo_url: data.parent.photo_url,
+            classLabel: "Found by email",
+          });
+        }
+      }
+    } catch (e) {
+      setEmailMatch(null);
+    }
+    setEmailSearching(false);
+  };
+
+  // Reusable selectable person row (used in room-drill-in, name search, email match).
   const personRow = (p) => {
     const sel = selectedIds.includes(p.id);
     return (
@@ -522,7 +559,10 @@ export default function Birthdays({
   };
 
   const continueToForm = () => {
-    const chosen = pickPeople.filter((p) => selectedIds.includes(p.id));
+    // Include both school families (pickPeople) and any email-found people (extraSelected).
+    const fromSchool = pickPeople.filter((p) => selectedIds.includes(p.id));
+    const fromEmail = extraSelected.filter((p) => selectedIds.includes(p.id) && !fromSchool.some((s) => s.id === p.id));
+    const chosen = [...fromSchool, ...fromEmail];
     if (chosen.length === 0) return;
     setLaunchRecipients(chosen.map((p) => ({ id: p.id, name: p.name, photo_url: p.photo_url })));
   };
@@ -891,22 +931,45 @@ export default function Birthdays({
             <input
               type="text"
               value={pickFilter}
-              onChange={(e) => setPickFilter(e.target.value)}
-              placeholder="Search all families at your school…"
-              style={{ width: "100%", padding: "0.75rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.95rem", marginBottom: "1.25rem", boxSizing: "border-box" }}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPickFilter(v);
+                setEmailMatch(null);
+                if (looksLikeEmail(v)) runEmailLookup(v);
+              }}
+              placeholder="Search by name, or enter a full email…"
+              style={{ width: "100%", padding: "0.75rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.95rem", marginBottom: "0.5rem", boxSizing: "border-box" }}
             />
+            <p style={{ color: "#607080", fontSize: "0.75rem", margin: "0 0 1.25rem", lineHeight: "1.45", display: "flex", alignItems: "flex-start", gap: "6px" }}>
+              <Icon name="lightbulb" size={14} color="#7C5CBF" style={{ marginTop: "1px", flexShrink: 0 }} />
+              <span>Type a name to find families at your school. To invite someone at another school, enter their <strong style={{ color: "#8AAEC8" }}>full email address</strong>.</span>
+            </p>
 
             {pickLoading ? (
               <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
             ) : pickFilter.trim() ? (
-              // ---- SEARCH MODE: flat results across the whole school ----
-              (() => {
-                const results = pickPeople.filter((p) => (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()));
-                if (results.length === 0) {
-                  return <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>No families match "{pickFilter}".</p>;
-                }
-                return results.map((p) => personRow(p));
-              })()
+              // ---- SEARCH MODE ----
+              looksLikeEmail(pickFilter) ? (
+                // Full email → exact lookup (may be cross-school)
+                emailSearching ? (
+                  <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>Looking up that email…</p>
+                ) : emailMatch ? (
+                  personRow(emailMatch)
+                ) : (
+                  <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem", lineHeight: "1.5" }}>
+                    No one on Huddle uses that exact email. Double-check the address, or invite by name.
+                  </p>
+                )
+              ) : (
+                // Partial text → live name filter over school families
+                (() => {
+                  const results = pickPeople.filter((p) => (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()));
+                  if (results.length === 0) {
+                    return <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>No families match "{pickFilter}".</p>;
+                  }
+                  return results.map((p) => personRow(p));
+                })()
+              )
             ) : viewingRoom ? (
               // ---- DRILLED INTO A CLASSROOM ----
               <>
@@ -956,7 +1019,7 @@ export default function Birthdays({
                   </>
                 )}
                 <p style={{ color: "#607080", fontSize: "0.78rem", textAlign: "center", margin: 0, lineHeight: "1.5" }}>
-                  Tap a classroom to invite classmates, or use search above to find anyone else at your school.
+                  Tap a classroom above to browse and invite classmates.
                 </p>
               </>
             )}
