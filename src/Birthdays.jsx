@@ -47,6 +47,9 @@ export default function Birthdays({
   // Create flow: opens the birthday invite form (family picker first).
   const [creating, setCreating] = useState(false);
   const [pickPeople, setPickPeople] = useState([]);
+  const [myRooms, setMyRooms] = useState([]);          // my classrooms (browse cards)
+  const [peopleByRoom, setPeopleByRoom] = useState({}); // classroom_id -> people
+  const [viewingRoom, setViewingRoom] = useState(null); // a room object when drilled in
   const [pickLoading, setPickLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [pickFilter, setPickFilter] = useState("");
@@ -388,6 +391,8 @@ export default function Birthdays({
     setCreating(true);
     setPickLoading(true);
     setSelectedIds([]);
+    setViewingRoom(null);
+    setPickFilter("");
     try {
       const userId = session.user.id;
       // My household.
@@ -398,13 +403,24 @@ export default function Birthdays({
         .maybeSingle();
       const myHhId = myHm?.household_id;
 
-      // My classrooms -> my school ids.
+      // My classrooms -> my school ids. Keep MY classrooms for the browse-by-room UI.
       const { data: myCms } = await supabase
         .from("classroom_members")
-        .select("classrooms(school_id)")
+        .select("classroom_id, classrooms(id, school_id, grade, teacher_name)")
         .eq("household_id", myHhId);
       const schoolIds = [...new Set((myCms || []).map((c) => c.classrooms?.school_id).filter(Boolean))];
-      if (schoolIds.length === 0) { setPickPeople([]); setPickLoading(false); return; }
+      // My own classrooms (the ones shown as cards at the top).
+      const myClassrooms = [];
+      const myClassroomIds = new Set();
+      for (const c of (myCms || [])) {
+        const cr = c.classrooms;
+        if (cr && !myClassroomIds.has(cr.id)) {
+          myClassroomIds.add(cr.id);
+          myClassrooms.push({ id: cr.id, grade: cr.grade, teacher: cr.teacher_name });
+        }
+      }
+      setMyRooms(myClassrooms);
+      if (schoolIds.length === 0) { setPickPeople([]); setPeopleByRoom({}); setPickLoading(false); return; }
 
       // All classrooms at those schools.
       const { data: schoolClassrooms } = await supabase
@@ -423,10 +439,13 @@ export default function Birthdays({
         .in("classroom_id", classroomIds);
 
       const classByHousehold = {}; // household_id -> {grade, teacher}
+      const roomsByHousehold = {}; // household_id -> Set(classroom_id) — for grouping by MY rooms
       const householdIds = new Set();
       for (const m of (allMemberships || [])) {
         if (m.household_id === myHhId) continue; // exclude self
         householdIds.add(m.household_id);
+        if (!roomsByHousehold[m.household_id]) roomsByHousehold[m.household_id] = new Set();
+        roomsByHousehold[m.household_id].add(m.classroom_id);
         if (!classByHousehold[m.household_id]) {
           const cr = classroomById[m.classroom_id];
           if (cr) classByHousehold[m.household_id] = { grade: cr.grade, teacher: cr.teacher_name };
@@ -456,11 +475,22 @@ export default function Birthdays({
           householdId: m.household_id,
           name: p.name,
           photo_url: p.photo_url,
+          rooms: roomsByHousehold[m.household_id] ? [...roomsByHousehold[m.household_id]] : [],
           classLabel: cls ? `${gradeLabel(cls.grade)}${cls.teacher ? " · " + cls.teacher : ""}` : "",
         });
       }
       people.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
       setPickPeople(people);
+
+      // Group people by MY classrooms (for the browse-by-room cards).
+      const byRoom = {};
+      for (const rid of myClassroomIds) byRoom[rid] = [];
+      for (const person of people) {
+        for (const rid of person.rooms) {
+          if (byRoom[rid]) byRoom[rid].push(person);
+        }
+      }
+      setPeopleByRoom(byRoom);
     } catch (e) {
       setPickPeople([]);
     }
@@ -470,6 +500,24 @@ export default function Birthdays({
   const toggleSelect = (p) => {
     setSelectedIds((prev) =>
       prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+    );
+  };
+
+  // Reusable selectable person row (used in both room-drill-in and search results).
+  const personRow = (p) => {
+    const sel = selectedIds.includes(p.id);
+    return (
+      <div key={p.id} onClick={() => toggleSelect(p)}
+        style={{ display: "flex", alignItems: "center", gap: "12px", background: sel ? "#2A1E3D" : "#162D50", border: `1px solid ${sel ? "#7C5CBF" : "#2A4A6B"}`, borderRadius: "12px", padding: "0.75rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>
+        <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", flexShrink: 0 }}>
+          {p.photo_url ? <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (p.name?.charAt(0) || "?")}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{p.name}</p>
+          {p.classLabel && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "1px 0 0" }}>{p.classLabel}</p>}
+        </div>
+        {sel && <Icon name="check_circle" size={22} color="#7C5CBF" />}
+      </div>
     );
   };
 
@@ -833,50 +881,84 @@ export default function Birthdays({
             <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>🎂 Invite families</h1>
           </div>
           <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
-            <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1rem" }}>
-              Choose which families to invite to the birthday celebration.
-            </p>
-            <input
-              type="text"
-              value={pickFilter}
-              onChange={(e) => setPickFilter(e.target.value)}
-              placeholder="Search families…"
-              style={{ width: "100%", padding: "0.75rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.95rem", marginBottom: "1rem", boxSizing: "border-box" }}
-            />
             {selectedIds.length > 0 && (
               <button onClick={continueToForm}
                 style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.25rem" }}>
                 Continue with {selectedIds.length} {selectedIds.length === 1 ? "family" : "families"} →
               </button>
             )}
+
+            <input
+              type="text"
+              value={pickFilter}
+              onChange={(e) => setPickFilter(e.target.value)}
+              placeholder="Search all families at your school…"
+              style={{ width: "100%", padding: "0.75rem 1rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.95rem", marginBottom: "1.25rem", boxSizing: "border-box" }}
+            />
+
             {pickLoading ? (
               <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
-            ) : pickPeople.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-                <p style={{ margin: "0 0 0.75rem" }}><Icon name="group" size={40} color="#3E5A7F" /></p>
-                <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
-                  No other families found at your school yet. As more families join, they'll appear here to invite.
+            ) : pickFilter.trim() ? (
+              // ---- SEARCH MODE: flat results across the whole school ----
+              (() => {
+                const results = pickPeople.filter((p) => (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()));
+                if (results.length === 0) {
+                  return <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>No families match "{pickFilter}".</p>;
+                }
+                return results.map((p) => personRow(p));
+              })()
+            ) : viewingRoom ? (
+              // ---- DRILLED INTO A CLASSROOM ----
+              <>
+                <button onClick={() => setViewingRoom(null)}
+                  style={{ display: "flex", alignItems: "center", gap: "6px", background: "transparent", border: "none", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", padding: "0 0 1rem" }}>
+                  <Icon name="arrow_back" size={18} color="#8AAEC8" /> All classrooms
+                </button>
+                <p style={{ color: "#FFFFFF", fontSize: "1rem", fontWeight: "600", margin: "0 0 0.25rem" }}>
+                  {gradeLabel(viewingRoom.grade)}{viewingRoom.teacher ? " · " + viewingRoom.teacher : ""}
                 </p>
-              </div>
+                <p style={{ color: "#607080", fontSize: "0.8rem", margin: "0 0 1.25rem" }}>Tap classmates to invite them.</p>
+                {(peopleByRoom[viewingRoom.id] || []).length === 0 ? (
+                  <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem", lineHeight: "1.5" }}>
+                    No other families from this classroom are on Huddle yet. As they join, they'll appear here.
+                  </p>
+                ) : (
+                  (peopleByRoom[viewingRoom.id] || []).map((p) => personRow(p))
+                )}
+              </>
             ) : (
-              pickPeople
-                .filter((p) => !pickFilter.trim() || (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()))
-                .map((p) => {
-                const sel = selectedIds.includes(p.id);
-                return (
-                  <div key={p.id} onClick={() => toggleSelect(p)}
-                    style={{ display: "flex", alignItems: "center", gap: "12px", background: sel ? "#2A1E3D" : "#162D50", border: `1px solid ${sel ? "#7C5CBF" : "#2A4A6B"}`, borderRadius: "12px", padding: "0.75rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>
-                    <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#028090", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#FFFFFF", fontWeight: "600", flexShrink: 0 }}>
-                      {p.photo_url ? <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (p.name?.charAt(0) || "?")}
+              // ---- CLASSROOM CARDS (default view) ----
+              <>
+                {myRooms.length > 0 && (
+                  <>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>YOUR CLASSROOMS</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.5rem" }}>
+                      {myRooms.map((room) => {
+                        const count = (peopleByRoom[room.id] || []).length;
+                        const selInRoom = (peopleByRoom[room.id] || []).filter((p) => selectedIds.includes(p.id)).length;
+                        return (
+                          <div key={room.id} onClick={() => setViewingRoom(room)}
+                            style={{ background: "linear-gradient(135deg, #1E2F52 0%, #253A63 100%)", border: "1px solid #2A4A6B", borderRadius: "16px", padding: "1.1rem", cursor: "pointer", position: "relative", minHeight: "116px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                            <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "#7C5CBF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Icon name="school" size={24} color="#FFFFFF" />
+                            </div>
+                            <div>
+                              <p style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: "600", margin: "0.6rem 0 2px" }}>{gradeLabel(room.grade)}</p>
+                              {room.teacher && <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>{room.teacher}</p>}
+                              <p style={{ color: "#607080", fontSize: "0.72rem", margin: "4px 0 0" }}>
+                                {count} {count === 1 ? "family" : "families"}{selInRoom > 0 ? ` · ${selInRoom} invited` : ""}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: 0 }}>{p.name}</p>
-                      {p.classLabel && <p style={{ color: "#8AAEC8", fontSize: "0.78rem", margin: "1px 0 0" }}>{p.classLabel}</p>}
-                    </div>
-                    {sel && <Icon name="check_circle" size={22} color="#7C5CBF" />}
-                  </div>
-                );
-              })
+                  </>
+                )}
+                <p style={{ color: "#607080", fontSize: "0.78rem", textAlign: "center", margin: 0, lineHeight: "1.5" }}>
+                  Tap a classroom to invite classmates, or use search above to find anyone else at your school.
+                </p>
+              </>
             )}
           </div>
         </div>
