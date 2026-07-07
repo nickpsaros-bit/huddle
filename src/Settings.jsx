@@ -53,6 +53,7 @@ export default function Settings({ session, onBack }) {
       .eq("id", session.user.id)
       .single();
     setParent(data);
+    if (data?.is_admin) refreshNewSignupCount();
     if (data && typeof data.discoverable === "boolean") setDiscoverable(data.discoverable);
     if (data && typeof data.notify_in_app === "boolean") setNotifyInApp(data.notify_in_app);
     if (data && typeof data.notify_email === "boolean") setNotifyEmail(data.notify_email);
@@ -319,6 +320,95 @@ export default function Settings({ session, onBack }) {
     setView("adminUsers");
     setEraseResult("");
     await loadUsers();
+  };
+
+  // ---- Admin: new signups (with school/grade associations) ----
+  const [newSignups, setNewSignups] = useState([]);
+  const [newSignupsLoading, setNewSignupsLoading] = useState(false);
+  const [newSignupCount, setNewSignupCount] = useState(0);
+
+  const ADMIN_SEEN_KEY = "huddle_admin_signups_last_seen";
+  const getLastSeen = () => {
+    try { return localStorage.getItem(ADMIN_SEEN_KEY) || "1970-01-01T00:00:00Z"; }
+    catch (e) { return "1970-01-01T00:00:00Z"; }
+  };
+
+  // Lightweight: just the count of signups since last viewed (for the badge).
+  const refreshNewSignupCount = async () => {
+    try {
+      const { count } = await supabase
+        .from("parents")
+        .select("id", { count: "exact", head: true })
+        .gt("created_at", getLastSeen());
+      setNewSignupCount(count || 0);
+    } catch (e) {
+      setNewSignupCount(0);
+    }
+  };
+
+  // Full: recent signups with their school + grade associations.
+  const loadNewSignups = async () => {
+    setNewSignupsLoading(true);
+    try {
+      // Most recent 50 signups.
+      const { data: recents } = await supabase
+        .from("parents")
+        .select("id, name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const ids = (recents || []).map((r) => r.id);
+      const bySignup = {};
+      for (const r of (recents || [])) bySignup[r.id] = { ...r, associations: [] };
+
+      if (ids.length > 0) {
+        // parent → household
+        const { data: hms } = await supabase
+          .from("household_members").select("parent_id, household_id").in("parent_id", ids);
+        const hhByParent = {};
+        const hhIds = [];
+        for (const h of (hms || [])) { hhByParent[h.parent_id] = h.household_id; hhIds.push(h.household_id); }
+
+        // household → classrooms → school/grade/teacher
+        if (hhIds.length > 0) {
+          const { data: cms } = await supabase
+            .from("classroom_members")
+            .select("household_id, classrooms(grade, teacher_name, schools(name))")
+            .in("household_id", hhIds);
+          const assocByHh = {};
+          for (const cm of (cms || [])) {
+            const cr = cm.classrooms;
+            if (!cr) continue;
+            (assocByHh[cm.household_id] = assocByHh[cm.household_id] || []).push({
+              school: cr.schools?.name || "Unknown school",
+              grade: cr.grade,
+              teacher: cr.teacher_name,
+            });
+          }
+          for (const pid of ids) {
+            const hh = hhByParent[pid];
+            if (hh && assocByHh[hh]) bySignup[pid].associations = assocByHh[hh];
+          }
+        }
+      }
+
+      const lastSeen = getLastSeen();
+      const list = (recents || []).map((r) => ({
+        ...bySignup[r.id],
+        isNew: new Date(r.created_at) > new Date(lastSeen),
+      }));
+      setNewSignups(list);
+    } catch (e) {
+      setNewSignups([]);
+    }
+    setNewSignupsLoading(false);
+  };
+
+  const openNewSignups = async () => {
+    setView("adminNewSignups");
+    await loadNewSignups();
+    // Mark as seen (clears the badge) once viewed.
+    try { localStorage.setItem(ADMIN_SEEN_KEY, new Date().toISOString()); } catch (e) {}
+    setNewSignupCount(0);
   };
 
   // ---- Admin: analytics (time-series) ----
@@ -833,6 +923,59 @@ export default function Settings({ session, onBack }) {
     );
   }
 
+  // ---- Admin: new signups viewer ----
+  if (view === "adminNewSignups") {
+    const gradeLabel = (g) => {
+      if (g === 0 || g === "0" || g === "K") return "Kindergarten";
+      if (g == null || g === "") return "";
+      return `Grade ${g}`;
+    };
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        {headerBar("New Signups", () => setView("main"))}
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {newSignupsLoading ? (
+            <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
+          ) : newSignups.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
+              <p style={{ margin: "0 0 0.75rem" }}><Icon name="celebration" size={40} color="#3E5A7F" /></p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>No signups yet. New families will show up here as they join.</p>
+            </div>
+          ) : (
+            <>
+              <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0 0 1rem" }}>
+                Most recent {newSignups.length} {newSignups.length === 1 ? "signup" : "signups"}. New ones since your last visit are marked.
+              </p>
+              {newSignups.map((u) => (
+                <div key={u.id} style={{ background: "#162D50", border: `1px solid ${u.isNew ? "#02C39A" : "#2A4A6B"}`, borderRadius: "12px", padding: "1rem 1.15rem", marginBottom: "0.7rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: u.associations.length ? "0.5rem" : 0 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "600", margin: 0 }}>{u.name || "(no name yet)"}</p>
+                    {u.isNew && (
+                      <span style={{ background: "#02C39A", color: "#0F2044", fontSize: "0.65rem", fontWeight: "700", borderRadius: "999px", padding: "1px 7px", letterSpacing: "0.03em" }}>NEW</span>
+                    )}
+                    <span style={{ color: "#607080", fontSize: "0.72rem", marginLeft: "auto" }}>
+                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : ""}
+                    </span>
+                  </div>
+                  {u.associations.length > 0 ? (
+                    u.associations.map((a, i) => (
+                      <p key={i} style={{ color: "#8AAEC8", fontSize: "0.8rem", margin: "2px 0 0" }}>
+                        <Icon name="school" size={13} color="#607080" style={{ verticalAlign: "-2px", marginRight: "5px" }} />
+                        {a.school}{a.grade != null && a.grade !== "" ? ` · ${gradeLabel(a.grade)}` : ""}{a.teacher ? ` · ${a.teacher}` : ""}
+                      </p>
+                    ))
+                  ) : (
+                    <p style={{ color: "#607080", fontSize: "0.78rem", margin: 0, fontStyle: "italic" }}>No classroom yet (onboarding incomplete)</p>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ---- Main settings ----
   return (
     <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
@@ -864,10 +1007,25 @@ export default function Settings({ session, onBack }) {
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
               <div onClick={openAnalytics}
-                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #2A4A6B", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>📈 Analytics</p>
                   <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>Growth & engagement over time</p>
+                </div>
+                <Icon name="chevron_right" size={22} color="#02C39A" />
+              </div>
+              <div onClick={openNewSignups}
+                style={{ padding: "1rem 1.25rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.9rem", margin: "0 0 2px" }}>🎉 New Signups</p>
+                    <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>See who just joined</p>
+                  </div>
+                  {newSignupCount > 0 && (
+                    <span style={{ background: "#02C39A", color: "#0F2044", fontSize: "0.72rem", fontWeight: "700", borderRadius: "999px", padding: "2px 8px", minWidth: "20px", textAlign: "center" }}>
+                      {newSignupCount}
+                    </span>
+                  )}
                 </div>
                 <Icon name="chevron_right" size={22} color="#02C39A" />
               </div>
