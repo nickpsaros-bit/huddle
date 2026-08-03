@@ -41,7 +41,7 @@ export default function Auth({ onAuth }) {
     }
   };
 
-  // Passkey / Face ID sign-in. Discoverable-credential flow: no email needed —
+  // Passkey / quick sign-in. Discoverable-credential flow: no email needed —
   // the device shows the user their Huddle passkey(s) and they pick one.
   // On success, onAuthStateChange in App.jsx picks up the SIGNED_IN event.
   const signInWithPasskey = async () => {
@@ -54,17 +54,17 @@ export default function Auth({ onAuth }) {
         // has no Huddle passkey yet. Keep the message gentle and point to email.
         const code = error.code || "";
         if (code === "webauthn_credential_not_found") {
-          setError("No Face ID sign-in is set up on this device yet. Use email or Google below, then turn on Face ID in your profile.");
+          setError("No quick sign-in is set up on this device yet. Use email or Google below, then turn it on in your profile.");
         } else if (error.name === "NotAllowedError" || /cancel/i.test(error.message || "")) {
           setError(""); // user backed out — no need to shout
         } else {
-          setError(error.message || "Couldn't sign in with Face ID. Try email or Google.");
+          setError(error.message || "Couldn't sign in. Try email or Google.");
         }
         setPasskeyLoading(false);
       }
       // success → App.jsx reacts to SIGNED_IN; nothing else to do here.
     } catch (e) {
-      setError("This device or browser doesn't support Face ID sign-in. Use email or Google.");
+      setError("This device or browser doesn't support quick sign-in. Use email or Google.");
       setPasskeyLoading(false);
     }
   };
@@ -200,13 +200,13 @@ export default function Auth({ onAuth }) {
           <>
             <h2 style={{ color: "#FFFFFF", fontSize: "1.25rem", margin: "0 0 0.4rem" }}>Welcome back</h2>
             <p style={{ color: "#8AAEC8", fontSize: "0.88rem", margin: "0 0 1.5rem", lineHeight: "1.5" }}>
-              Use Face ID if you've set it up, or sign in with Google or your email.
+              Use quick sign-in if you've set it up, or sign in with Google or your email.
             </p>
 
-            {/* Fast path: passkey / Face ID. Sits above the rest as the 1-tap return. */}
+            {/* Fast path: passkey / quick sign-in. Sits above the rest as the 1-tap return. */}
             <button onClick={signInWithPasskey} disabled={passkeyLoading} style={passkeyBtn}>
               <Icon name="lock" size={20} color="#B8CCE0" />
-              {passkeyLoading ? "Waiting for Face ID..." : "Sign in with Face ID"}
+              {passkeyLoading ? "Waiting for your device..." : "Quick sign-in"}
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
               <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />

@@ -24,7 +24,7 @@ export default function Settings({ session, onBack }) {
   const [notifyCreationCal, setNotifyCreationCal] = useState(true);
   const [notifBusy, setNotifBusy] = useState(false);
 
-  // ---- Passkeys / Face ID ----
+  // ---- Passkeys / quick sign-in ----
   const [passkeys, setPasskeys] = useState([]);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyMsg, setPasskeyMsg] = useState("");
@@ -122,18 +122,18 @@ export default function Settings({ session, onBack }) {
       if (error) {
         const code = error.code || "";
         if (code === "webauthn_credential_exists") {
-          setPasskeyMsg("This device already has Face ID sign-in set up. 👍");
+          setPasskeyMsg("This device already has quick sign-in set up. 👍");
         } else if (error.name === "NotAllowedError" || /cancel/i.test(error.message || "")) {
           setPasskeyMsg("");
         } else {
-          setPasskeyMsg(error.message || "Couldn't set up Face ID on this device.");
+          setPasskeyMsg(error.message || "Couldn't set up quick sign-in on this device.");
         }
       } else {
-        setPasskeyMsg("Face ID sign-in is on for this device. ✅");
+        setPasskeyMsg("Quick sign-in is on for this device. ✅");
         loadPasskeys();
       }
     } catch (e) {
-      setPasskeyMsg("This device or browser doesn't support Face ID sign-in.");
+      setPasskeyMsg("This device or browser doesn't support quick sign-in.");
     }
     setPasskeyBusy(false);
   };
@@ -1107,12 +1107,12 @@ export default function Settings({ session, onBack }) {
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 0.75rem" }}>
           <Icon name="fingerprint" size={16} color="#607080" />
-          <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0, letterSpacing: "0.05em" }}>FASTER SIGN-IN</p>
+          <p style={{ color: "#607080", fontSize: "0.72rem", margin: 0, letterSpacing: "0.05em" }}>QUICK SIGN-IN</p>
         </div>
         <div style={{ background: "#162D50", borderRadius: "12px", border: "1px solid #2A4A6B", marginBottom: "1.5rem", overflow: "hidden" }}>
           <div style={{ padding: "1.25rem", borderBottom: passkeys.length > 0 ? "1px solid #2A4A6B" : "none" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>🔐 Face ID / Touch ID</p>
+              <p style={{ color: "#FFFFFF", fontSize: "0.9rem", fontWeight: "500", margin: 0 }}>🔐 Quick sign-in</p>
               {passkeys.length > 0 && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#0F3D2E", color: "#02C39A", fontSize: "0.72rem", fontWeight: "700", padding: "3px 10px", borderRadius: "999px", flexShrink: 0 }}>
                   <Icon name="check_circle" size={13} color="#02C39A" />ON
@@ -1122,11 +1122,11 @@ export default function Settings({ session, onBack }) {
             {passkeys.length === 0 ? (
               <>
                 <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0.25rem 0 0.85rem", lineHeight: "1.4" }}>
-                  Turn on Face ID for this device to sign back in with a tap — no email link needed next time.
+                  Turn on quick sign-in for this device — use Face ID, your fingerprint, or your device PIN to sign back in with a tap, no email link needed.
                 </p>
                 <Button variant="secondary" onClick={addPasskey} disabled={passkeyBusy}
                   style={{ background: "#0F3D2E", border: "1px solid #02C39A", color: "#02C39A" }}>
-                  {passkeyBusy ? "Setting up..." : "Set up Face ID on this device"}
+                  {passkeyBusy ? "Setting up..." : "Set up quick sign-in on this device"}
                 </Button>
               </>
             ) : (
