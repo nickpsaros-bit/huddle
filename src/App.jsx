@@ -54,11 +54,9 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const queryToken = params.get("invite");
     const pathMatch = path.match(/^\/invite\/([A-Za-z0-9]+)/);
-
     let token = null;
     if (queryToken) token = queryToken;
     else if (pathMatch && pathMatch[1]) token = pathMatch[1];
-
     if (token) {
       localStorage.setItem(INVITE_KEY, token);
       setInviteToken(token);
@@ -124,10 +122,8 @@ export default function App() {
       .from("parent_consents")
       .select("document_type, document_version")
       .eq("parent_id", userId);
-
     const hasTerms = (data || []).some(c => c.document_type === "terms_of_service" && c.document_version === TERMS_VERSION);
     const hasPrivacy = (data || []).some(c => c.document_type === "privacy_policy" && c.document_version === PRIVACY_VERSION);
-
     setHasConsented(hasTerms && hasPrivacy);
   };
 
@@ -137,20 +133,18 @@ export default function App() {
       .then(({ data }) => { if (data) setMyAvatarUrl(data.photo_url || null); });
 
     // 1) Read the parents row. CRITICAL: distinguish a FAILED read (error) from a
-    //    genuinely-absent profile. A failed read must NOT dump an existing user
-    //    into the signup flow (that's what happened during the RLS incident).
+    // genuinely-absent profile. A failed read must NOT dump an existing user
+    // into the signup flow (that's what happened during the RLS incident).
     const { data: parentData, error: parentErr } = await supabase
       .from("parents")
       .select("id, name")
       .eq("id", userId)
       .maybeSingle();
-
     if (parentErr) {
       console.warn("checkProfile: parents read failed, will retry:", parentErr.message);
       setTimeout(() => checkProfile(userId), 1500);
       return;
     }
-
     if (!parentData || !parentData.name) {
       setHasProfile(false);
       return;
@@ -162,7 +156,6 @@ export default function App() {
       .select("household_id")
       .eq("parent_id", userId)
       .maybeSingle();
-
     if (hmErr) {
       console.warn("checkProfile: household read failed, will retry:", hmErr.message);
       setTimeout(() => checkProfile(userId), 1500);
@@ -179,13 +172,11 @@ export default function App() {
       .select("id")
       .eq("household_id", hm.household_id)
       .limit(1);
-
     if (cmErr) {
       console.warn("checkProfile: classroom read failed, will retry:", cmErr.message);
       setTimeout(() => checkProfile(userId), 1500);
       return;
     }
-
     setHasProfile(memberships && memberships.length > 0);
   };
 
@@ -316,7 +307,6 @@ export default function App() {
       .eq("recipient_id", userId)
       .eq("read", false);
     bell += unreadNotifs ? unreadNotifs.length : 0;
-
     setNotificationCount(inAppOn ? bell : 0);
 
     if (!myHh) {
@@ -327,7 +317,6 @@ export default function App() {
     }
 
     const nowMs = Date.now();
-
     let unrepliedCount = 0;
     let unrepliedBirthdays = 0;
     const upcoming = []; // { date, status }
@@ -336,15 +325,14 @@ export default function App() {
       .from("playdate_invites")
       .select("rsvp, playdates(proposed_date, organizer_household_id, status, event_type)")
       .eq("household_id", myHh.household_id);
-
     for (const inv of (myInv || [])) {
       const pd = inv.playdates;
       if (!pd) continue;
       if (pd.event_type === "birthday") {
         // Count unreplied, upcoming birthday invites for the Birthdays badge.
-        if (pd.organizer_household_id !== myHh.household_id
-            && new Date(pd.proposed_date).getTime() >= nowMs
-            && inv.rsvp === "invited") {
+        if (pd.organizer_household_id !== myHh.household_id &&
+            new Date(pd.proposed_date).getTime() >= nowMs &&
+            inv.rsvp === "invited") {
           unrepliedBirthdays++;
         }
         continue; // not shown in Playdates
@@ -361,7 +349,6 @@ export default function App() {
       .select("proposed_date, status, event_type")
       .eq("organizer_household_id", myHh.household_id)
       .gte("proposed_date", new Date(nowMs).toISOString());
-
     for (const pd of (hosting || [])) {
       if (pd.event_type === "birthday") continue; // birthdays counted in the Birthdays tab
       upcoming.push({ date: new Date(pd.proposed_date).getTime(), status: pd.status });
@@ -395,10 +382,7 @@ export default function App() {
 
   if (!session && arrivedViaInvite && inviteToken && !dismissedInviteLanding) {
     return (
-      <InviteLanding
-        token={inviteToken}
-        onJoin={() => setDismissedInviteLanding(true)}
-      />
+      <InviteLanding token={inviteToken} onJoin={() => setDismissedInviteLanding(true)} />
     );
   }
 
@@ -421,7 +405,12 @@ export default function App() {
         householdId={rolloverData.householdId}
         currentYear={rolloverData.currentYear}
         memberships={rolloverData.memberships}
-        onDone={() => { setRolloverData(null); checkProfile(session.user.id); fetchCounts(session.user.id); }}
+        onDone={() => {
+          setRolloverData(null);
+          setRolloverSnoozed(true); // don't re-evaluate/re-show again this session
+          checkProfile(session.user.id);
+          fetchCounts(session.user.id);
+        }}
         onRemindLater={() => setRolloverSnoozed(true)}
       />
     );
@@ -465,12 +454,7 @@ export default function App() {
       <div style={{ paddingBottom: "70px" }}>
         {screen}
       </div>
-      <NavBar
-        active={activeTab}
-        onNavigate={handleNavigate}
-        badges={{ playdates: playdateBadge, birthdays: birthdayBadge }}
-        halos={{ playdates: playdateHalo }}
-      />
+      <NavBar active={activeTab} onNavigate={handleNavigate} badges={{ playdates: playdateBadge, birthdays: birthdayBadge }} halos={{ playdates: playdateHalo }} />
     </div>
   );
 }
