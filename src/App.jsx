@@ -15,6 +15,7 @@ import InviteLanding from "./InviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
 import Journey from "./Journey";
 import Birthdays from "./Birthdays";
+import PlaydateRequest from "./PlaydateRequest";
 import FadeIn, { ensureKeyframes } from "./FadeIn";
 import { shouldPromptRollover, currentSchoolYear, earliestStartMonth } from "./schoolYear";
 import { TERMS_VERSION, PRIVACY_VERSION } from "./legal";
@@ -34,6 +35,7 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [showJourney, setShowJourney] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [pingPlaydateWith, setPingPlaydateWith] = useState(null); // person object from a ping's "Let's plan it"
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const [playdateBadge, setPlaydateBadge] = useState(0);
@@ -416,8 +418,26 @@ export default function App() {
     );
   }
 
+  // A playdate ping was acted on ("Let's plan it") — open the planner pre-filled
+  // with the pinger as the recipient. Takes priority so it shows over the inbox.
+  if (pingPlaydateWith) {
+    return (
+      <PlaydateRequest
+        session={session}
+        recipient={pingPlaydateWith}
+        onBack={() => setPingPlaydateWith(null)}
+        onSent={() => {
+          setPingPlaydateWith(null);
+          setShowInbox(false);
+          setActiveTab("playdates");
+          fetchCounts(session.user.id);
+        }}
+      />
+    );
+  }
+
   if (showInbox) {
-    return <Inbox session={session} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
+    return <Inbox session={session} onPlanPlaydate={(person) => setPingPlaydateWith(person)} onBack={() => { setShowInbox(false); fetchCounts(session.user.id); checkProfile(session.user.id); }} />;
   }
 
   if (showSettings) {

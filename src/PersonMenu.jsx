@@ -1,8 +1,9 @@
 import { useState } from "react";
 import Icon from "./Icon";
+import { supabase } from "./supabase";
 import { blockParent, submitReport } from "./blocks";
 
-// Drop-in "⋯" menu for blocking/reporting ANY person, anywhere they appear.
+// Drop-in "⋯" menu for pinging/blocking/reporting ANY person, anywhere they appear.
 // Usage: <PersonMenu session={session} targetId={parentId} targetName={name} onDone={() => refresh()} />
 export default function PersonMenu({ session, targetId, targetName, onDone, onRemoveConnection, size = 20, color = "#8AAEC8" }) {
   const [open, setOpen] = useState(false);
@@ -13,6 +14,7 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
   const [reportAlsoBlock, setReportAlsoBlock] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [pinging, setPinging] = useState(false);
 
   const short = (n) => {
     if (!n) return "this person";
@@ -21,6 +23,53 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
   };
 
   if (!targetId || targetId === session?.user?.id) return null;
+
+  // Send a lightweight "open to a playdate?" ping = one notification to the target.
+  // Best-effort dedupe: if I've pinged this person in the last 3 days, don't re-send.
+  const doPing = async () => {
+    setPinging(true);
+    setOpen(false);
+    try {
+      // Dedupe check: any recent playdate_ping I sent to this person?
+      const threeDaysAgo = new Date(Date.now() - 3 * 864e5).toISOString();
+      const { data: recent } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("recipient_id", targetId)
+        .eq("actor_id", session.user.id)
+        .eq("type", "playdate_ping")
+        .gte("created_at", threeDaysAgo)
+        .limit(1);
+      if (recent && recent.length > 0) {
+        setToast(`You already pinged ${short(targetName)} recently 👋`);
+        setPinging(false);
+        setTimeout(() => setToast(""), 2500);
+        return;
+      }
+
+      // My display name for the ping copy.
+      const { data: me } = await supabase
+        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+      const myLabel = short(me?.name);
+
+      const { error } = await supabase.from("notifications").insert({
+        recipient_id: targetId,
+        actor_id: session.user.id,
+        type: "playdate_ping",
+        title: "Open to a playdate? 👋",
+        body: `${myLabel} is up for a playdate soon. Tap “Let's plan it” to set one up.`,
+      });
+      if (error) throw error;
+
+      setToast(`Sent! ${short(targetName)} will see you're up for a playdate 👋`);
+      setPinging(false);
+      setTimeout(() => { setToast(""); if (onDone) onDone(); }, 1800);
+    } catch (e) {
+      setToast("Couldn't send that ping, try again.");
+      setPinging(false);
+      setTimeout(() => setToast(""), 2500);
+    }
+  };
 
   const doBlock = async () => {
     setBusy(true);
@@ -81,6 +130,14 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
           <div onClick={(e) => e.stopPropagation()}
             style={{ background: "#162D50", borderRadius: "18px", padding: "1rem", width: "100%", maxWidth: "360px", border: "1px solid #2A4A6B", animation: "huddleScaleIn 200ms cubic-bezier(0.22,1,0.36,1) both" }}>
             <p style={{ color: "#8AAEC8", fontSize: "0.82rem", textAlign: "center", margin: "0.25rem 0 1rem" }}>{targetName || "This person"}</p>
+
+            {/* Positive action first: ping for a playdate. */}
+            <button onClick={doPing} disabled={pinging}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: pinging ? "default" : "pointer" }}>
+              <span style={{ fontSize: "20px", lineHeight: 1 }}>👋</span>
+              <span style={{ color: "#02C39A", fontSize: "0.92rem", fontWeight: "600" }}>{pinging ? "Sending…" : "Open to a playdate?"}</span>
+            </button>
+
             {onRemoveConnection && (
               <button onClick={() => { setOpen(false); onRemoveConnection(); }}
                 style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F2044", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: "pointer" }}>

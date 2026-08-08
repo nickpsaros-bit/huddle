@@ -4,7 +4,7 @@ import Button from "./Button";
 import Icon from "./Icon";
 import { getHiddenParentIds } from "./blocks";
 
-export default function Inbox({ session, onBack }) {
+export default function Inbox({ session, onBack, onPlanPlaydate }) {
   const [connectionRequests, setConnectionRequests] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -125,6 +125,22 @@ export default function Inbox({ session, onBack }) {
       } catch (e) { /* best-effort */ }
     }
     if (typeof onBack === "function") onBack();
+  };
+
+  // Act on a playdate ping: mark it read, then open the playdate planner
+  // pre-filled with the pinger as the recipient (funnel into the existing flow).
+  const planFromPing = async (n) => {
+    const actor = n.actor_id ? actorMap[n.actor_id] : null;
+    if (!n.actor_id || !actor) {
+      setMessage("Couldn't find that person — they may have left Huddle.");
+      setTimeout(() => setMessage(""), 3000);
+      return;
+    }
+    // Mark this ping read so it doesn't keep nagging.
+    try { await supabase.from("notifications").update({ read: true }).eq("id", n.id); } catch (e) { /* best-effort */ }
+    if (typeof onPlanPlaydate === "function") {
+      onPlanPlaydate({ id: n.actor_id, name: actor.name, photo_url: actor.photo_url });
+    }
   };
 
   // Reply to a gift question with a category — routes back to the asker (actor_id).
@@ -366,6 +382,14 @@ export default function Inbox({ session, onBack }) {
                           </div>
                         {n.body && <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 6px", lineHeight: "1.5" }}>{n.body}</p>}
                         <p style={{ color: "#607080", fontSize: "0.7rem", margin: 0 }}>{fmtWhen(n.created_at)}</p>
+
+                        {n.type === "playdate_ping" && (
+                          <div style={{ marginTop: "0.75rem" }}>
+                            <Button variant="primary" size="sm" onClick={() => planFromPing(n)}>
+                              Let's plan it →
+                            </Button>
+                          </div>
+                        )}
 
                         {n.type === "gift_ask" && (
                           repliedGift[n.id] ? (
