@@ -49,6 +49,9 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
   const [statBirthdaysMonth, setStatBirthdaysMonth] = useState(0);
   const [monthBirthdays, setMonthBirthdays] = useState([]);
   const [showBirthdayList, setShowBirthdayList] = useState(false);
+  const [sentPingCount, setSentPingCount] = useState(0);       // my pending sent pings
+  const [showSentPings, setShowSentPings] = useState(false);
+  const [sentPings, setSentPings] = useState([]);              // full list for the drill-in
   const [hasUpcomingBirthdayEvent, setHasUpcomingBirthdayEvent] = useState(false);
   const [birthdayEventTag, setBirthdayEventTag] = useState("");  // "🎂 Hosting" | "🎂 Going"
 
@@ -385,6 +388,31 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       setStatConnections(acceptedCount);
     } catch (e) {
       setStatConnections(0);
+    }
+
+    // ---- MY PENDING SENT PINGS (for the conditional home tile + drill-in list) ----
+    try {
+      const { data: pings } = await supabase
+        .from("playdate_pings")
+        .select("id, recipient_id, status, created_at")
+        .eq("sender_id", session.user.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      const list = pings || [];
+      setSentPingCount(list.length);
+      if (list.length > 0) {
+        const rIds = [...new Set(list.map((p) => p.recipient_id))];
+        const { data: people } = await supabase
+          .from("parents").select("id, name, photo_url").in("id", rIds);
+        const byId = {};
+        for (const p of (people || [])) byId[p.id] = p;
+        setSentPings(list.map((p) => ({ ...p, person: byId[p.recipient_id] || null })));
+      } else {
+        setSentPings([]);
+      }
+    } catch (e) {
+      setSentPingCount(0);
+      setSentPings([]);
     }
 
     setLoading(false);
@@ -931,6 +959,50 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     </div>
   );
 
+  if (showSentPings) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => setShowSentPings(false)} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}><Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back</button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>👋 Playdate pings sent</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {sentPings.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+              <p style={{ fontSize: "2.5rem", margin: "0 0 1rem" }}>👋</p>
+              <p style={{ color: "#FFFFFF", fontSize: "1.1rem", margin: "0 0 0.5rem" }}>No pings waiting</p>
+              <p style={{ color: "#607080", fontSize: "0.85rem" }}>When you tap “Open to a playdate?” on a family, it'll show here until they respond.</p>
+            </div>
+          ) : (
+            <>
+              <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
+                Families you've nudged for a playdate. They'll drop off here once they start planning with you.
+              </p>
+              {sentPings.map((p) => (
+                <div key={p.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#028090", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: "600", color: "#FFFFFF", flexShrink: 0, overflow: "hidden" }}>
+                    {p.person?.photo_url ? (
+                      <img src={p.person.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (p.person?.name?.charAt(0) || "?")}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "500", margin: "0 0 2px" }}>
+                      {shortName(p.person?.name)}
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>Pinged {relTime(p.created_at)}</p>
+                  </div>
+                  <span style={{ color: "#8AAEC8", fontSize: "0.78rem", fontWeight: "600", flexShrink: 0 }}>Waiting to hear back</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (showBirthdayList) {
     const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
     const now = new Date();
@@ -1162,6 +1234,10 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
             { label: "Upcoming playdates", value: statUpcoming, go: onGoToPlaydates },
             { label: "Birthdays coming up", value: statBirthdaysMonth, go: () => setShowBirthdayList(true), highlight: hasUpcomingBirthdayEvent, tag: birthdayEventTag },
           ];
+          // Only surface the pings tile when there are pings in play (never show a "0").
+          if (sentPingCount > 0) {
+            tiles.push({ label: "Playdate pings sent 👋", value: sentPingCount, go: () => setShowSentPings(true) });
+          }
           return (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "1.5rem" }}>
               {tiles.map((t) => (

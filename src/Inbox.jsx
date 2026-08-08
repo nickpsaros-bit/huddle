@@ -138,6 +138,14 @@ export default function Inbox({ session, onBack, onPlanPlaydate }) {
     }
     // Mark this ping read so it doesn't keep nagging.
     try { await supabase.from("notifications").update({ read: true }).eq("id", n.id); } catch (e) { /* best-effort */ }
+    // Mark the tracked ping row as responded (so the sender sees it moved).
+    try {
+      await supabase.from("playdate_pings")
+        .update({ status: "responded" })
+        .eq("sender_id", n.actor_id)
+        .eq("recipient_id", session.user.id)
+        .eq("status", "pending");
+    } catch (e) { /* best-effort */ }
     if (typeof onPlanPlaydate === "function") {
       onPlanPlaydate({ id: n.actor_id, name: actor.name, photo_url: actor.photo_url });
     }

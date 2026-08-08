@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "./Icon";
 import { supabase } from "./supabase";
 import { blockParent, submitReport } from "./blocks";
@@ -15,6 +15,7 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [pinging, setPinging] = useState(false);
+  const [alreadyPinged, setAlreadyPinged] = useState(false); // pending ping to this person exists
 
   const short = (n) => {
     if (!n) return "this person";
@@ -22,49 +23,79 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
     return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1].charAt(0)}.` : parts[0];
   };
 
+  // When the menu opens, check whether I already have a pending ping to this person.
+  useEffect(() => {
+    if (!open || !targetId || !session?.user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("playdate_pings")
+          .select("id")
+          .eq("sender_id", session.user.id)
+          .eq("recipient_id", targetId)
+          .eq("status", "pending")
+          .limit(1);
+        if (!cancelled) setAlreadyPinged(!!(data && data.length > 0));
+      } catch (e) {
+        if (!cancelled) setAlreadyPinged(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, targetId, session?.user?.id]);
+
   if (!targetId || targetId === session?.user?.id) return null;
 
-  // Send a lightweight "open to a playdate?" ping = one notification to the target.
-  // Best-effort dedupe: if I've pinged this person in the last 3 days, don't re-send.
+  // Send an "open to a playdate?" ping: create a tracked playdate_pings row AND
+  // a notification (so it lights up the recipient's bell). Guarded against dupes.
   const doPing = async () => {
     setPinging(true);
-    setOpen(false);
     try {
-      // Dedupe check: any recent playdate_ping I sent to this person?
-      const threeDaysAgo = new Date(Date.now() - 3 * 864e5).toISOString();
-      const { data: recent } = await supabase
-        .from("notifications")
+      // Dedupe: any pending ping I already sent this person?
+      const { data: existing } = await supabase
+        .from("playdate_pings")
         .select("id")
+        .eq("sender_id", session.user.id)
         .eq("recipient_id", targetId)
-        .eq("actor_id", session.user.id)
-        .eq("type", "playdate_ping")
-        .gte("created_at", threeDaysAgo)
+        .eq("status", "pending")
         .limit(1);
-      if (recent && recent.length > 0) {
-        setToast(`You already pinged ${short(targetName)} recently 👋`);
+      if (existing && existing.length > 0) {
+        setOpen(false);
+        setToast(`You've already pinged ${short(targetName)} 👋`);
         setPinging(false);
         setTimeout(() => setToast(""), 2500);
         return;
       }
 
-      // My display name for the ping copy.
-      const { data: me } = await supabase
-        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
-      const myLabel = short(me?.name);
-
-      const { error } = await supabase.from("notifications").insert({
+      // 1) The tracked ping row.
+      const { error: pingErr } = await supabase.from("playdate_pings").insert({
+        sender_id: session.user.id,
         recipient_id: targetId,
-        actor_id: session.user.id,
-        type: "playdate_ping",
-        title: "Open to a playdate? 👋",
-        body: `${myLabel} is up for a playdate soon. Tap “Let's plan it” to set one up.`,
+        status: "pending",
       });
-      if (error) throw error;
+      if (pingErr) throw pingErr;
 
+      // 2) A notification so it hits their bell (best-effort).
+      try {
+        const { data: me } = await supabase
+          .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+        const myLabel = short(me?.name);
+        await supabase.from("notifications").insert({
+          recipient_id: targetId,
+          actor_id: session.user.id,
+          type: "playdate_ping",
+          title: "Open to a playdate? 👋",
+          body: `${myLabel} is up for a playdate soon. Tap “Let's plan it” to set one up.`,
+        });
+      } catch (notifErr) { /* best-effort */ }
+
+      setOpen(false);
+      setAlreadyPinged(true);
       setToast(`Sent! ${short(targetName)} will see you're up for a playdate 👋`);
       setPinging(false);
       setTimeout(() => { setToast(""); if (onDone) onDone(); }, 1800);
     } catch (e) {
+      setOpen(false);
       setToast("Couldn't send that ping, try again.");
       setPinging(false);
       setTimeout(() => setToast(""), 2500);
@@ -132,11 +163,18 @@ export default function PersonMenu({ session, targetId, targetName, onDone, onRe
             <p style={{ color: "#8AAEC8", fontSize: "0.82rem", textAlign: "center", margin: "0.25rem 0 1rem" }}>{targetName || "This person"}</p>
 
             {/* Positive action first: ping for a playdate. */}
-            <button onClick={doPing} disabled={pinging}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: pinging ? "default" : "pointer" }}>
-              <span style={{ fontSize: "20px", lineHeight: 1 }}>👋</span>
-              <span style={{ color: "#02C39A", fontSize: "0.92rem", fontWeight: "600" }}>{pinging ? "Sending…" : "Open to a playdate?"}</span>
-            </button>
+            {alreadyPinged ? (
+              <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#12352C", border: "1px solid #2A4A6B", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem" }}>
+                <Icon name="check_circle" size={20} color="#02C39A" />
+                <span style={{ color: "#8AAEC8", fontSize: "0.92rem" }}>Playdate ping sent 👋</span>
+              </div>
+            ) : (
+              <button onClick={doPing} disabled={pinging}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px", background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "0.9rem 1rem", marginBottom: "0.6rem", cursor: pinging ? "default" : "pointer" }}>
+                <span style={{ fontSize: "20px", lineHeight: 1 }}>👋</span>
+                <span style={{ color: "#02C39A", fontSize: "0.92rem", fontWeight: "600" }}>{pinging ? "Sending…" : "Open to a playdate?"}</span>
+              </button>
+            )}
 
             {onRemoveConnection && (
               <button onClick={() => { setOpen(false); onRemoveConnection(); }}
