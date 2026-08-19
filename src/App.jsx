@@ -12,6 +12,7 @@ import Inbox from "./Inbox";
 import Network from "./Network";
 import Playdates from "./Playdates";
 import InviteLanding from "./InviteLanding";
+import PlaydateInviteLanding from "./PlaydateInviteLanding";
 import RolloverPrompt from "./RolloverPrompt";
 import Journey from "./Journey";
 import Birthdays from "./Birthdays";
@@ -46,6 +47,13 @@ export default function App() {
   const [inviteToken, setInviteToken] = useState(null);
   const [arrivedViaInvite, setArrivedViaInvite] = useState(false);
   const [dismissedInviteLanding, setDismissedInviteLanding] = useState(false);
+
+  // NON-USER playdate invite landing (Option A). Detected synchronously from the
+  // URL and rendered BEFORE the session gate, so a logged-out invitee sees the
+  // invite — not the login screen. Separate path (/pd-invite/) from the existing
+  // connection-invite system (/invite/), so the two never collide.
+  const pdInviteMatch = (window.location.pathname || "").match(/^\/pd-invite\/([a-f0-9]+)/i);
+  const pdInviteToken = pdInviteMatch ? pdInviteMatch[1] : null;
 
   // Rollover: null = not evaluated / not due; object = prompt data to show.
   const [rolloverData, setRolloverData] = useState(null);
@@ -373,6 +381,13 @@ export default function App() {
       setTimeout(() => fetchCounts(session.user.id), 1500);
     }
   };
+
+  // Non-user playdate invite: highest priority, works logged-in or out.
+  // Rendered before the session gate so a logged-out invitee sees the invite,
+  // not the login screen.
+  if (pdInviteToken) {
+    return <PlaydateInviteLanding token={pdInviteToken} />;
+  }
 
   if (loading) {
     return (
