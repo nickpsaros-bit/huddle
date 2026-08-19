@@ -123,6 +123,7 @@ export default function App() {
   useEffect(() => {
     if (session && hasProfile) {
       consumeInvite(session.user.id, session.user.email).then(() => fetchCounts(session.user.id));
+      redeemPlaydateInvite().then(() => fetchCounts(session.user.id));
       checkRollover(session.user.id);
     }
   }, [session, hasProfile]);
@@ -273,6 +274,18 @@ export default function App() {
       localStorage.removeItem(INVITE_KEY);
       localStorage.removeItem(INVITE_EMAIL_KEY);
       setInviteToken(null);
+    }
+  };
+
+  // Turn any accepted/pending NON-USER playdate invites (matched by this user's
+  // email) into real playdate_invites rows, so a family that accepted before
+  // signing up shows up on the host's playdate. Mirrors consumeInvite:
+  // server-side RPC, best-effort, never blocks the app.
+  const redeemPlaydateInvite = async () => {
+    try {
+      await supabase.rpc("redeem_playdate_invite", { p_token: null });
+    } catch (err) {
+      // Best-effort — a failed redemption shouldn't block entering the app.
     }
   };
 
