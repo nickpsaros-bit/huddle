@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import ConfirmModal from "./ConfirmModal";
 import Button from "./Button";
 import PlaydateRequest from "./PlaydateRequest";
+import InviteNonUser from "./InviteNonUser";
 import Icon from "./Icon";
 import TopBar from "./TopBar";
 
@@ -16,6 +17,8 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const [showArchive, setShowArchive] = useState(false);
 
   // Create-flow state
+  const [invitingNonUser, setInvitingNonUser] = useState(false); // ← STEP 9
+  const [myName, setMyName] = useState("");                      // ← STEP 9
   const [picking, setPicking] = useState(false);
   const [pickPeople, setPickPeople] = useState([]);
   const [pickLoading, setPickLoading] = useState(false);
@@ -201,6 +204,13 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     if (!hm) { setLoading(false); return; }
     const hhId = hm.household_id;
     setHouseholdId(hhId);
+
+    // My name (for the connection-invite fallback in the non-user flow). ← STEP 9
+    try {
+      const { data: meRow } = await supabase
+        .from("parents").select("name").eq("id", session.user.id).maybeSingle();
+      if (meRow?.name) setMyName(meRow.name);
+    } catch (e) { /* best-effort */ }
 
     // Load my plan (for the multi-invite premium gate).
     try {
@@ -759,6 +769,22 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
   };
 
+  // ---- STEP 9: Non-user invite flow (second button) ----
+  if (invitingNonUser) {
+    return (
+      <InviteNonUser
+        session={session}
+        inviterName={myName}
+        onBack={() => setInvitingNonUser(false)}
+        onDone={() => {
+          setInvitingNonUser(false);
+          fetchData();
+          if (typeof onChanged === "function") onChanged();
+        }}
+      />
+    );
+  }
+
   // ---- If creating a playdate, render the request form (reuses existing flow) ----
   if (editingEvent) {
     return (
@@ -1033,8 +1059,14 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
         <button onClick={openPicker}
-          style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#02C39A", color: "#0F2044", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           <Icon name="add" size={20} style={{ verticalAlign: "-3px", marginRight: 4 }} />Set up a playdate
+        </button>
+
+        {/* ---- STEP 9: second button — invite a non-user ---- */}
+        <button onClick={() => setInvitingNonUser(true)}
+          style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <Icon name="mail" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Invite someone not on Huddle
         </button>
 
         {message && (
