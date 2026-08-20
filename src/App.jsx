@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import Auth from "./Auth";
 import Consent from "./Consent";
 import Profile from "./Profile";
+import Onboarding from "./Onboarding";
 import Home from "./Home";
 import NavBar from "./NavBar";
 import ProfileScreen from "./ProfileScreen";
@@ -30,6 +31,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasConsented, setHasConsented] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState(true); // assume seen until we learn otherwise (avoids flash)
+  const [myName, setMyName] = useState("");
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -148,7 +151,7 @@ export default function App() {
     // into the signup flow (that's what happened during the RLS incident).
     const { data: parentData, error: parentErr } = await supabase
       .from("parents")
-      .select("id, name")
+      .select("id, name, onboarding_seen")
       .eq("id", userId)
       .maybeSingle();
     if (parentErr) {
@@ -160,6 +163,9 @@ export default function App() {
       setHasProfile(false);
       return;
     }
+    // Capture name + onboarding flag for the first-run tutorial.
+    if (parentData.name) setMyName(parentData.name);
+    setOnboardingSeen(parentData.onboarding_seen !== false); // only false triggers the tutorial
 
     // 2) Household check — same error-vs-absent distinction.
     const { data: hm, error: hmErr } = await supabase
@@ -426,6 +432,18 @@ export default function App() {
 
   if (!hasProfile) {
     return <Profile session={session} onComplete={() => { setHasProfile(true); fetchCounts(session.user.id); }} />;
+  }
+
+  // First-run tutorial: after profile is complete, before the main app, shown
+  // once (gated on parents.onboarding_seen). Skippable; sets the flag on finish.
+  if (!onboardingSeen) {
+    return (
+      <Onboarding
+        session={session}
+        name={myName}
+        onDone={() => setOnboardingSeen(true)}
+      />
+    );
   }
 
   if (rolloverData && !rolloverSnoozed) {
