@@ -2,7 +2,7 @@
 // When you update these, bump the VERSION number to trigger re-consent.
 
 export const TERMS_VERSION = "1.0.0";
-export const PRIVACY_VERSION = "1.1.0";
+export const PRIVACY_VERSION = "1.2.0";
 
 export const TERMS_OF_SERVICE = `# Terms of Service
 
@@ -121,14 +121,14 @@ Email: admin@huddlefamilies.com
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
-**Effective date:** June 28, 2026
-**Version:** 1.1.0
+**Effective date:** August 19, 2026
+**Version:** 1.2.0
 
 This Privacy Policy describes how Huddle ("we," "us," or "our") collects, uses, and shares information when you use the Huddle service at huddlefamilies.com (the "Service").
 
 By using Huddle, you agree to this Privacy Policy.
 
-> **What's new in 1.1.0:** We added details about the information we collect when you report a problem or contact support, and about passkey ("Face ID" / "Touch ID") sign-in.
+> **What's new in 1.2.0:** We added details about what happens when a Huddle member invites someone who isn't yet on Huddle to a playdate — specifically, that we store that person's email address only to deliver the invitation, and delete it once they respond or the invitation expires.
 
 ---
 
@@ -154,6 +154,10 @@ When you sign up and use Huddle, we collect:
 - **Sign-in credentials** — if you choose to enable passkey sign-in ("Face ID," "Touch ID," or a device PIN or security key), we store a public key and related sign-in metadata for your account. Your biometric data (such as your face or fingerprint) **never leaves your device** and is never sent to or stored by Huddle
 - **Basic technical data** — IP address, browser type, device information, and session timestamps, used for security and service reliability
 
+If **another Huddle member invites you to a playdate before you have an account**, we also collect:
+
+- **Your email address, and a name if the member provides one** — stored only so we can deliver that playdate invitation to you, along with the event details and a calendar file. We use this solely to send you that invitation. You do not need to create an account to receive or respond to it, and every invitation email includes a one-click link to opt out of further invitations. We delete this information once you respond to the invitation or it expires (see "Data retention" below). If you opt out, we keep a minimal record of your email for the sole purpose of honoring that choice and not emailing you again.
+
 We **do not** collect names, photos, or any identifying information about minor children. Children are never users of Huddle and are never represented as records in our system.
 
 ## 3. How we use your information
@@ -163,6 +167,7 @@ We use your information to:
 - Provide and maintain the Huddle service
 - Help you find and connect with other parents at your child's school
 - Send you notifications about connection requests, messages, and other parents' actions you've opted into
+- Deliver playdate invitations that a member sends you, if you have been invited before creating an account
 - Investigate, troubleshoot, and fix problems you report, and respond to your support requests
 - Improve and develop the Service
 - Protect the security and integrity of the Service
@@ -173,6 +178,7 @@ We use your information to:
 We share information **only** in these limited ways:
 
 - **With other parents you've connected with** — your name, photo, and classroom affiliation are visible to parents in your same classroom and to parents you've accepted a connection with
+- **When you invite someone who isn't on Huddle** — if you invite a person who doesn't yet have an account to a playdate, we send an email to the address you provide, containing the playdate details and a calendar file, so they can respond. We do this only at your direction and only to deliver that invitation
 - **With service providers** — we use Supabase (database and authentication), Vercel (hosting), and Resend (email delivery) to operate the Service. These providers are bound by their own privacy obligations and only process data on our behalf
 - **For legal reasons** — if required by law, court order, or to protect rights, safety, or property
 - **In a business transfer** — if Huddle is acquired, your information may be transferred to the new owner, subject to this Privacy Policy
@@ -185,6 +191,7 @@ We minimize data retention by design:
 
 - **Playdate messages** — automatically deleted 24 hours after the scheduled playdate
 - **General messages** — automatically deleted after 30 days from the last message (configurable by user)
+- **Invitations to people not yet on Huddle** — the email address stored to deliver a playdate invitation to a non-member is deleted once the invitation is responded to or expires, and in any case no later than 30 days after it is sent. If the person opts out, we retain only their email address, on a suppression list, for the sole purpose of not contacting them again
 - **Problem reports** — retained while we investigate and for a reasonable period afterward to track recurring issues, then deleted
 - **Account data after deletion** — permanently removed within 30 days of account deletion
 - **Profile data** — retained as long as your account is active
@@ -198,6 +205,7 @@ You can:
 - **Update your profile** at any time through the Profile screen
 - **Manage passkey sign-in** — you can add or remove a passkey for a device at any time in Settings under "Faster sign-in"
 - **Disconnect from another parent** at any time through your Network screen
+- **Opt out of playdate invitations** — if you receive an invitation before joining Huddle, every invitation email includes a one-click link to stop receiving them
 - **Delete your account** by contacting us at the email below. When you delete your account, we will permanently remove your profile, photo, messages, and connections within 30 days
 - **Request a copy** of the data we hold about you
 - **Object** to certain uses of your data
