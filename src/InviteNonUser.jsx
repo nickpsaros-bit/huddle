@@ -5,12 +5,21 @@ import Icon from "./Icon";
 import InviteFamily from "./InviteFamily";
 
 // Streamlined flow for inviting someone who ISN'T on Huddle to a playdate.
-// Creates a playdate (host-only guest list), then fires create-pending-invite,
-// which emails the non-user a tokenized landing page (+ .ics). Surfaces the
-// backend safety codes (already_user / already_invited / opted_out /
-// monthly_limit). On monthly_limit we roll the playdate back and offer the
-// existing connection-invite flow (InviteFamily) instead.
-export default function InviteNonUser({ session, inviterName, onBack, onDone }) {
+//
+// Two modes:
+//  - CREATE (default): collects date/time/location, creates a NEW playdate
+//    (host-only guest list), then fires create-pending-invite.
+//  - REUSE (existingPlaydate passed): the playdate already exists (e.g. the host
+//    is re-inviting after a decline). We DON'T create a playdate; we just invite
+//    the new email against existingPlaydate.id. Date/location are shown read-only.
+//
+// Surfaces the backend safety codes (already_user / already_invited / opted_out
+// / monthly_limit). On monthly_limit we show the connection-invite fallback
+// (InviteFamily); in CREATE mode we also roll back the just-created playdate,
+// but in REUSE mode we NEVER delete the host's pre-existing playdate.
+export default function InviteNonUser({ session, inviterName, existingPlaydate = null, onBack, onDone }) {
+  const reuse = !!existingPlaydate;
+
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [locationName, setLocationName] = useState("");
@@ -34,6 +43,20 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
     { name: "Our House", address: "My home" },
     { name: "Their House", address: "Their home" },
   ];
+
+  // In reuse mode, prefill the (read-only) date/time/location from the playdate.
+  useEffect(() => {
+    if (!existingPlaydate) return;
+    if (existingPlaydate.proposed_date) {
+      const d = new Date(existingPlaydate.proposed_date);
+      const pad = (x) => String(x).padStart(2, "0");
+      setDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      setTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    }
+    setLocationName(existingPlaydate.location_name || "");
+    setLocationAddress(existingPlaydate.location_address || "");
+    setNote(existingPlaydate.note || "");
+  }, [existingPlaydate]);
 
   // Time slots 7am–9pm every 30 min, mirroring PlaydateRequest.
   const timeSlots = [];
@@ -60,16 +83,25 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
     return c.includes("@") && c.includes(".") && !c.endsWith("@");
   };
 
+  const fmtReuseWhen = () => {
+    if (!existingPlaydate?.proposed_date) return "";
+    return new Date(existingPlaydate.proposed_date).toLocaleString("en-US", {
+      weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+  };
+
   const send = async () => {
     // ---- Validate ----
-    if (!date || !time || !locationName) {
-      setError("Please fill in date, time and location.");
-      return;
-    }
-    const startsAt = new Date(`${date}T${time}`);
-    if (isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
-      setError("Please pick a date and time in the future.");
-      return;
+    if (!reuse) {
+      if (!date || !time || !locationName) {
+        setError("Please fill in date, time and location.");
+        return;
+      }
+      const startsAt = new Date(`${date}T${time}`);
+      if (isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
+        setError("Please pick a date and time in the future.");
+        return;
+      }
     }
     if (!validEmail(email)) {
       setError("Please enter a valid email address.");
@@ -79,66 +111,70 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
     setLoading(true);
     setError("");
 
+    // In reuse mode we invite against the existing playdate and never create/delete one.
     let createdPlaydateId = null;
+    let targetPlaydateId = reuse ? existingPlaydate.id : null;
+
     try {
-      // 1) My household.
-      const { data: myHm, error: myErr } = await supabase
-        .from("household_members")
-        .select("household_id")
-        .eq("parent_id", session.user.id)
-        .single();
-      if (myErr) throw myErr;
+      if (!reuse) {
+        // 1) My household.
+        const { data: myHm, error: myErr } = await supabase
+          .from("household_members")
+          .select("household_id")
+          .eq("parent_id", session.user.id)
+          .single();
+        if (myErr) throw myErr;
 
-      const proposedDate = startsAt.toISOString();
+        const proposedDate = new Date(`${date}T${time}`).toISOString();
 
-      // 2) Create the playdate.
-      const { data: playdate, error: pdErr } = await supabase
-        .from("playdates")
-        .insert({
-          organizer_household_id: myHm.household_id,
-          organizer_parent_id: session.user.id,
-          proposed_date: proposedDate,
-          location_name: locationName,
-          location_address: locationAddress,
-          note: note || null,
-          status: "pending",
-          event_type: "playdate",
-          recurrence: "none",
-        })
-        .select()
-        .single();
-      if (pdErr) throw pdErr;
-      createdPlaydateId = playdate.id;
+        // 2) Create the playdate.
+        const { data: playdate, error: pdErr } = await supabase
+          .from("playdates")
+          .insert({
+            organizer_household_id: myHm.household_id,
+            organizer_parent_id: session.user.id,
+            proposed_date: proposedDate,
+            location_name: locationName,
+            location_address: locationAddress,
+            note: note || null,
+            status: "pending",
+            event_type: "playdate",
+            recurrence: "none",
+          })
+          .select()
+          .single();
+        if (pdErr) throw pdErr;
+        createdPlaydateId = playdate.id;
+        targetPlaydateId = playdate.id;
 
-      // 3) Host's own invite row (rsvp=yes), matching the normal send flow.
-      const { error: invErr } = await supabase.from("playdate_invites").insert({
-        playdate_id: playdate.id,
-        household_id: myHm.household_id,
-        invited_by_household_id: myHm.household_id,
-        invited_parent_id: session.user.id,
-        rsvp: "yes",
-      });
-      if (invErr) throw invErr;
+        // 3) Host's own invite row (rsvp=yes).
+        const { error: invErr } = await supabase.from("playdate_invites").insert({
+          playdate_id: playdate.id,
+          household_id: myHm.household_id,
+          invited_by_household_id: myHm.household_id,
+          invited_parent_id: session.user.id,
+          rsvp: "yes",
+        });
+        if (invErr) throw invErr;
 
-      // 4) Host's own calendar copy (best-effort), matching PlaydateRequest.
-      supabase.functions.invoke("send-host-calendar", {
-        body: { playdate_id: playdate.id },
-      }).catch(() => {});
+        // 4) Host's own calendar copy (best-effort).
+        supabase.functions.invoke("send-host-calendar", {
+          body: { playdate_id: playdate.id },
+        }).catch(() => {});
+      }
 
-      // 5) Fire the non-user invite.
+      // 5) Fire the non-user invite (same for both modes).
       const { data: result, error: fnErr } = await supabase.functions.invoke(
         "create-pending-invite",
         {
           body: {
-            playdate_id: playdate.id,
+            playdate_id: targetPlaydateId,
             invitee_email: email.trim().toLowerCase(),
             invitee_name: inviteeName.trim() || null,
           },
         }
       );
 
-      // supabase.functions.invoke surfaces non-2xx as fnErr with the body in context;
-      // we also defensively read result.code when present.
       const code = result?.code || (fnErr ? await extractCode(fnErr) : null);
 
       if (result?.ok) {
@@ -149,7 +185,8 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
 
       // ---- Handle safety codes ----
       if (code === "monthly_limit") {
-        // Roll back the just-created playdate (option B: clean connection invite).
+        // Only roll back a playdate WE created this run. Never delete a
+        // pre-existing (reuse) playdate — it's the host's real event.
         if (createdPlaydateId) {
           await supabase.from("playdates").delete().eq("id", createdPlaydateId);
           createdPlaydateId = null;
@@ -162,8 +199,7 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
         return;
       }
 
-      // For every other failure, roll back the playdate so we don't leave an
-      // orphan, then show the specific message.
+      // Other failures: roll back only a playdate we created (never a reuse one).
       if (createdPlaydateId) {
         await supabase.from("playdates").delete().eq("id", createdPlaydateId);
         createdPlaydateId = null;
@@ -247,7 +283,9 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
         <button onClick={onBack} style={{ background: "transparent", border: "none", color: accent, fontSize: "1rem", cursor: "pointer" }}>
           <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
         </button>
-        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>Invite someone not on Huddle</h1>
+        <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>
+          {reuse ? "Invite someone else" : "Invite someone not on Huddle"}
+        </h1>
         <div style={{ width: "60px" }} />
       </div>
 
@@ -255,7 +293,9 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
 
         <div style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: 0, lineHeight: "1.5" }}>
-            Invite a family who isn't on Huddle yet. We'll email them the playdate details and a calendar invite — they can reply without signing up.
+            {reuse
+              ? "Invite another family who isn't on Huddle to this same playdate. We'll email them the details and a calendar invite — they can reply without signing up."
+              : "Invite a family who isn't on Huddle yet. We'll email them the playdate details and a calendar invite — they can reply without signing up."}
           </p>
         </div>
 
@@ -281,80 +321,95 @@ export default function InviteNonUser({ session, inviterName, onBack, onDone }) 
           />
         </div>
 
-        {/* DATE & TIME */}
-        <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
-          <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>DATE & TIME</p>
-          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            min={new Date().toISOString().split("T")[0]}
-            style={inputStyle}
-          />
-          <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Time</label>
-          <select
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            style={{ ...inputStyle, appearance: "auto", cursor: "pointer", marginBottom: 0 }}
-          >
-            <option value="" disabled>Select a time</option>
-            {timeSlots.map((slot) => (
-              <option key={slot.value} value={slot.value}>{slot.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* LOCATION */}
-        <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
-          <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>LOCATION</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
-            {locations.map((loc) => {
-              const selected = locationName === loc.name;
-              return (
-                <button
-                  key={loc.name}
-                  onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
-                  style={{
-                    padding: "0.6rem", borderRadius: "8px", border: "1px solid",
-                    borderColor: selected ? accent : "#2A4A6B",
-                    background: selected ? "#0F3D2E" : "transparent",
-                    color: selected ? accent : "#8AAEC8",
-                    fontSize: "0.8rem", cursor: "pointer", textAlign: "left",
-                  }}
-                >
-                  {loc.name}
-                </button>
-              );
-            })}
+        {/* DATE & TIME — editable in CREATE, read-only summary in REUSE */}
+        {reuse ? (
+          <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+            <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 0.75rem", letterSpacing: "0.05em" }}>PLAYDATE DETAILS</p>
+            <p style={{ color: "#FFFFFF", fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+              <Icon name="calendar_month" size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />{fmtReuseWhen()}
+            </p>
+            <p style={{ color: "#FFFFFF", fontSize: "0.95rem", margin: 0 }}>
+              <Icon name="location_on" size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />{locationName}{locationAddress ? ` — ${locationAddress}` : ""}
+            </p>
+            <p style={{ color: "#607080", fontSize: "0.78rem", margin: "0.75rem 0 0", lineHeight: "1.4" }}>
+              Same date and place as before — you're just inviting a different family.
+            </p>
           </div>
+        ) : (
+          <>
+            <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>DATE & TIME</p>
+              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                style={inputStyle}
+              />
+              <label style={{ color: "#8AAEC8", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>Time</label>
+              <select
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                style={{ ...inputStyle, appearance: "auto", cursor: "pointer", marginBottom: 0 }}
+              >
+                <option value="" disabled>Select a time</option>
+                {timeSlots.map((slot) => (
+                  <option key={slot.value} value={slot.value}>{slot.label}</option>
+                ))}
+              </select>
+            </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0.25rem 0 0.85rem" }}>
-            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
-            <span style={{ color: "#607080", fontSize: "0.75rem" }}>or enter a specific place</span>
-            <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
-          </div>
+            <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1rem", border: "1px solid #2A4A6B" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>LOCATION</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "1rem" }}>
+                {locations.map((loc) => {
+                  const selected = locationName === loc.name;
+                  return (
+                    <button
+                      key={loc.name}
+                      onClick={() => { setLocationName(loc.name); setLocationAddress(loc.address); }}
+                      style={{
+                        padding: "0.6rem", borderRadius: "8px", border: "1px solid",
+                        borderColor: selected ? accent : "#2A4A6B",
+                        background: selected ? "#0F3D2E" : "transparent",
+                        color: selected ? accent : "#8AAEC8",
+                        fontSize: "0.8rem", cursor: "pointer", textAlign: "left",
+                      }}
+                    >
+                      {loc.name}
+                    </button>
+                  );
+                })}
+              </div>
 
-          <input
-            type="text"
-            placeholder="e.g. Howarth Park, Santa Rosa"
-            value={isPresetSelected ? "" : locationName}
-            onChange={(e) => { setLocationName(e.target.value); setLocationAddress(""); }}
-            style={{ ...inputStyle, marginBottom: 0 }}
-          />
-        </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0.25rem 0 0.85rem" }}>
+                <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+                <span style={{ color: "#607080", fontSize: "0.75rem" }}>or enter a specific place</span>
+                <div style={{ flex: 1, height: "1px", background: "#2A4A6B" }} />
+              </div>
 
-        {/* NOTE */}
-        <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
-          <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
-          <textarea
-            placeholder="e.g. Our kids are in the same class — thought they'd love a playdate!"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            style={{ ...inputStyle, resize: "none", marginBottom: 0 }}
-          />
-        </div>
+              <input
+                type="text"
+                placeholder="e.g. Howarth Park, Santa Rosa"
+                value={isPresetSelected ? "" : locationName}
+                onChange={(e) => { setLocationName(e.target.value); setLocationAddress(""); }}
+                style={{ ...inputStyle, marginBottom: 0 }}
+              />
+            </div>
+
+            <div style={{ background: "#162D50", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid #2A4A6B" }}>
+              <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: "0 0 1rem", letterSpacing: "0.05em" }}>ADD A NOTE (optional)</p>
+              <textarea
+                placeholder="e.g. Our kids are in the same class — thought they'd love a playdate!"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={3}
+                style={{ ...inputStyle, resize: "none", marginBottom: 0 }}
+              />
+            </div>
+          </>
+        )}
 
         {error && <p style={{ color: "#F87171", fontSize: "0.85rem", marginBottom: "1rem", lineHeight: "1.5" }}>{error}</p>}
 

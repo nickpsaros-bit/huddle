@@ -17,8 +17,9 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const [showArchive, setShowArchive] = useState(false);
 
   // Create-flow state
-  const [invitingNonUser, setInvitingNonUser] = useState(false); // ← STEP 9
-  const [myName, setMyName] = useState("");                      // ← STEP 9
+  const [invitingNonUser, setInvitingNonUser] = useState(false);   // non-user invite (new playdate)
+  const [reinvitePlaydate, setReinvitePlaydate] = useState(null);  // non-user invite (reuse existing playdate)
+  const [myName, setMyName] = useState("");
   const [picking, setPicking] = useState(false);
   const [pickPeople, setPickPeople] = useState([]);
   const [pickLoading, setPickLoading] = useState(false);
@@ -205,7 +206,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     const hhId = hm.household_id;
     setHouseholdId(hhId);
 
-    // My name (for the connection-invite fallback in the non-user flow). ← STEP 9
+    // My name (for the connection-invite fallback in the non-user flow).
     try {
       const { data: meRow } = await supabase
         .from("parents").select("name").eq("id", session.user.id).maybeSingle();
@@ -231,11 +232,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
       .select("*")
       .eq("organizer_household_id", hhId);
 
-    // Pre-load ALL household names we'll need in one batched query up front.
-    const hostGuestHhIds = [];
-    for (const pd of (hosting || [])) {
-      if (pd.event_type === "birthday") continue;
-    }
     // Gather invite rosters in parallel, then batch-load their names.
     const hostingNonBday = (hosting || []).filter((pd) => pd.event_type !== "birthday");
     const inviteResults = await Promise.all(
@@ -244,6 +240,23 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           .then((res) => ({ pd, invites: res.data || [] }))
       )
     );
+
+    // NON-USER invitees: load pending_invites for each hosted playdate. We show
+    // pending / accepted / declined (NOT reconciled — those already appear as
+    // real guests, so showing them here too would double-list them).
+    const pendingResults = await Promise.all(
+      hostingNonBday.map((pd) =>
+        supabase.from("pending_invites")
+          .select("id, invitee_email, invitee_name, status")
+          .eq("playdate_id", pd.id)
+          .in("status", ["pending", "accepted", "declined"])
+          .then((res) => ({ pdId: pd.id, pendings: res.data || [] }))
+      )
+    );
+    const pendingByPd = {};
+    for (const { pdId, pendings } of pendingResults) pendingByPd[pdId] = pendings;
+
+    const hostGuestHhIds = [];
     for (const { invites } of inviteResults) {
       for (const inv of invites) {
         if (inv.household_id !== hhId) hostGuestHhIds.push(inv.household_id);
@@ -262,10 +275,17 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           initial: householdInitial(inv.household_id),
         });
       }
+      // Non-user invitees for this playdate (email-based, not yet real guests).
+      const pendings = (pendingByPd[pd.id] || []).map((p) => ({
+        id: p.id,
+        label: p.invitee_name || p.invitee_email,
+        status: p.status, // pending | accepted | declined
+      }));
       all.push({
         kind: "hosting",
         playdate: pd,
         roster,
+        pendings,
         goingCount: roster.filter((r) => r.rsvp === "yes").length,
       });
     }
@@ -300,12 +320,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     }
 
     // ---- SELF-HEAL: settle expired-but-unconfirmed playdates ----
-    // A playdate whose date has passed while still "pending" was never
-    // confirmed and never actively cancelled — it simply lapsed. Persist it
-    // as "cancelled" so the data doesn't accumulate stale "pending" rows that
-    // render as zombie cards. Display still distinguishes these as "Expired"
-    // via effectiveStatus() below. De-duplicate playdate IDs first (a playdate
-    // can appear as both a hosting row and an invited row in `all`).
     const nowMs = Date.now();
     const toSettle = [];
     const seenSettle = new Set();
@@ -321,7 +335,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     if (toSettle.length > 0) {
       try {
         await supabase.from("playdates").update({ status: "cancelled" }).in("id", toSettle);
-        // Reflect locally so this render is already correct.
         const settleSet = new Set(toSettle);
         for (const it of all) {
           if (it.playdate && settleSet.has(it.playdate.id)) {
@@ -437,7 +450,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         .update({ rsvp, responded_at: new Date().toISOString(), responded_parent_id: session.user.id })
         .eq("id", inviteId);
 
-      // Recompute this playdate's status (confirmed/pending/cancelled) after the RSVP change.
       try {
         const { data: invRow } = await supabase
           .from("playdate_invites")
@@ -509,7 +521,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
             }
           }
 
-          // Guest declined → email the HOST (they shouldn't have to check the app).
           if (rsvp === "no" && playdateId) {
             try {
               await supabase.functions.invoke("notify-host-decline", {
@@ -538,12 +549,10 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   };
 
   // Host nudges guests who haven't firmed up (rsvp = maybe or invited) on a pending playdate.
-  // Sends an in-app notification to each un-firmed guest's parents.
   const nudgeGuests = async (it) => {
     setBusy(true);
     try {
       const pd = it.playdate;
-      // Un-firmed guest households (maybe / invited) from the roster (host already excluded).
       const targetHouseholdIds = [...new Set(
         (it.roster || [])
           .filter((r) => r.rsvp === "maybe" || r.rsvp === "invited")
@@ -557,12 +566,10 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         return;
       }
 
-      // Host label for the message.
       await loadHouseholdNames([pd.organizer_household_id]);
       const hostLabel = householdLabel(pd.organizer_household_id);
       const whenStr = fmtDate(pd.proposed_date);
 
-      // Parents of each un-firmed guest household.
       const { data: guestParents } = await supabase
         .from("household_members")
         .select("parent_id")
@@ -633,6 +640,11 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         // Best-effort.
       }
 
+      // Clean up any non-user pending invites tied to this playdate too.
+      try {
+        await supabase.from("pending_invites").delete().eq("playdate_id", pd.id);
+      } catch (pErr) { /* best-effort */ }
+
       await supabase.from("playdate_invites").delete().eq("playdate_id", pd.id);
       await supabase.from("playdates").delete().eq("id", pd.id);
 
@@ -646,13 +658,10 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     setBusy(false);
   };
 
-  // Open the editor for a hosted event: load its current guest families, then
-  // render the form in edit mode pre-filled with details + guest list.
   const openEdit = async (it) => {
     const pd = it.playdate;
     try {
       const myHh = pd.organizer_household_id;
-      // Current guest invite rows (exclude host's own).
       const { data: invRows } = await supabase
         .from("playdate_invites")
         .select("invited_parent_id, household_id")
@@ -691,17 +700,17 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const rsvpLabel = (rsvp) =>
     rsvp === "yes" ? "Going" : rsvp === "maybe" ? "Maybe" : rsvp === "no" ? "Declined" : "Invited";
 
+  // Non-user invitee status → label/color (shown on host cards).
+  const pendingColor = (status) =>
+    status === "accepted" ? "#02C39A" : status === "declined" ? "#F87171" : "#607080";
+  const pendingLabel = (status) =>
+    status === "accepted" ? "Going" : status === "declined" ? "Can't make it" : "Invited (email)";
+
   const now = Date.now();
   const isPast = (it) => new Date(it.playdate.proposed_date).getTime() < now;
   const isDeclined = (it) => it.kind === "invited" && it.invite.rsvp === "no";
   const isCancelled = (it) => it.playdate.status === "cancelled";
 
-  // Effective lifecycle status for display. A playdate whose date has passed
-  // while never reaching "confirmed" is "expired" — it lapsed, nobody actively
-  // cancelled it. This keeps the badge truthful even before the self-heal write
-  // in fetchData lands (or if it failed). Note: the self-heal persists these as
-  // "cancelled" in the DB, so isCancelled() routes them into the CANCELLED
-  // section; effectiveStatus only governs the BADGE text/color shown on the card.
   const effectiveStatus = (it) => {
     const pd = it.playdate;
     if (pd.status === "confirmed") return "confirmed";
@@ -709,8 +718,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     return pd.status; // "pending" | "cancelled"
   };
 
-  // Status badge driven by the lifecycle engine's status.
-  // RSVP button style: neutral until selected, then the chosen color.
   const rsvpBtnStyle = (active, activeBg, activeTxt) => ({
     flex: 1, padding: "0.7rem", borderRadius: "10px", border: "none",
     background: active ? activeBg : "#1B3A5C",
@@ -748,7 +755,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
     .filter((it) => isPast(it))
     .sort((a, b) => new Date(b.playdate.proposed_date) - new Date(a.playdate.proposed_date));
 
-  // Everything that belongs in the collapsible "Past & archived" group.
   const archiveCount = past.length + cancelled.length + declined.length;
 
   const card = (dim) => ({
@@ -763,13 +769,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const subSectionLabel = { color: "#607080", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.6rem" };
   const metaRow = { color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 4px" };
 
-  const calButtonStyle = {
-    width: "100%", marginTop: "0.85rem", padding: "0.6rem", borderRadius: "8px",
-    border: "1px solid #02C39A", background: "transparent", color: "#02C39A",
-    fontSize: "0.85rem", fontWeight: "600", cursor: "pointer",
-  };
-
-  // ---- STEP 9: Non-user invite flow (second button) ----
+  // ---- STEP 9: Non-user invite flow (new playdate) ----
   if (invitingNonUser) {
     return (
       <InviteNonUser
@@ -778,6 +778,23 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         onBack={() => setInvitingNonUser(false)}
         onDone={() => {
           setInvitingNonUser(false);
+          fetchData();
+          if (typeof onChanged === "function") onChanged();
+        }}
+      />
+    );
+  }
+
+  // ---- Non-user RE-INVITE flow (reuse an existing playdate after a decline) ----
+  if (reinvitePlaydate) {
+    return (
+      <InviteNonUser
+        session={session}
+        inviterName={myName}
+        existingPlaydate={reinvitePlaydate}
+        onBack={() => setReinvitePlaydate(null)}
+        onDone={() => {
+          setReinvitePlaydate(null);
           fetchData();
           if (typeof onChanged === "function") onChanged();
         }}
@@ -965,9 +982,18 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
     const sb = statusBadge(effectiveStatus(it));
     const showCal = !dim && it.goingCount > 0 && pd.status !== "cancelled";
-    // Host nudge: only on pending hosting cards with someone still un-firmed.
     const unfirmedCount = (it.roster || []).filter((r) => r.rsvp === "maybe" || r.rsvp === "invited").length;
     const showNudge = !dim && pd.status === "pending" && unfirmedCount > 0;
+
+    // "No one's coming" recovery state: an upcoming, non-cancelled hosted playdate
+    // with NO live guests (no real family going/invited/maybe) AND at least one
+    // non-user invite that is declined/expired-ish (i.e. nobody's actually coming).
+    const liveGuestCount = (it.roster || []).filter((r) => ["yes", "maybe", "invited"].includes(r.rsvp)).length;
+    const livePendingCount = (it.pendings || []).filter((p) => p.status === "pending" || p.status === "accepted").length;
+    const anyDeclinedPending = (it.pendings || []).some((p) => p.status === "declined");
+    const showRecovery = !dim && !isPast(it) && pd.status !== "cancelled"
+      && liveGuestCount === 0 && livePendingCount === 0 && anyDeclinedPending;
+
     return (
       <div key={`host-${pd.id}`} style={card(dim)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
@@ -991,7 +1017,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
 
         <div style={{ borderTop: "1px solid #2A4A6B", paddingTop: "0.75rem", marginTop: pd.note ? 0 : "0.75rem" }}>
           <p style={{ color: "#8AAEC8", fontSize: "0.7rem", letterSpacing: "0.05em", margin: "0 0 0.6rem" }}>GUEST LIST</p>
-          {it.roster.length === 0 && (
+          {it.roster.length === 0 && (it.pendings || []).length === 0 && (
             <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0, fontStyle: "italic" }}>No families invited yet.</p>
           )}
           {it.roster.map((inv) => (
@@ -1005,9 +1031,39 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
               <span style={{ color: rsvpColor(inv.rsvp), fontSize: "0.8rem", fontWeight: "500" }}>{rsvpLabel(inv.rsvp)}</span>
             </div>
           ))}
+          {/* Non-user (email) invitees */}
+          {(it.pendings || []).map((p) => (
+            <div key={`pend-${p.id}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#28405F", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: "600", color: "#8AAEC8", flexShrink: 0 }}>
+                  <Icon name="mail" size={15} color="#8AAEC8" />
+                </div>
+                <span style={{ color: p.status === "declined" ? "#8AAEC8" : "#FFFFFF", fontSize: "0.85rem" }}>{p.label}</span>
+              </div>
+              <span style={{ color: pendingColor(p.status), fontSize: "0.8rem", fontWeight: "500" }}>{pendingLabel(p.status)}</span>
+            </div>
+          ))}
         </div>
 
-        {(showNudge || showCal || !dim) && (
+        {/* Recovery banner: nobody's coming, offer re-invite or cancel. */}
+        {showRecovery && (
+          <div style={{ background: "#3D2A0A", border: "1px solid #854F0B", borderRadius: "10px", padding: "0.85rem 1rem", marginTop: "0.85rem" }}>
+            <p style={{ color: "#F59E0B", fontSize: "0.85rem", margin: "0 0 0.75rem", lineHeight: "1.4" }}>
+              No one's coming yet — the family you invited can't make it. Invite someone else, or cancel the playdate.
+            </p>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <Button variant="accent" size="sm" onClick={() => setReinvitePlaydate(pd)} disabled={busy}
+                style={{ background: "#02C39A", color: "#0F2044" }}>
+                <Icon name="mail" size={16} style={{ verticalAlign: "-3px", marginRight: 4 }} />Invite someone else
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => cancelPlaydate(pd)} disabled={busy}>
+                Cancel playdate
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {!showRecovery && (showNudge || showCal || !dim) && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "0.85rem", alignItems: "center" }}>
             {showNudge && (
               <Button variant="accent" size="sm" onClick={() => nudgeGuests(it)} disabled={busy}
@@ -1063,7 +1119,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           <Icon name="add" size={20} style={{ verticalAlign: "-3px", marginRight: 4 }} />Set up a playdate
         </button>
 
-        {/* ---- STEP 9: second button — invite a non-user ---- */}
         <button onClick={() => setInvitingNonUser(true)}
           style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "1px dashed #02C39A", background: "#0F3D2E", color: "#02C39A", fontSize: "0.95rem", fontWeight: "600", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           <Icon name="mail" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Invite someone not on Huddle
@@ -1097,7 +1152,6 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
           </>
         )}
 
-        {/* ---- PAST & ARCHIVED (collapsible; holds Past / Cancelled / Declined) ---- */}
         {archiveCount > 0 && (
           <div style={{ marginTop: (needsAttention.length + upcoming.length) > 0 ? "1.5rem" : 0 }}>
             <button
