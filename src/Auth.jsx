@@ -160,19 +160,36 @@ export default function Auth({ onAuth }) {
         Huddle
       </h1>
       <p style={{ color: "#B0C4D8", fontSize: "1rem", margin: "0 0 2.5rem", textAlign: "center", maxWidth: "360px", lineHeight: "1.5" }}>
-        Bringing school families together.
+        Playdates &amp; birthdays with your school's parents — minus the group-text chaos.
       </p>
 
       <div style={{ background: "#162D50", borderRadius: "16px", padding: "2rem", width: "100%", maxWidth: "400px" }}>
 
         {mode === "intro" && !sent && (
           <>
-            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", margin: "0 0 0.5rem", textAlign: "center" }}>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.3rem", margin: "0 0 0.6rem", textAlign: "center" }}>
               Welcome to Huddle
             </h2>
-            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.75rem", textAlign: "center", lineHeight: "1.5" }}>
-              The easiest way for school parents to set up playdates. Join your classroom community in a couple of minutes.
+            <p style={{ color: "#8AAEC8", fontSize: "0.9rem", margin: "0 0 1.5rem", textAlign: "center", lineHeight: "1.55" }}>
+              Huddle connects you with the parents in your kid's classroom, so planning playdates and birthday parties takes a few taps — not a dozen group texts.
             </p>
+
+            {/* What you can do — three concrete points */}
+            <div style={{ marginBottom: "1.75rem" }}>
+              {[
+                { icon: "groups", text: "Find the parents in your kid's classes" },
+                { icon: "calendar_month", text: "Set up playdates everyone can RSVP to" },
+                { icon: "celebration", text: "Invite the whole class to a birthday" },
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.6rem 0" }}>
+                  <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: "#0F3D2E", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon name={item.icon} size={20} color="#02C39A" />
+                  </div>
+                  <span style={{ color: "#D8E4F0", fontSize: "0.9rem", lineHeight: "1.4" }}>{item.text}</span>
+                </div>
+              ))}
+            </div>
+
             <Button fullWidth variant="primary" onClick={() => { setError(""); setMode("signup"); }} style={{ marginBottom: "0.85rem" }}>
               Get started<Icon name="arrow_forward" size={18} style={{ verticalAlign: "-3px", marginLeft: 4 }} />
             </Button>
