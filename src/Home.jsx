@@ -57,6 +57,12 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   const grades = ["TK","Kindergarten","1st Grade","2nd Grade","3rd Grade","4th Grade","5th Grade"];
 
+  // Pending pings older than this stop counting on the dashboard (and are
+  // eligible for cleanup). A ping is a time-sensitive nudge — a two-week-old
+  // unanswered "want to plan something?" is stale, so we let it age out rather
+  // than sit on the dashboard forever.
+  const PING_TTL_DAYS = 14;
+
   useEffect(() => { fetchData(); }, []);
 
   const shortName = (fullName) => {
@@ -391,12 +397,28 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
     }
 
     // ---- MY PENDING SENT PINGS (for the conditional home tile + drill-in list) ----
+    // Only pending pings from the last PING_TTL_DAYS count — a nudge older than
+    // that is stale and shouldn't linger on the dashboard. Also fire-and-forget a
+    // cleanup that expires those old pending pings so they don't accumulate.
     try {
+      const pingCutoff = new Date(Date.now() - PING_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+      // Best-effort: mark my own stale pending pings as expired so they stop
+      // counting everywhere, not just in this view. Never blocks the dashboard.
+      supabase
+        .from("playdate_pings")
+        .update({ status: "expired" })
+        .eq("sender_id", session.user.id)
+        .eq("status", "pending")
+        .lt("created_at", pingCutoff)
+        .then(() => {}, () => {});
+
       const { data: pings } = await supabase
         .from("playdate_pings")
         .select("id, recipient_id, status, created_at")
         .eq("sender_id", session.user.id)
         .eq("status", "pending")
+        .gte("created_at", pingCutoff)
         .order("created_at", { ascending: false });
       const list = pings || [];
       setSentPingCount(list.length);
@@ -978,7 +1000,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
           ) : (
             <>
               <p style={{ color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 1rem", lineHeight: "1.5" }}>
-                Families you've nudged for a playdate. They'll drop off here once they start planning with you.
+                Families you've nudged for a playdate. They'll drop off here once they start planning with you — or after two weeks if you don't hear back.
               </p>
               {sentPings.map((p) => (
                 <div key={p.id} style={{ background: "#162D50", borderRadius: "12px", padding: "1rem 1.25rem", marginBottom: "10px", border: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "12px" }}>
