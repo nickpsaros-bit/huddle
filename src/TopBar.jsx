@@ -13,7 +13,7 @@ import Icon from "./Icon";
 //   onSearchClick   fn
 //   onProfileClick  fn
 //   onLogoClick     fn
-//   onTutorialClick fn     — if provided AND isHome, shows a help icon that replays onboarding.
+//   onTutorialClick fn     — if provided, shows a help icon. On Home it replays onboarding; on other tabs it opens that tab's help screen.
 //   avatarUrl       string | null
 //   initial         string — fallback avatar letter
 export default function TopBar({
@@ -57,12 +57,13 @@ export default function TopBar({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-        {/* Tutorial replay (Home only) — a quiet help affordance so anyone who
-            tapped through onboarding too fast can watch it again. */}
-        {isHome && typeof onTutorialClick === "function" && (
+        {/* Help / tutorial affordance — shows whenever a handler is passed.
+            On Home it replays onboarding; on other tabs it opens that tab's
+            help screen. Left of search so the grouping reads clearly. */}
+        {typeof onTutorialClick === "function" && (
           <button onClick={() => onTutorialClick()}
-            aria-label="How Huddle works"
-            title="How Huddle works"
+            aria-label="Help"
+            title="Help"
             style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px", display: "inline-flex", alignItems: "center" }}>
             <Icon name="help_outline" size={22} color="#8AAEC8" />
           </button>

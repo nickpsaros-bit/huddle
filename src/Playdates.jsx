@@ -15,6 +15,10 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);          // per-tab help screen
+  const [helpBugText, setHelpBugText] = useState("");       // report-issue box in help
+  const [helpBugBusy, setHelpBugBusy] = useState(false);
+  const [helpBugSent, setHelpBugSent] = useState(false);
 
   // Create-flow state
   const [invitingNonUser, setInvitingNonUser] = useState(false);   // non-user invite (new playdate)
@@ -769,6 +773,81 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
   const subSectionLabel = { color: "#607080", fontSize: "0.72rem", letterSpacing: "0.05em", margin: "0 0 0.6rem" };
   const metaRow = { color: "#8AAEC8", fontSize: "0.85rem", margin: "0 0 4px" };
 
+  // Report an issue from the help screen — reuses the existing bug_reports flow,
+  // pre-tagged with the tab so we know where it came from.
+  const submitHelpBug = async () => {
+    if (!helpBugText.trim()) return;
+    setHelpBugBusy(true);
+    try {
+      await supabase.from("bug_reports").insert({
+        reporter_parent_id: session.user.id,
+        description: helpBugText.trim(),
+        screen: "Playdates",
+        user_agent: (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : null,
+        status: "new",
+      });
+      setHelpBugText("");
+      setHelpBugSent(true);
+    } catch (e) {
+      // best-effort; leave the text so they can retry
+    }
+    setHelpBugBusy(false);
+  };
+
+  // ---- HELP: how Playdates work (concise, scrollable) ----
+  if (showHelp) {
+    const hSection = (label, body) => (
+      <div style={{ marginBottom: "1.25rem" }}>
+        <p style={{ color: "#02C39A", fontSize: "0.72rem", letterSpacing: "0.06em", fontWeight: 600, margin: "0 0 0.35rem" }}>{label}</p>
+        <p style={{ color: "#B8CCE0", fontSize: "0.9rem", lineHeight: 1.55, margin: 0 }}>{body}</p>
+      </div>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => { setShowHelp(false); setHelpBugSent(false); }} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>
+            <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
+          </button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>How Playdates work</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {hSection("TWO WAYS TO START ONE", "Tap Set up a playdate to invite families already on Huddle, or Invite someone not on Huddle to invite a parent by email — they can reply without signing up.")}
+          {hSection("RSVPS AND STATUS", "Families reply Going, Maybe, or Can't go. A playdate shows Confirmed once two families are going. Until then it sits as upcoming.")}
+          {hSection("IF NO ONE CAN MAKE IT", "If everyone declines, you'll see a prompt to invite someone else — keeping your date and place — or to cancel the playdate.")}
+          {hSection("INVITING PEOPLE NOT ON HUDDLE", "They get an email with the details and a calendar invite, and can accept or decline without an account. If they join Huddle later, you'll be connected automatically.")}
+          {hSection("CHANGING OR CANCELLING", "Tap a playdate you're hosting to edit it or cancel. Cancelling lets the other families know and clears it from their calendars.")}
+          {hSection("HEADS UP", "Playdate messages are automatically deleted 24 hours after the event — Huddle keeps things tidy and private.")}
+
+          {/* Report an issue */}
+          <div style={{ marginTop: "1.5rem", borderTop: "1px solid #2A4A6B", paddingTop: "1.5rem" }}>
+            {helpBugSent ? (
+              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "1rem 1.25rem" }}>
+                <p style={{ color: "#02C39A", fontSize: "0.9rem", margin: 0 }}>Thanks — your report was sent. 🙏</p>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.6rem", fontWeight: 600 }}>SOMETHING NOT WORKING?</p>
+                <textarea
+                  placeholder="Tell us what went wrong on the Playdates screen."
+                  value={helpBugText}
+                  onChange={(e) => setHelpBugText(e.target.value)}
+                  rows={3}
+                  style={{ width: "100%", padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.75rem", resize: "vertical", fontFamily: "inherit" }}
+                />
+                <Button variant="primary" onClick={submitHelpBug} disabled={!helpBugText.trim() || helpBugBusy}
+                  style={{ background: helpBugText.trim() ? "#02C39A" : "#2A4A6B" }}>
+                  {helpBugBusy ? "Sending..." : "Report an issue"}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ---- STEP 9: Non-user invite flow (new playdate) ----
   if (invitingNonUser) {
     return (
@@ -1103,6 +1182,7 @@ export default function Playdates({ session, onChanged, avatarUrl, onProfileClic
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
         onLogoClick={onGoHome}
+        onTutorialClick={() => setShowHelp(true)}
         avatarUrl={avatarUrl}
         initial="?"
       />
