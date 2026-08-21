@@ -23,6 +23,10 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
   const [reportAlsoBlock, setReportAlsoBlock] = useState(true);
   const [reportBusy, setReportBusy] = useState(false);
   const [petsByHousehold, setPetsByHousehold] = useState({});
+  const [showHelp, setShowHelp] = useState(false);          // per-tab help screen
+  const [helpBugText, setHelpBugText] = useState("");       // report-issue box in help
+  const [helpBugBusy, setHelpBugBusy] = useState(false);
+  const [helpBugSent, setHelpBugSent] = useState(false);
 
   useEffect(() => { fetchConnections(); }, []);
 
@@ -257,6 +261,27 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
     }
   };
 
+  // Report an issue from the help screen — reuses the existing bug_reports flow,
+  // pre-tagged with the tab so we know where it came from.
+  const submitHelpBug = async () => {
+    if (!helpBugText.trim()) return;
+    setHelpBugBusy(true);
+    try {
+      await supabase.from("bug_reports").insert({
+        reporter_parent_id: session.user.id,
+        description: helpBugText.trim(),
+        screen: "Network",
+        user_agent: (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : null,
+        status: "new",
+      });
+      setHelpBugText("");
+      setHelpBugSent(true);
+    } catch (e) {
+      // best-effort; leave the text so they can retry
+    }
+    setHelpBugBusy(false);
+  };
+
   const grades = ["TK","K","1st","2nd","3rd","4th","5th"];
 
   if (requestingPlaydate) {
@@ -267,6 +292,61 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
         onBack={() => setRequestingPlaydate(null)}
         onSent={() => setRequestingPlaydate(null)}
       />
+    );
+  }
+
+  // ---- HELP: how your Network works (concise, scrollable) ----
+  if (showHelp) {
+    const hSection = (label, body) => (
+      <div style={{ marginBottom: "1.25rem" }}>
+        <p style={{ color: "#02C39A", fontSize: "0.72rem", letterSpacing: "0.06em", fontWeight: 600, margin: "0 0 0.35rem" }}>{label}</p>
+        <p style={{ color: "#B8CCE0", fontSize: "0.9rem", lineHeight: 1.55, margin: 0 }}>{body}</p>
+      </div>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => { setShowHelp(false); setHelpBugSent(false); }} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>
+            <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
+          </button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>How your Network works</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {hSection("WHAT YOU'LL SEE HERE", "Network shows the parents you've connected with, grouped by family. Their classrooms are listed so you can see how you know them.")}
+          {hSection("MAKING CONNECTIONS", "You connect with parents from your classrooms on the Home tab, or by finding someone in Search. Once they accept, they appear here.")}
+          {hSection("STARTING A PLAYDATE", "Tap Huddle → next to anyone to set up a playdate with them.")}
+          {hSection("CO-PARENTS", "If someone shares a household with a person you're connected to, they show as a \u201cCo-parent.\u201d You can plan with your direct connections.")}
+          {hSection("MANAGING A CONNECTION", "Tap the \u22ef menu next to anyone to remove the connection, block them, or report a concern.")}
+          {hSection("INVITING PARENTS", "Know a parent who isn't on Huddle? Use Invite a parent to Huddle at the bottom to bring them in.")}
+          {hSection("KEEPING HUDDLE SAFE", "Blocking hides you from each other and removes the connection — they aren't notified. Reports go privately to the Huddle team for review.")}
+
+          {/* Report an issue */}
+          <div style={{ marginTop: "1.5rem", borderTop: "1px solid #2A4A6B", paddingTop: "1.5rem" }}>
+            {helpBugSent ? (
+              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "1rem 1.25rem" }}>
+                <p style={{ color: "#02C39A", fontSize: "0.9rem", margin: 0 }}>Thanks — your report was sent. 🙏</p>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.6rem", fontWeight: 600 }}>SOMETHING NOT WORKING?</p>
+                <textarea
+                  placeholder="Tell us what went wrong on the Network screen."
+                  value={helpBugText}
+                  onChange={(e) => setHelpBugText(e.target.value)}
+                  rows={3}
+                  style={{ width: "100%", padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.75rem", resize: "vertical", fontFamily: "inherit" }}
+                />
+                <Button variant="primary" onClick={submitHelpBug} disabled={!helpBugText.trim() || helpBugBusy}
+                  style={{ background: helpBugText.trim() ? "#02C39A" : "#2A4A6B" }}>
+                  {helpBugBusy ? "Sending..." : "Report an issue"}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -285,6 +365,7 @@ export default function Network({ session, avatarUrl, onProfileClick, onSearchCl
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
         onLogoClick={onGoHome}
+        onTutorialClick={() => setShowHelp(true)}
         avatarUrl={avatarUrl}
         initial={(myName && myName.charAt(0)) || "?"}
       />

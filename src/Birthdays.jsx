@@ -44,6 +44,12 @@ export default function Birthdays({
   const [wishedIds, setWishedIds] = useState({});     // birthday_id -> true (already wished this year)
   const [askedIds, setAskedIds] = useState({});       // birthday_id -> true (already asked this year)
 
+  // Per-tab help screen
+  const [showHelp, setShowHelp] = useState(false);
+  const [helpBugText, setHelpBugText] = useState("");
+  const [helpBugBusy, setHelpBugBusy] = useState(false);
+  const [helpBugSent, setHelpBugSent] = useState(false);
+
   // Create flow: opens the birthday invite form (family picker first).
   const [creating, setCreating] = useState(false);
   const [pickPeople, setPickPeople] = useState([]);
@@ -654,6 +660,27 @@ export default function Birthdays({
     });
   };
 
+  // Report an issue from the help screen — reuses the existing bug_reports flow,
+  // pre-tagged with the tab so we know where it came from.
+  const submitHelpBug = async () => {
+    if (!helpBugText.trim()) return;
+    setHelpBugBusy(true);
+    try {
+      await supabase.from("bug_reports").insert({
+        reporter_parent_id: session.user.id,
+        description: helpBugText.trim(),
+        screen: "Birthdays",
+        user_agent: (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : null,
+        status: "new",
+      });
+      setHelpBugText("");
+      setHelpBugSent(true);
+    } catch (e) {
+      // best-effort; leave the text so they can retry
+    }
+    setHelpBugBusy(false);
+  };
+
   // When editing a hosted birthday, open the editor.
   if (editingEvent) {
     return (
@@ -692,6 +719,60 @@ export default function Birthdays({
     );
   }
 
+  // ---- HELP: how Birthdays work (concise, scrollable) ----
+  if (showHelp) {
+    const hSection = (label, body) => (
+      <div style={{ marginBottom: "1.25rem" }}>
+        <p style={{ color: "#02C39A", fontSize: "0.72rem", letterSpacing: "0.06em", fontWeight: 600, margin: "0 0 0.35rem" }}>{label}</p>
+        <p style={{ color: "#B8CCE0", fontSize: "0.9rem", lineHeight: 1.55, margin: 0 }}>{body}</p>
+      </div>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
+        <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
+          <button onClick={() => { setShowHelp(false); setHelpBugSent(false); }} style={{ background: "transparent", border: "none", color: "#02C39A", fontSize: "1rem", cursor: "pointer" }}>
+            <Icon name="arrow_back" size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />Back
+          </button>
+          <h1 style={{ color: "#FFFFFF", fontSize: "1.1rem", fontWeight: "500", margin: 0 }}>How Birthdays work</h1>
+          <div style={{ width: "60px" }} />
+        </div>
+
+        <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
+          {hSection("THROWING A BIRTHDAY", "Tap Set up a birthday invite, choose the families to invite, then pick your date and place. Browse your classrooms, search by name, or enter a full email to invite someone at another school.")}
+          {hSection("INVITES YOU RECEIVE", "Parties you're invited to show under Invited to. Tap Going or Can't make it — hosts see your reply right away.")}
+          {hSection("BIRTHDAYS YOU'RE HOSTING", "Under You're hosting, you'll see your guest list and who's coming. You can edit the details or cancel — cancelling notifies everyone and clears it from their calendars.")}
+          {hSection("BIRTHDAYS IN YOUR NETWORK", "When families you're connected with save a birthday, they appear under Upcoming in your network. Tap one to wish them a happy birthday, ask what their child would like, or set yourself a gift reminder.")}
+          {hSection("CONNECTING AT A PARTY", "If you say yes to a party from a family you're not connected with yet, Huddle offers to connect you — so you can plan together afterward.")}
+          {hSection("WHERE BIRTHDAYS COME FROM", "You'll only see birthdays that families choose to save. Add your own family's birthday in your profile so your network can celebrate with you.")}
+
+          {/* Report an issue */}
+          <div style={{ marginTop: "1.5rem", borderTop: "1px solid #2A4A6B", paddingTop: "1.5rem" }}>
+            {helpBugSent ? (
+              <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "1rem 1.25rem" }}>
+                <p style={{ color: "#02C39A", fontSize: "0.9rem", margin: 0 }}>Thanks — your report was sent. 🙏</p>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: "#8AAEC8", fontSize: "0.8rem", letterSpacing: "0.05em", margin: "0 0 0.6rem", fontWeight: 600 }}>SOMETHING NOT WORKING?</p>
+                <textarea
+                  placeholder="Tell us what went wrong on the Birthdays screen."
+                  value={helpBugText}
+                  onChange={(e) => setHelpBugText(e.target.value)}
+                  rows={3}
+                  style={{ width: "100%", padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "0.75rem", resize: "vertical", fontFamily: "inherit" }}
+                />
+                <button onClick={submitHelpBug} disabled={!helpBugText.trim() || helpBugBusy}
+                  style={{ width: "100%", padding: "0.85rem", borderRadius: "10px", border: "none", background: helpBugText.trim() ? "#02C39A" : "#2A4A6B", color: "#0F2044", fontSize: "0.95rem", fontWeight: 700, cursor: helpBugText.trim() && !helpBugBusy ? "pointer" : "default" }}>
+                  {helpBugBusy ? "Sending..." : "Report an issue"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const fmtInviteDate = (iso) => {
     try {
       return new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -707,6 +788,7 @@ export default function Birthdays({
         onSearchClick={onSearchClick}
         onProfileClick={onProfileClick}
         onLogoClick={onGoHome}
+        onTutorialClick={() => setShowHelp(true)}
         avatarUrl={avatarUrl}
         initial="?"
       />
