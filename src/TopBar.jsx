@@ -1,16 +1,19 @@
 import Icon from "./Icon";
 
 // Shared top bar for the main tab screens (Home, Network, Playdates, Birthdays).
-// Carries: a title (or the Huddle logo on Home), a global Search action, the
-// notifications bell (with count), and the profile avatar.
+// Carries: a title (or the Huddle logo on Home), an optional tutorial replay
+// button (Home only), a global Search action, the notifications bell (with
+// count), and the profile avatar.
 //
 // Props:
 //   title           string — shown left. If isHome, renders the teal "Huddle" logo instead.
-//   isHome          bool   — use the branded logo treatment.
+//   isHome          bool   — use the branded logo treatment + show the tutorial button.
 //   notificationCount number
 //   onBellClick     fn
 //   onSearchClick   fn
 //   onProfileClick  fn
+//   onLogoClick     fn
+//   onTutorialClick fn     — if provided AND isHome, shows a help icon that replays onboarding.
 //   avatarUrl       string | null
 //   initial         string — fallback avatar letter
 export default function TopBar({
@@ -21,6 +24,7 @@ export default function TopBar({
   onSearchClick,
   onProfileClick,
   onLogoClick,
+  onTutorialClick,
   avatarUrl,
   initial = "",
 }) {
@@ -53,6 +57,17 @@ export default function TopBar({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        {/* Tutorial replay (Home only) — a quiet help affordance so anyone who
+            tapped through onboarding too fast can watch it again. */}
+        {isHome && typeof onTutorialClick === "function" && (
+          <button onClick={() => onTutorialClick()}
+            aria-label="How Huddle works"
+            title="How Huddle works"
+            style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px", display: "inline-flex", alignItems: "center" }}>
+            <Icon name="help_outline" size={22} color="#8AAEC8" />
+          </button>
+        )}
+
         {/* Global search */}
         <button onClick={() => { if (typeof onSearchClick === "function") onSearchClick(); }}
           aria-label="Search"

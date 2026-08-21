@@ -32,6 +32,7 @@ export default function App() {
   const [hasConsented, setHasConsented] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
   const [onboardingSeen, setOnboardingSeen] = useState(true); // assume seen until we learn otherwise (avoids flash)
+  const [replayTutorial, setReplayTutorial] = useState(false); // manual re-run from the Home help button
   const [myName, setMyName] = useState("");
   const [activeTab, setActiveTab] = useState("home");
   const [showInbox, setShowInbox] = useState(false);
@@ -446,6 +447,20 @@ export default function App() {
     );
   }
 
+  // Manual replay from the Home help button — shows the same tutorial again but
+  // does NOT change any stored state (they've already seen it; this is just a
+  // refresher). onDone simply returns them to the app.
+  if (replayTutorial) {
+    return (
+      <Onboarding
+        session={session}
+        name={myName}
+        replay
+        onDone={() => setReplayTutorial(false)}
+      />
+    );
+  }
+
   if (rolloverData && !rolloverSnoozed) {
     return (
       <RolloverPrompt
@@ -504,7 +519,7 @@ export default function App() {
 
   let screen;
   if (activeTab === "home") {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} onSearchClick={() => setShowSearch(true)} />;
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onOpenJourney={() => setShowJourney(true)} onSearchClick={() => setShowSearch(true)} onReplayTutorial={() => setReplayTutorial(true)} />;
   } else if (activeTab === "network") {
     screen = <Network session={session} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} onGoHome={() => setActiveTab("home")} />;
   } else if (activeTab === "playdates") {
@@ -512,7 +527,7 @@ export default function App() {
   } else if (activeTab === "birthdays") {
     screen = <Birthdays session={session} onChanged={() => fetchCounts(session.user.id)} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onBellClick={() => setShowInbox(true)} notificationCount={notificationCount} onGoHome={() => setActiveTab("home")} />;
   } else {
-    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} />;
+    screen = <Home session={session} notificationCount={notificationCount} onBellClick={() => setShowInbox(true)} onPlaydateCreated={() => { setActiveTab("playdates"); fetchCounts(session.user.id); }} onGoToNetwork={() => setActiveTab("network")} onGoToPlaydates={() => setActiveTab("playdates")} avatarUrl={myAvatarUrl} onProfileClick={() => setShowProfile(true)} onSearchClick={() => setShowSearch(true)} onReplayTutorial={() => setReplayTutorial(true)} />;
   }
 
   return (

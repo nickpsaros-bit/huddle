@@ -10,7 +10,7 @@ import { getHiddenParentIds } from "./blocks";
 import PersonMenu from "./PersonMenu";
 import TopBar from "./TopBar";
 
-export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney, onSearchClick }) {
+export default function Home({ session, notificationCount, onBellClick, onPlaydateCreated, onGoToPlaydates, onGoToNetwork, avatarUrl, onProfileClick, onOpenJourney, onSearchClick, onReplayTutorial }) {
   const [parent, setParent] = useState(null);
   const [householdId, setHouseholdId] = useState(null);
   const [memberships, setMemberships] = useState([]);
@@ -820,6 +820,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
       onSearchClick={onSearchClick}
       onProfileClick={onProfileClick}
       onLogoClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      onTutorialClick={onReplayTutorial}
       avatarUrl={parent?.photo_url}
       initial={parent?.name?.charAt(0) || "?"}
     />

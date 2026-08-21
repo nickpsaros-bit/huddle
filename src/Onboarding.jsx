@@ -52,7 +52,7 @@ function ensureOnboardingKeyframes() {
   document.head.appendChild(el);
 }
 
-export default function Onboarding({ session, name, onDone }) {
+export default function Onboarding({ session, name, onDone, replay = false }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const total = 6; // keep in sync with the screens array below
@@ -63,6 +63,9 @@ export default function Onboarding({ session, name, onDone }) {
 
   const finish = async () => {
     if (saving) return;
+    // Replay mode (opened from the Home help button): the user has already seen
+    // onboarding, so don't touch stored state — just close and return to the app.
+    if (replay) { onDone(); return; }
     setSaving(true);
     // Persist that they've seen it, so it never fires again (best-effort — if the
     // write fails we still let them into the app; worst case they see it once more).
