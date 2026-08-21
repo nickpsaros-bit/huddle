@@ -42,7 +42,7 @@ export default function TopBar({
         </h1>
         {isHome && (
           <span style={{ color: "#8AAEC8", fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: "1.05rem", fontWeight: "500", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            where school families connect
+            Parents connecting, so their kids can too
           </span>
         )}
         {!isHome && title && (
