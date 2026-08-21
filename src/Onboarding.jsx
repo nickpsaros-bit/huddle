@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
+import Icon from "./Icon";
 
 // First-run animated tutorial. Fires ONCE after a new user completes their
 // profile (App.jsx gates on hasProfile && !onboarding_seen). Five screens:
@@ -54,7 +55,7 @@ function ensureOnboardingKeyframes() {
 export default function Onboarding({ session, name, onDone }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-  const total = 5;
+  const total = 6; // keep in sync with the screens array below
 
   useEffect(() => { ensureOnboardingKeyframes(); }, []);
 
@@ -193,6 +194,34 @@ export default function Onboarding({ session, name, onDone }) {
     </div>
   );
 
+  // Mini "invite by email" mockup — an email row with a teal Invite action,
+  // assembling in sequence like the other cards.
+  const MiniInvite = () => (
+    <div style={{
+      background: NAVY_CARD, border: `1px solid ${BORDER}`, borderRadius: "14px",
+      padding: "1.1rem 1.2rem", textAlign: "left",
+      animation: "obSettle 0.5s cubic-bezier(0.22,1,0.36,1) both",
+    }} className="ob-anim">
+      <p className="ob-anim" style={{ color: FAINT, fontSize: "0.7rem", letterSpacing: "0.05em", margin: "0 0 0.7rem", animation: "obFade 0.4s 0.12s both" }}>INVITE A FAMILY</p>
+      <div className="ob-anim" style={{
+        display: "flex", alignItems: "center", gap: "10px",
+        background: NAVY, border: `1px solid ${BORDER}`, borderRadius: "10px",
+        padding: "0.7rem 0.9rem", marginBottom: "0.85rem",
+        animation: "obSlideUp 0.5s 0.22s cubic-bezier(0.22,1,0.36,1) both",
+      }}>
+        <div style={{ width: "30px", height: "30px", borderRadius: "8px", background: "#28405F", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon name="mail" size={16} color={MUTE} />
+        </div>
+        <span style={{ color: MUTE, fontSize: "0.86rem" }}>parent@email.com</span>
+      </div>
+      <div className="ob-anim" style={{ textAlign: "center", animation: "obPop 0.5s 0.5s cubic-bezier(0.22,1,0.36,1) both" }}>
+        <span style={{ display: "inline-block", background: TEAL, color: NAVY, fontSize: "0.82rem", fontWeight: 700, padding: "0.5rem 1.4rem", borderRadius: "9px" }}>
+          Send invite →
+        </span>
+      </div>
+    </div>
+  );
+
   // ---- screen content ----
   const screens = [
     // 0 — Welcome
@@ -227,7 +256,15 @@ export default function Onboarding({ session, name, onDone }) {
       visual: <MiniFind />,
       cta: "Next",
     },
-    // 4 — Done
+    // 4 — Grow your community (invite non-users)
+    {
+      eyebrow: "INVITE FAMILIES",
+      title: "Grow your community",
+      body: "Know a parent who isn't on Huddle yet? Invite them by email — you can even invite someone to a playdate before they've signed up.",
+      visual: <MiniInvite />,
+      cta: "Next",
+    },
+    // 5 — Done
     {
       emoji: "🎉",
       title: "You're all set",
