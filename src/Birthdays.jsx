@@ -29,20 +29,34 @@ function friendlyWhen(days) {
   return null; // farther out — we show the date instead
 }
 
+// Days in a month (leap-year safe for Feb 29).
+function daysInMonth(monthNum) {
+  if (!monthNum) return 31;
+  return new Date(2024, monthNum, 0).getDate();
+}
+
 export default function Birthdays({
   session, avatarUrl, onProfileClick, onSearchClick, onBellClick, notificationCount = 0, onChanged, onGoHome,
 }) {
   const [loading, setLoading] = useState(true);
-  const [upcoming, setUpcoming] = useState([]);   // connections' birthdays, sorted soonest-first
-  const [invites, setInvites] = useState([]);      // inbound birthday invites
-  const [hosting, setHosting] = useState([]);      // birthdays I'm hosting
+  const [upcoming, setUpcoming] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [hosting, setHosting] = useState([]);
   const [myHouseholdId, setMyHouseholdId] = useState(null);
+  const [myBirthdayCount, setMyBirthdayCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [connectPrompt, setConnectPrompt] = useState(null); // { hostParentId, hostName }
-  const [activeBday, setActiveBday] = useState(null); // the feed item whose action menu is open
-  const [wishedIds, setWishedIds] = useState({});     // birthday_id -> true (already wished this year)
-  const [askedIds, setAskedIds] = useState({});       // birthday_id -> true (already asked this year)
+  const [connectPrompt, setConnectPrompt] = useState(null);
+  const [activeBday, setActiveBday] = useState(null);
+  const [wishedIds, setWishedIds] = useState({});
+  const [askedIds, setAskedIds] = useState({});
+
+  // Quick-add-birthday modal (empty-state on-ramp)
+  const [addingBday, setAddingBday] = useState(false);
+  const [addBMonth, setAddBMonth] = useState("");
+  const [addBDay, setAddBDay] = useState("");
+  const [addBLabel, setAddBLabel] = useState("");
+  const [addBBusy, setAddBBusy] = useState(false);
 
   // Per-tab help screen
   const [showHelp, setShowHelp] = useState(false);
@@ -53,12 +67,12 @@ export default function Birthdays({
   // Create flow: opens the birthday invite form (family picker first).
   const [creating, setCreating] = useState(false);
   const [pickPeople, setPickPeople] = useState([]);
-  const [myRooms, setMyRooms] = useState([]);          // my classrooms (browse cards)
-  const [peopleByRoom, setPeopleByRoom] = useState({}); // classroom_id -> people
-  const [viewingRoom, setViewingRoom] = useState(null); // a room object when drilled in
-  const [emailMatch, setEmailMatch] = useState(null);   // exact email lookup result
+  const [myRooms, setMyRooms] = useState([]);
+  const [peopleByRoom, setPeopleByRoom] = useState({});
+  const [viewingRoom, setViewingRoom] = useState(null);
+  const [emailMatch, setEmailMatch] = useState(null);
   const [emailSearching, setEmailSearching] = useState(false);
-  const [extraSelected, setExtraSelected] = useState([]); // email-found people not in pickPeople
+  const [extraSelected, setExtraSelected] = useState([]);
   const [pickLoading, setPickLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [pickFilter, setPickFilter] = useState("");
@@ -80,7 +94,15 @@ export default function Birthdays({
       const hhId = hm.household_id;
       setMyHouseholdId(hhId);
 
-      // --- Section 2: upcoming birthdays of connections ---
+      // How many birthdays has MY household saved? (drives empty-state UX)
+      try {
+        const { count: myBCount } = await supabase
+          .from("household_birthdays")
+          .select("id", { count: "exact", head: true })
+          .eq("household_id", hhId);
+        setMyBirthdayCount(myBCount || 0);
+      } catch (_e) { setMyBirthdayCount(0); }
+
       const { data: conns } = await supabase
         .from("connections")
         .select("requester_id, recipient_id, status")
@@ -94,7 +116,6 @@ export default function Birthdays({
 
       let feed = [];
       if (otherParentIds.length > 0) {
-        // Map connected parents -> their households.
         const { data: theirHms } = await supabase
           .from("household_members")
           .select("parent_id, household_id")
@@ -102,7 +123,6 @@ export default function Birthdays({
         const householdIds = [...new Set((theirHms || []).map((h) => h.household_id))];
 
         if (householdIds.length > 0) {
-          // Names for display (one representative parent name per household).
           const { data: parentRows } = await supabase
             .from("parents")
             .select("id, name")
@@ -134,7 +154,6 @@ export default function Birthdays({
             };
           }).sort((a, b) => a.days - b.days);
 
-          // Which of these have I already wished this year?
           const bdayIds = (bdays || []).map((b) => b.id);
           if (bdayIds.length > 0) {
             const { data: myWishes } = await supabase
@@ -151,13 +170,11 @@ export default function Birthdays({
       }
       setUpcoming(feed);
 
-      // --- Section 3: inbound birthday invites (event_type = birthday) ---
       const { data: myInv } = await supabase
         .from("playdate_invites")
         .select("*, playdates(*)")
         .eq("household_id", hhId);
 
-      // Figure out which invites qualify, then BATCH-load all organizer names at once.
       const qualifyingInvites = (myInv || []).filter((inv) => {
         const pd = inv.playdates;
         if (!pd) return false;
@@ -167,7 +184,6 @@ export default function Birthdays({
         return true;
       });
 
-      // One batched query: all members of all organizer households.
       const orgHhIds = [...new Set(qualifyingInvites.map((inv) => inv.playdates.organizer_household_id))];
       const namesByHh = {};
       if (orgHhIds.length > 0) {
@@ -196,7 +212,6 @@ export default function Birthdays({
       bdayInvites.sort((a, b) => new Date(a.playdate.proposed_date) - new Date(b.playdate.proposed_date));
       setInvites(bdayInvites);
 
-      // --- Section: birthdays I'm HOSTING ---
       const { data: myHosted } = await supabase
         .from("playdates")
         .select("*")
@@ -206,14 +221,12 @@ export default function Birthdays({
 
       const hostedList = [];
       if ((myHosted || []).length > 0) {
-        // Load ALL invites for ALL hosted parties in one query.
         const hostedIds = myHosted.map((pd) => pd.id);
         const { data: allInvites } = await supabase
           .from("playdate_invites")
           .select("*")
           .in("playdate_id", hostedIds);
 
-        // Batch-load names for every guest household across all parties.
         const guestHhIds = [...new Set((allInvites || [])
           .map((inv) => inv.household_id)
           .filter((id) => id && id !== hhId))];
@@ -260,10 +273,8 @@ export default function Birthdays({
       setMessage(rsvp === "yes" ? "You're going! 🎉" : "Response sent.");
       if (typeof onChanged === "function") onChanged();
 
-      // On acceptance, if we're not already connected to the host, offer to connect.
       if (rsvp === "yes" && hostHouseholdId) {
         const userId = session.user.id;
-        // Find a host parent to connect with.
         const { data: hostMembers } = await supabase
           .from("household_members")
           .select("parent_id, parents(name)")
@@ -272,7 +283,6 @@ export default function Birthdays({
         const hostParentId = hostMembers?.[0]?.parent_id;
         const hostName = hostMembers?.[0]?.parents?.name || "this family";
         if (hostParentId && hostParentId !== userId) {
-          // Already connected (either direction, any status)?
           const { data: existing } = await supabase
             .from("connections")
             .select("id, status")
@@ -293,7 +303,6 @@ export default function Birthdays({
     if (!connectPrompt) return;
     setBusy(true);
     try {
-      // Both sides consented (host invited, guest chose to connect) -> accepted.
       await supabase.from("connections").insert({
         requester_id: session.user.id,
         recipient_id: connectPrompt.hostParentId,
@@ -308,9 +317,6 @@ export default function Birthdays({
     setBusy(false);
   };
 
-  // Self-reminder. NOTE: the app has no scheduled-notification system yet, so
-  // this drops a note into your OWN inbox now ("remember to get a gift for X").
-  // A true date-scheduled reminder would need a reminders table + a scheduler.
   const addGiftReminder = async (b) => {
     setBusy(true);
     try {
@@ -330,14 +336,11 @@ export default function Birthdays({
     setBusy(false);
   };
 
-  // Send a birthday wish to a family in the awareness feed.
   const sendWish = async (b) => {
     setBusy(true);
     try {
-      // Notify each parent in the target household.
       const { data: members } = await supabase
         .from("household_members").select("parent_id").eq("household_id", b.householdId);
-      // My first name for the message.
       const { data: me } = await supabase
         .from("parents").select("name").eq("id", session.user.id).maybeSingle();
       const myFirst = (me?.name || "A family").trim().split(/\s+/)[0];
@@ -349,7 +352,6 @@ export default function Birthdays({
         body: `${myFirst}'s family is thinking of your family this birthday month!`,
       }));
       if (rows.length > 0) await supabase.from("notifications").insert(rows);
-      // Persist so it sticks.
       try {
         await supabase.from("birthday_wishes").insert({
           birthday_id: b.id,
@@ -368,7 +370,6 @@ export default function Birthdays({
     setBusy(false);
   };
 
-  // Ask the family what their child would like (gift-idea nudge).
   const askGift = async (b) => {
     setBusy(true);
     try {
@@ -395,7 +396,33 @@ export default function Birthdays({
     setBusy(false);
   };
 
-  // --- Create flow: load ALL families at my school(s) (not just connections) ---
+  // Quick-add a birthday from the Birthdays tab empty state.
+  const openAddBirthday = () => {
+    setAddBMonth("");
+    setAddBDay("");
+    setAddBLabel("");
+    setAddingBday(true);
+  };
+  const saveAddBirthday = async () => {
+    if (!addBMonth || !addBDay || !myHouseholdId) return;
+    setAddBBusy(true);
+    try {
+      await supabase.from("household_birthdays").insert({
+        household_id: myHouseholdId,
+        month: Number(addBMonth),
+        day: Number(addBDay),
+        label: addBLabel.trim() || null,
+      });
+      setAddingBday(false);
+      setMessage("Birthday saved! 🎂");
+      if (typeof onChanged === "function") onChanged();
+      await load();
+    } catch (_e) {
+      setMessage("Couldn't save, please try again.");
+    }
+    setAddBBusy(false);
+  };
+
   const openCreate = async () => {
     setCreating(true);
     setPickLoading(true);
@@ -406,7 +433,6 @@ export default function Birthdays({
     setExtraSelected([]);
     try {
       const userId = session.user.id;
-      // My household.
       const { data: myHm } = await supabase
         .from("household_members")
         .select("household_id")
@@ -414,13 +440,11 @@ export default function Birthdays({
         .maybeSingle();
       const myHhId = myHm?.household_id;
 
-      // My classrooms -> my school ids. Keep MY classrooms for the browse-by-room UI.
       const { data: myCms } = await supabase
         .from("classroom_members")
         .select("classroom_id, classrooms(id, school_id, grade, teacher_name)")
         .eq("household_id", myHhId);
       const schoolIds = [...new Set((myCms || []).map((c) => c.classrooms?.school_id).filter(Boolean))];
-      // My own classrooms (the ones shown as cards at the top).
       const myClassrooms = [];
       const myClassroomIds = new Set();
       for (const c of (myCms || [])) {
@@ -433,7 +457,6 @@ export default function Birthdays({
       setMyRooms(myClassrooms);
       if (schoolIds.length === 0) { setPickPeople([]); setPeopleByRoom({}); setPickLoading(false); return; }
 
-      // All classrooms at those schools.
       const { data: schoolClassrooms } = await supabase
         .from("classrooms")
         .select("id, grade, teacher_name")
@@ -443,17 +466,16 @@ export default function Birthdays({
       for (const c of (schoolClassrooms || [])) classroomById[c.id] = c;
       if (classroomIds.length === 0) { setPickPeople([]); setPickLoading(false); return; }
 
-      // All memberships in those classrooms -> household ids (+ remember a grade/class per household).
       const { data: allMemberships } = await supabase
         .from("classroom_members")
         .select("household_id, classroom_id")
         .in("classroom_id", classroomIds);
 
-      const classByHousehold = {}; // household_id -> {grade, teacher}
-      const roomsByHousehold = {}; // household_id -> Set(classroom_id) — for grouping by MY rooms
+      const classByHousehold = {};
+      const roomsByHousehold = {};
       const householdIds = new Set();
       for (const m of (allMemberships || [])) {
-        if (m.household_id === myHhId) continue; // exclude self
+        if (m.household_id === myHhId) continue;
         householdIds.add(m.household_id);
         if (!roomsByHousehold[m.household_id]) roomsByHousehold[m.household_id] = new Set();
         roomsByHousehold[m.household_id].add(m.classroom_id);
@@ -465,7 +487,6 @@ export default function Birthdays({
       const hhIdList = [...householdIds];
       if (hhIdList.length === 0) { setPickPeople([]); setPickLoading(false); return; }
 
-      // A representative parent (name/photo) per household.
       const { data: members } = await supabase
         .from("household_members")
         .select("household_id, parents(id, name, photo_url)")
@@ -478,7 +499,7 @@ export default function Birthdays({
         if (seen.has(m.household_id)) continue;
         const p = m.parents;
         if (!p) continue;
-        if (hidden.has(p.id)) continue; // blocked either direction — hide
+        if (hidden.has(p.id)) continue;
         seen.add(m.household_id);
         const cls = classByHousehold[m.household_id];
         people.push({
@@ -493,7 +514,6 @@ export default function Birthdays({
       people.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
       setPickPeople(people);
 
-      // Group people by MY classrooms (for the browse-by-room cards).
       const byRoom = {};
       for (const rid of myClassroomIds) byRoom[rid] = [];
       for (const person of people) {
@@ -512,14 +532,11 @@ export default function Birthdays({
     setSelectedIds((prev) =>
       prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
     );
-    // If this person isn't in the school list (found by email), remember them.
     if (!pickPeople.some((sp) => sp.id === p.id)) {
       setExtraSelected((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
     }
   };
 
-  // Add all classmates from a room to the selection (additive, deduped).
-  // If ALL classmates in the room are already selected, remove them all instead.
   const toggleWholeClass = (roomId, e) => {
     if (e && e.stopPropagation) e.stopPropagation();
     const roomPeople = peopleByRoom[roomId] || [];
@@ -527,10 +544,8 @@ export default function Birthdays({
     const roomIds = roomPeople.map((p) => p.id);
     const allSelected = roomIds.every((id) => selectedIds.includes(id));
     if (allSelected) {
-      // Remove all classmates from this room.
       setSelectedIds((prev) => prev.filter((id) => !roomIds.includes(id)));
     } else {
-      // Add missing ones (dedupe).
       setSelectedIds((prev) => {
         const next = [...prev];
         for (const id of roomIds) if (!next.includes(id)) next.push(id);
@@ -539,10 +554,8 @@ export default function Birthdays({
     }
   };
 
-  // Is the query a full, complete email address?
   const looksLikeEmail = (s) => /^\S+@\S+\.\S+$/.test((s || "").trim());
 
-  // Exact email lookup (finds a specific person, even cross-school) via the edge fn.
   const runEmailLookup = async (email) => {
     setEmailSearching(true);
     setEmailMatch(null);
@@ -567,7 +580,6 @@ export default function Birthdays({
     setEmailSearching(false);
   };
 
-  // Reusable selectable person row (used in room-drill-in, name search, email match).
   const personRow = (p) => {
     const sel = selectedIds.includes(p.id);
     return (
@@ -586,7 +598,6 @@ export default function Birthdays({
   };
 
   const continueToForm = () => {
-    // Include both school families (pickPeople) and any email-found people (extraSelected).
     const fromSchool = pickPeople.filter((p) => selectedIds.includes(p.id));
     const fromEmail = extraSelected.filter((p) => selectedIds.includes(p.id) && !fromSchool.some((s) => s.id === p.id));
     const chosen = [...fromSchool, ...fromEmail];
@@ -594,7 +605,6 @@ export default function Birthdays({
     setLaunchRecipients(chosen.map((p) => ({ id: p.id, name: p.name, photo_url: p.photo_url })));
   };
 
-  // Open the editor for a birthday I'm hosting (change date/venue/notes/guests).
   const openEdit = async (pd) => {
     try {
       const { data: invRows } = await supabase
@@ -618,7 +628,6 @@ export default function Birthdays({
     }
   };
 
-  // Cancel a hosted birthday: cancellation .ics to everyone + in-app notice + delete.
   const doCancelBirthday = async (pd) => {
     setBusy(true);
     try {
@@ -632,7 +641,6 @@ export default function Birthdays({
         .filter((id) => id && id !== pd.organizer_household_id);
 
       try {
-        // Host label (both parents) for the message.
         const { data: hostMembers } = await supabase
           .from("household_members").select("parent_id").eq("household_id", pd.organizer_household_id);
         const hostIds = (hostMembers || []).map((m) => m.parent_id).filter(Boolean);
@@ -681,8 +689,6 @@ export default function Birthdays({
     });
   };
 
-  // Report an issue from the help screen — reuses the existing bug_reports flow,
-  // pre-tagged with the tab so we know where it came from.
   const submitHelpBug = async () => {
     if (!helpBugText.trim()) return;
     setHelpBugBusy(true);
@@ -697,12 +703,11 @@ export default function Birthdays({
       setHelpBugText("");
       setHelpBugSent(true);
     } catch (e) {
-      // best-effort; leave the text so they can retry
+      // best-effort
     }
     setHelpBugBusy(false);
   };
 
-  // When editing a hosted birthday, open the editor.
   if (editingEvent) {
     return (
       <PlaydateRequest
@@ -721,7 +726,6 @@ export default function Birthdays({
     );
   }
 
-  // When the birthday form is open, render it.
   if (launchRecipients) {
     return (
       <PlaydateRequest
@@ -740,7 +744,6 @@ export default function Birthdays({
     );
   }
 
-  // ---- HELP: how Birthdays work (concise, scrollable) ----
   if (showHelp) {
     const hSection = (label, body) => (
       <div style={{ marginBottom: "1.25rem" }}>
@@ -764,9 +767,8 @@ export default function Birthdays({
           {hSection("BIRTHDAYS YOU'RE HOSTING", "Under You're hosting, you'll see your guest list and who's coming. You can edit the details or cancel — cancelling notifies everyone and clears it from their calendars.")}
           {hSection("BIRTHDAYS IN YOUR NETWORK", "When families you're connected with save a birthday, they appear under Upcoming in your network. Tap one to wish them a happy birthday, ask what their child would like, or set yourself a gift reminder.")}
           {hSection("CONNECTING AT A PARTY", "If you say yes to a party from a family you're not connected with yet, Huddle offers to connect you — so you can plan together afterward.")}
-          {hSection("WHERE BIRTHDAYS COME FROM", "You'll only see birthdays that families choose to save. Add your own family's birthday in your profile so your network can celebrate with you.")}
+          {hSection("WHERE BIRTHDAYS COME FROM", "You'll only see birthdays that families choose to save. On your Profile, scroll to Birthdays to add your own family's — so your network can celebrate with you too.")}
 
-          {/* Report an issue */}
           <div style={{ marginTop: "1.5rem", borderTop: "1px solid #2A4A6B", paddingTop: "1.5rem" }}>
             {helpBugSent ? (
               <div style={{ background: "#0F3D2E", border: "1px solid #02C39A", borderRadius: "12px", padding: "1rem 1.25rem" }}>
@@ -816,7 +818,6 @@ export default function Birthdays({
 
       <div style={{ padding: "1.5rem", maxWidth: "600px", margin: "0 auto" }}>
 
-        {/* Create a birthday invite */}
         <button onClick={openCreate}
           style={{ width: "100%", padding: "0.95rem", borderRadius: "12px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.95rem", fontWeight: "700", cursor: "pointer", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           🎂 Set up a birthday invite
@@ -832,7 +833,6 @@ export default function Birthdays({
           <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
         ) : (
           <>
-            {/* Section 3: invites sent to you */}
             {invites.length > 0 && (
               <div style={{ marginBottom: "2rem" }}>
                 <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>INVITED TO</p>
@@ -868,7 +868,6 @@ export default function Birthdays({
               </div>
             )}
 
-            {/* Section: birthdays you're hosting */}
             {hosting.length > 0 && (
               <div style={{ marginBottom: "2rem" }}>
                 <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>YOU'RE HOSTING</p>
@@ -915,14 +914,28 @@ export default function Birthdays({
               </div>
             )}
 
-            {/* Section 2: upcoming birthdays of connections */}
             <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", margin: "0 0 0.75rem" }}>UPCOMING IN YOUR NETWORK</p>
             {upcoming.length === 0 ? (
               <div style={{ textAlign: "center", padding: "2rem 1rem" }}>
                 <p style={{ margin: "0 0 0.75rem" }}><Icon name="cake" size={40} color="#3E5A7F" /></p>
-                <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
-                  No birthdays saved yet by families you've connected with. As your network adds their birthdays, they'll show up here.
-                </p>
+                {myBirthdayCount === 0 ? (
+                  <>
+                    <p style={{ color: "#B8CCE0", fontSize: "0.95rem", fontWeight: 600, margin: "0 0 0.35rem" }}>
+                      Get the ball rolling
+                    </p>
+                    <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5", margin: "0 0 1rem" }}>
+                      Add your family's birthday so the parents in your network can celebrate with you.
+                    </p>
+                    <button onClick={openAddBirthday}
+                      style={{ padding: "0.7rem 1.25rem", borderRadius: "10px", border: "none", background: "#7C5CBF", color: "#FFFFFF", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                      🎂 Add your family's birthday
+                    </button>
+                  </>
+                ) : (
+                  <p style={{ color: "#607080", fontSize: "0.85rem", lineHeight: "1.5" }}>
+                    No birthdays saved yet by families you've connected with. As your network adds their birthdays, they'll show up here.
+                  </p>
+                )}
               </div>
             ) : (
               upcoming.map((b, i) => {
@@ -950,7 +963,6 @@ export default function Birthdays({
         )}
       </div>
 
-      {/* Birthday action menu */}
       {activeBday && (
         <div onClick={() => setActiveBday(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "huddleFadeInUp 160ms ease both" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#162D50", borderTopLeftRadius: "20px", borderTopRightRadius: "20px", padding: "1.5rem", width: "100%", maxWidth: "600px", borderTop: "2px solid #7C5CBF", animation: "huddleSlideUp 260ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
@@ -987,7 +999,6 @@ export default function Birthdays({
         </div>
       )}
 
-      {/* Connect-on-accept prompt */}
       {connectPrompt && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
           <div style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "16px", padding: "1.5rem", maxWidth: "360px", width: "100%", animation: "huddleScaleIn 200ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
@@ -1012,9 +1023,56 @@ export default function Birthdays({
         </div>
       )}
 
+      {/* Quick-add-birthday modal */}
+      {addingBday && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(6,16,36,0.8)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "#162D50", border: "1px solid #7C5CBF", borderRadius: "16px", padding: "1.5rem", maxWidth: "400px", width: "100%", animation: "huddleScaleIn 200ms cubic-bezier(0.22, 1, 0.36, 1) both" }}>
+            <p style={{ margin: "0 0 0.75rem", textAlign: "center", fontSize: "2rem" }}>🎂</p>
+            <h2 style={{ color: "#FFFFFF", fontSize: "1.15rem", fontWeight: "700", margin: "0 0 0.5rem", textAlign: "center" }}>
+              Add a family birthday
+            </h2>
+            <p style={{ color: "#8AAEC8", fontSize: "0.85rem", lineHeight: "1.5", margin: "0 0 1.25rem", textAlign: "center" }}>
+              We only store the month and day — never a name or age.
+            </p>
+
+            <div style={{ display: "flex", gap: "8px", marginBottom: "0.75rem" }}>
+              <select value={addBMonth} onChange={(e) => { setAddBMonth(e.target.value); setAddBDay(""); }}
+                style={{ flex: 1, padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: addBMonth ? "#FFFFFF" : "#607080", fontSize: "0.9rem" }}>
+                <option value="">Month</option>
+                {MONTHS.map((m, i) => (<option key={m} value={i + 1}>{m}</option>))}
+              </select>
+              <select value={addBDay} onChange={(e) => setAddBDay(e.target.value)} disabled={!addBMonth}
+                style={{ flex: 1, padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: addBDay ? "#FFFFFF" : "#607080", fontSize: "0.9rem" }}>
+                <option value="">Day</option>
+                {Array.from({ length: daysInMonth(Number(addBMonth)) }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <input type="text" placeholder="Optional — a nickname to tell birthdays apart" value={addBLabel}
+              onChange={(e) => setAddBLabel(e.target.value)}
+              style={{ width: "100%", padding: "0.7rem 0.85rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "#0F2044", color: "#FFFFFF", fontSize: "0.9rem", boxSizing: "border-box", marginBottom: "1rem" }}
+            />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <button disabled={!addBMonth || !addBDay || addBBusy} onClick={saveAddBirthday}
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "none", background: (!addBMonth || !addBDay) ? "#3E5A7F" : "#7C5CBF", color: "#FFFFFF", fontWeight: 700, cursor: (!addBMonth || !addBDay || addBBusy) ? "default" : "pointer", fontSize: "0.9rem" }}>
+                {addBBusy ? "Saving..." : "Add birthday"}
+              </button>
+              <button disabled={addBBusy} onClick={() => setAddingBday(false)}
+                style={{ width: "100%", padding: "0.8rem", borderRadius: "10px", border: "1px solid #2A4A6B", background: "transparent", color: "#8AAEC8", fontWeight: 600, cursor: "pointer", fontSize: "0.9rem" }}>
+                Cancel
+              </button>
+            </div>
+            <p style={{ color: "#607080", fontSize: "0.75rem", textAlign: "center", margin: "0.9rem 0 0", lineHeight: 1.4 }}>
+              You can add more or remove any anytime under <strong style={{ color: "#8AAEC8" }}>Profile → Birthdays</strong>.
+            </p>
+          </div>
+        </div>
+      )}
+
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
 
-      {/* Create: family picker overlay */}
       {creating && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#0F2044", zIndex: 60, overflowY: "auto" }}>
           <div style={{ background: "#162D50", padding: "1rem 1.5rem", borderBottom: "1px solid #2A4A6B", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1051,9 +1109,7 @@ export default function Birthdays({
             {pickLoading ? (
               <p style={{ color: "#607080", textAlign: "center", padding: "2rem" }}>Loading...</p>
             ) : pickFilter.trim() ? (
-              // ---- SEARCH MODE ----
               looksLikeEmail(pickFilter) ? (
-                // Full email → exact lookup (may be cross-school)
                 emailSearching ? (
                   <p style={{ color: "#607080", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>Looking up that email…</p>
                 ) : emailMatch ? (
@@ -1064,7 +1120,6 @@ export default function Birthdays({
                   </p>
                 )
               ) : (
-                // Partial text → live name filter over school families
                 (() => {
                   const results = pickPeople.filter((p) => (p.name || "").toLowerCase().includes(pickFilter.trim().toLowerCase()));
                   if (results.length === 0) {
@@ -1074,7 +1129,6 @@ export default function Birthdays({
                 })()
               )
             ) : viewingRoom ? (
-              // ---- DRILLED INTO A CLASSROOM ----
               <>
                 <button onClick={() => setViewingRoom(null)}
                   style={{ display: "flex", alignItems: "center", gap: "6px", background: "transparent", border: "none", color: "#8AAEC8", fontSize: "0.85rem", cursor: "pointer", padding: "0 0 1rem" }}>
@@ -1093,7 +1147,6 @@ export default function Birthdays({
                 )}
               </>
             ) : (
-              // ---- CLASSROOM CARDS (default view) ----
               <>
                 {myRooms.length > 0 && (
                   <>
@@ -1123,31 +1176,8 @@ export default function Birthdays({
                               {hasAny && (
                                 <button
                                   onClick={(e) => toggleWholeClass(room.id, e)}
-                                  style={{
-                                    marginTop: "0.6rem",
-                                    width: "100%",
-                                    padding: "0.45rem 0.6rem",
-                                    borderRadius: "8px",
-                                    border: `1px solid ${allSelected ? "#7C5CBF" : "#2A4A6B"}`,
-                                    background: allSelected ? "#2A1E3D" : "transparent",
-                                    color: allSelected ? "#B8A4E0" : "#8AAEC8",
-                                    fontSize: "0.76rem",
-                                    fontWeight: 600,
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "4px",
-                                  }}
-                                >
-                                  {allSelected ? (
-                                    <>
-                                      <Icon name="check_circle" size={14} color="#B8A4E0" />
-                                      Whole class added
-                                    </>
-                                  ) : (
-                                    <>+ Add whole class</>
-                                  )}
+                                  style={{ marginTop: "0.6rem", width: "100%", padding: "0.45rem 0.6rem", borderRadius: "8px", border: `1px solid ${allSelected ? "#7C5CBF" : "#2A4A6B"}`, background: allSelected ? "#2A1E3D" : "transparent", color: allSelected ? "#B8A4E0" : "#8AAEC8", fontSize: "0.76rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                                  {allSelected ? (<><Icon name="check_circle" size={14} color="#B8A4E0" />Whole class added</>) : (<>+ Add whole class</>)}
                                 </button>
                               )}
                             </div>
@@ -1158,7 +1188,7 @@ export default function Birthdays({
                   </>
                 )}
                 <p style={{ color: "#607080", fontSize: "0.78rem", textAlign: "center", margin: 0, lineHeight: "1.5" }}>
-                  Tap a classroom to invite specific families, or use “Add whole class” to invite everyone.
+                  Tap a classroom to invite specific families, or use "Add whole class" to invite everyone.
                 </p>
               </>
             )}
