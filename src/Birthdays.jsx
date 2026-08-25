@@ -518,6 +518,27 @@ export default function Birthdays({
     }
   };
 
+  // Add all classmates from a room to the selection (additive, deduped).
+  // If ALL classmates in the room are already selected, remove them all instead.
+  const toggleWholeClass = (roomId, e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const roomPeople = peopleByRoom[roomId] || [];
+    if (roomPeople.length === 0) return;
+    const roomIds = roomPeople.map((p) => p.id);
+    const allSelected = roomIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      // Remove all classmates from this room.
+      setSelectedIds((prev) => prev.filter((id) => !roomIds.includes(id)));
+    } else {
+      // Add missing ones (dedupe).
+      setSelectedIds((prev) => {
+        const next = [...prev];
+        for (const id of roomIds) if (!next.includes(id)) next.push(id);
+        return next;
+      });
+    }
+  };
+
   // Is the query a full, complete email address?
   const looksLikeEmail = (s) => /^\S+@\S+\.\S+$/.test((s || "").trim());
 
@@ -1079,11 +1100,14 @@ export default function Birthdays({
                     <p style={{ color: "#8AAEC8", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.05em", margin: "0 0 0.75rem" }}>YOUR CLASSROOMS</p>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.5rem" }}>
                       {myRooms.map((room) => {
-                        const count = (peopleByRoom[room.id] || []).length;
-                        const selInRoom = (peopleByRoom[room.id] || []).filter((p) => selectedIds.includes(p.id)).length;
+                        const roomPeople = peopleByRoom[room.id] || [];
+                        const count = roomPeople.length;
+                        const selInRoom = roomPeople.filter((p) => selectedIds.includes(p.id)).length;
+                        const allSelected = count > 0 && selInRoom === count;
+                        const hasAny = count > 0;
                         return (
                           <div key={room.id} onClick={() => setViewingRoom(room)}
-                            style={{ background: "linear-gradient(135deg, #1E2F52 0%, #253A63 100%)", border: "1px solid #2A4A6B", borderRadius: "16px", padding: "1.1rem", cursor: "pointer", position: "relative", minHeight: "116px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                            style={{ background: "linear-gradient(135deg, #1E2F52 0%, #253A63 100%)", border: `1px solid ${allSelected ? "#7C5CBF" : "#2A4A6B"}`, borderRadius: "16px", padding: "1.1rem", cursor: "pointer", position: "relative", minHeight: "116px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                             <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "#7C5CBF", display: "flex", alignItems: "center", justifyContent: "center" }}>
                               <Icon name="school" size={24} color="#FFFFFF" />
                             </div>
@@ -1091,8 +1115,41 @@ export default function Birthdays({
                               <p style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: "600", margin: "0.6rem 0 2px" }}>{gradeLabel(room.grade)}</p>
                               {room.teacher && <p style={{ color: "#8AAEC8", fontSize: "0.75rem", margin: 0 }}>{room.teacher}</p>}
                               <p style={{ color: "#607080", fontSize: "0.72rem", margin: "4px 0 0" }}>
-                                {count} {count === 1 ? "family" : "families"}{selInRoom > 0 ? ` · ${selInRoom} invited` : ""}
+                                {count} {count === 1 ? "family" : "families"}
+                                {selInRoom > 0 && (
+                                  <span style={{ color: "#B8A4E0", fontWeight: 600 }}> · {selInRoom}/{count} selected</span>
+                                )}
                               </p>
+                              {hasAny && (
+                                <button
+                                  onClick={(e) => toggleWholeClass(room.id, e)}
+                                  style={{
+                                    marginTop: "0.6rem",
+                                    width: "100%",
+                                    padding: "0.45rem 0.6rem",
+                                    borderRadius: "8px",
+                                    border: `1px solid ${allSelected ? "#7C5CBF" : "#2A4A6B"}`,
+                                    background: allSelected ? "#2A1E3D" : "transparent",
+                                    color: allSelected ? "#B8A4E0" : "#8AAEC8",
+                                    fontSize: "0.76rem",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "4px",
+                                  }}
+                                >
+                                  {allSelected ? (
+                                    <>
+                                      <Icon name="check_circle" size={14} color="#B8A4E0" />
+                                      Whole class added
+                                    </>
+                                  ) : (
+                                    <>+ Add whole class</>
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -1101,7 +1158,7 @@ export default function Birthdays({
                   </>
                 )}
                 <p style={{ color: "#607080", fontSize: "0.78rem", textAlign: "center", margin: 0, lineHeight: "1.5" }}>
-                  Tap a classroom above to browse and invite classmates.
+                  Tap a classroom to invite specific families, or use “Add whole class” to invite everyone.
                 </p>
               </>
             )}
