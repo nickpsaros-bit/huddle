@@ -1028,8 +1028,6 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
 
   if (showBirthdayList) {
     const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    const now = new Date();
-    const monthName = MONTH_NAMES[now.getMonth()];
     return (
       <div style={{ minHeight: "100vh", background: "#0F2044", fontFamily: "system-ui, sans-serif", paddingBottom: "80px" }}>
         <div style={{ background: "#162D50", padding: "1rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2A4A6B" }}>
@@ -1060,7 +1058,7 @@ export default function Home({ session, notificationCount, onBellClick, onPlayda
                       {b.isMine ? "Your family" : b.familyLabel}
                       {b.label ? <span style={{ color: "#C9A9FF" }}> · {b.label}</span> : null}
                     </p>
-                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{monthName} {b.day}</p>
+                    <p style={{ color: "#607080", fontSize: "0.8rem", margin: 0 }}>{MONTH_NAMES[b.month - 1]} {b.day}</p>
                   </div>
                   {!b.isMine && (
                     wishedIds[b.id] ? (
