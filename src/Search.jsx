@@ -271,13 +271,30 @@ export default function Search({ session, avatarUrl, onProfileClick, onBack }) {
   };
 
   const sendRequest = async (recipientId) => {
+    // Guard in local state first: if we already have any connection with this
+    // person (either direction), don't attempt an insert the DB would reject.
+    const existing = getConnectionStatus(recipientId);
+    if (existing) {
+      setMessage(existing.status === "accepted" ? "You're already connected." : "Request already pending.");
+      fetchMyData();
+      setTimeout(() => setMessage(""), 3000);
+      return;
+    }
+
     const { error } = await supabase.from("connections").insert({
       requester_id: session.user.id,
       recipient_id: recipientId,
       status: "pending"
     });
+
     if (!error) {
       setMessage("Connection request sent!");
+      fetchMyData();
+      setTimeout(() => setMessage(""), 3000);
+    } else if (error.code === "23505") {
+      // Unique-pair constraint: a connection already exists (possibly created
+      // by the other person in the same window). Treat as success-ish.
+      setMessage("You're already connected with this family.");
       fetchMyData();
       setTimeout(() => setMessage(""), 3000);
     } else {
